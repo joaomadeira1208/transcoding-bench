@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+
+# Experiment artifacts (large files, not for git)
+runs/
+*.mkv
+*.parquet
+
+docs/DECISOES-PENDENTES.md

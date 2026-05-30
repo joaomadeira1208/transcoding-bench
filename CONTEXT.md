@@ -32,6 +32,14 @@ _Avoid_: rodada, trial.
 Re-execução do mesmo cenário pra estimativa estatística. Cada cenário tem 6 execuções na mesma instância EC2; a primeira é descartada (warm-up) e as 5 seguintes são as replicações reportadas.
 _Avoid_: repetição.
 
+**`scenario_id`**:
+Chave legível canônica de um Cenário + replicação (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`). É a identidade **lógica**: `resume.py` e `consolidate.py` raciocinam sobre ela. Formada uma vez pelo Orquestrador e ecoada pelas instâncias (ADR-0019).
+_Não confundir com_: `run_id` (identidade física).
+
+**`run_id`**:
+Identificador **físico** de uma Execução (UUID v4), cunhado pela instância na hora da execução; nomeia o diretório `runs/{run_id}/`. Garante unicidade à prova de retomada (ADR-0007/0019).
+_Não confundir com_: `scenario_id` (identidade lógica, que pode repetir entre uma execução e sua refeita).
+
 **Experimento** (`experiment`):
 A campanha completa: todos os cenários × todas as replicações.
 _Avoid_: estudo, teste.

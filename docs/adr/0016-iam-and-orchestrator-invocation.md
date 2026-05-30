@@ -61,5 +61,5 @@ Antes da campanha, validar o IAM lançando uma instância descartável e confirm
 
 - O Terraform cria: 3 roles + instance profiles, a policy `orchestrator` com as condições de EC2, o key pair, e o parâmetro SSM SecureString da chave privada.
 - A role `orchestrator` acumula três papéis de credencial: lançar/terminar instâncias (EC2), mover artefatos (S3), e ler a chave SSH (SSM/KMS).
-- O **hop limit do IMDS no encode** depende de onde o `aws s3 cp` roda (host vs. container) — decidido junto da estrutura dos `run_*.sh` (item de scaffolding). No host, hop limit 1 basta; dentro do container, precisa de 2.
+- O **hop limit do IMDS no encode** foi resolvido na ADR-0018: a Execução roda dentro do container, então o `aws s3 cp` também — logo o `run-instances` do encode usa **hop limit 2** (`HttpPutResponseHopLimit=2`).
 - A validação de fumaça é pré-requisito operacional antes de disparar a campanha.

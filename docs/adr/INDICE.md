@@ -29,3 +29,14 @@ Decisões sobre como a pipeline é construída: tooling, orquestração, storage
 | [0014](0014-quality-pass-orchestration.md) | Orquestração do Pass de qualidade | Triage no orquestrador, execução no Juiz; bootstrap de masters no Orquestrador; Parquet local |
 | [0015](0015-aws-infrastructure-config.md) | Configuração da infra AWS | us-east-1; subnets públicas; Ubuntu 24.04 LTS; Docker/AWS CLI instalados no bootstrap |
 | [0016](0016-iam-and-orchestrator-invocation.md) | IAM e invocação do orquestrador | Instance profiles (sem chave estática); PassRole escopado; EC2 com condições região+tipo; chave SSH via SSM; orquestrador em tmux |
+
+## Scaffolding
+
+Decisões sobre a estrutura física do projeto: organização do repo, fronteira host/container, contratos de dados, state do Terraform.
+
+| ADR | Título | Descrição |
+|---|---|---|
+| [0017](0017-repository-structure.md) | Estrutura do repositório | Organização por papel de execução; config como spec; bootstrap por papel; dois requirements.txt; Python 3.12 |
+| [0018](0018-host-container-boundary.md) | Fronteira host/container | Execução dentro do container; imagem = ambiente, scripts bind-mounted; uma imagem (encoders+libvmaf); IMDS hop limit 2 |
+| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; Python forma scenario_id (bash ecoa); instância cunha run_id; meta.json validado na leitura |
+| [0020](0020-terraform-state-backend.md) | State do Terraform | Backend S3 remoto (bucket fora-de-banda); chave privada no state + re-applies do resume.py justificam durabilidade |

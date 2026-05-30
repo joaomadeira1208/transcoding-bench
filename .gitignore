@@ -1,26 +1,30 @@
-# OS
-.DS_Store
+# Deny-by-default (allowlist): nada entra no histórico sem ser explicitamente
+# permitido. O repo é clonado em instâncias com IP público (ADR-0016/0017);
+# um blocklist depende de lembrar de cada segredo, a allowlist falha de forma segura.
+*
 
-# IDE
-.vscode/
-.idea/
+# Permite o git descer nos diretórios
+!*/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
+# Fonte
+!*.py
+!*.sh
+!*.tf
+!*.toml
+!*.md
+!Dockerfile
+!requirements.txt
+!ruff.toml
+!.gitignore
+!.pre-commit-config.yaml
+!meta.schema.json
+
+# Re-nega diretórios gerados (higiene; o sensível já está negado por extensão)
 .venv/
 venv/
-
-# Terraform
 .terraform/
-*.tfstate
-*.tfstate.backup
-*.tfvars
-
-# Experiment artifacts (large files, not for git)
 runs/
-*.mkv
-*.parquet
+__pycache__/
 
+# Re-nega doc local de trabalho (é .md, a allowlist o pegaria)
 docs/DECISOES-PENDENTES.md

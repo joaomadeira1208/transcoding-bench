@@ -12,12 +12,14 @@ config/        # SPEC declarativa do experimento → experiment.toml (fonte de v
 orchestrator/  # Python na t3.micro: maquinaria que age sobre a spec.
                #   conhecidos: orchestrator.py, resume.py, quality_triage.py
                #   + geração do scenarios.json + bootstrap por papel (user-data fino → bootstrap gordo)
+               #   tests/ (pytest, roda só no Mac) + requirements-dev.txt
 encode/        # shell do encode, em duas camadas:
                #   HOST (bootstrap): docker, perf, sysstat, perf_event_paranoid
                #   CONTAINER (montado): run_all.sh, run_scenario.sh
 judge/         # shell do Juiz: HOST bootstrap (sem perf); CONTAINER (montado): run_quality.sh
 docker/        # AMBIENTE de medição, compartilhado encode+judge → Dockerfile (ver ADR-0018)
-analysis/      # Python local (pandas/pyarrow): consolidate.py + requirements + notebooks
+analysis/      # Python local (pandas/pyarrow): consolidate.py + schema do meta.json (pydantic, ADR-0019) + requirements + notebooks
+               #   tests/ (pytest) + requirements-dev.txt
 infra/         # Terraform, só do Mac. Arquivos planos por preocupação. Backend S3 remoto (ADR-0020).
 docs/          # adr/ + CONTEXT.md
 ```
@@ -32,6 +34,8 @@ Três escolhas de fronteira que o layout codifica:
 
 Dois `requirements.txt` separados (`orchestrator/` quase vazio — stdlib + AWS CLI via `subprocess`; `analysis/` com pandas/pyarrow), não um `pyproject` com extras. Não há pacote a construir nem código compartilhado entre as pontas (o contrato entre `generate_scenarios`/`orchestrator` e `consolidate` é o JSON validado da ADR-0019, não um módulo comum). Python pinado em **3.12** (o que o Ubuntu 24.04 LTS entrega — ADR-0015 — e que tem `tomllib` na stdlib).
 
+Os testes automatizados moram **co-localizados por papel** — `orchestrator/tests/` e `analysis/tests/` — coerente com "o papel é o dono". Só os dois papéis Python têm testes (a fronteira de testabilidade é "núcleo lógico determinístico, sem side-effect externo"); `encode/`/`judge/` (shell) ficam fora do TDD. As **dependências de teste** ficam num `requirements-dev.txt` por papel (runtime + `pytest`), **separado** do `requirements.txt` de runtime: o bootstrap da t3.micro instala só o runtime (ADR-0013), nunca o `-dev` — mantém a instância magra e os testes do orquestrador rodando num ambiente stdlib-only fiel ao dela (um `import pandas` acidental no orquestrador quebra o teste). Testes rodam só no Mac; as instâncias clonam e ignoram `tests/` (custo zero, coerente com a organização por papel).
+
 ## Convenções e linters
 
 Cada linguagem usa o linter/formatter padrão da sua camada, decididos antes do desenvolvimento porque o fluxo é por PR/issue e formato indefinido vira discussão de estilo em cada PR:
@@ -39,7 +43,8 @@ Cada linguagem usa o linter/formatter padrão da sua camada, decididos antes do 
 - **Python:** `ruff` (lint) + `ruff format` — config em `ruff.toml` no topo.
 - **Bash:** `shellcheck` (lint) + `shfmt` (format).
 - **Terraform:** `terraform fmt`.
-- **Opcional:** `pre-commit` amarrando os três como hook.
+
+O **`pre-commit` é a casa oficial dos linters** (não opcional): amarra os quatro hooks — `ruff`, `shellcheck`/`shfmt`, `terraform fmt` e o `gitleaks` (seção de segredos abaixo) — com as versões pinadas no `.pre-commit-config.yaml`. Por isso os linters **não entram em nenhum `requirements`**: o pre-commit gerencia os próprios ambientes. O `ruff.toml` no topo segue sendo a config consumida tanto pelo hook quanto por execução manual.
 
 ## Segredos e segurança do versionamento
 
@@ -60,5 +65,5 @@ Por design quase nada sensível nasce dentro do repo: chave SSH via SSM → `~/.
 
 ## Consequences
 
-- Bootstrap do orquestrador vira `git clone` → `venv` → `pip install -r orchestrator/requirements.txt` — coerente com a ADR-0013.
+- Bootstrap do orquestrador vira `git clone` → `venv` → `pip install -r orchestrator/requirements.txt` (nunca o `-dev`) — coerente com a ADR-0013.
 - O nome do gerador do `scenarios.json`, dos `.tf` e dos scripts de bootstrap fica em aberto até o desenvolvimento; só os nomes já fixados por ADR (`orchestrator.py`, `resume.py`, `quality_triage.py`, `consolidate.py`, `run_all.sh`, `run_scenario.sh`, `run_quality.sh`, `Dockerfile`) e pela spec (`experiment.toml`) estão cravados.

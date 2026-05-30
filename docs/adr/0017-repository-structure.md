@@ -32,12 +32,31 @@ Três escolhas de fronteira que o layout codifica:
 
 Dois `requirements.txt` separados (`orchestrator/` quase vazio — stdlib + AWS CLI via `subprocess`; `analysis/` com pandas/pyarrow), não um `pyproject` com extras. Não há pacote a construir nem código compartilhado entre as pontas (o contrato entre `generate_scenarios`/`orchestrator` e `consolidate` é o JSON validado da ADR-0019, não um módulo comum). Python pinado em **3.12** (o que o Ubuntu 24.04 LTS entrega — ADR-0015 — e que tem `tomllib` na stdlib).
 
+## Convenções e linters
+
+Cada linguagem usa o linter/formatter padrão da sua camada, decididos antes do desenvolvimento porque o fluxo é por PR/issue e formato indefinido vira discussão de estilo em cada PR:
+
+- **Python:** `ruff` (lint) + `ruff format` — config em `ruff.toml` no topo.
+- **Bash:** `shellcheck` (lint) + `shfmt` (format).
+- **Terraform:** `terraform fmt`.
+- **Opcional:** `pre-commit` amarrando os três como hook.
+
+## Segredos e segurança do versionamento
+
+O repo é clonado em instâncias com IP público (ADR-0016), então nada sensível pode entrar no histórico. Duas camadas, cobrindo vetores ortogonais:
+
+1. **`.gitignore` deny-by-default (allowlist).** Ignora `*` e re-permite só extensões/arquivos de fonte. Arquivo sensível de tipo inesperado (`*.pem`, `.env`, dump de credencial) fica fora por padrão — esquecer passa a ser seguro. O que é sensível por extensão (`*.pem`, `*.tfstate`, `*.tfvars`) nunca está na allowlist. Se fosse pra ter só uma camada, seria essa.
+2. **`gitleaks` no `pre-commit`.** Varre o conteúdo staged e bloqueia segredo embutido dentro de um arquivo *permitido* (ex.: chave colada num `.sh` durante debug) — o vetor que a camada 1 não pega. Incluída porque o `pre-commit` já existe pros linters, então o custo marginal é ≈ zero.
+
+Por design quase nada sensível nasce dentro do repo: chave SSH via SSM → `~/.ssh` (ADR-0016), state remoto (ADR-0020), sem credencial estática (instance profiles). As camadas são rede de segurança, não a defesa primária. Bônus opcional server-side: push protection do GitHub (não burlável por `--no-verify`).
+
 ## Considered Options
 
+- **`.gitignore` como blocklist** — rejeitado: depende de lembrar de listar cada segredo; o default errado ("commita tudo exceto o bloqueado") é inaceitável num repo clonado em máquina pública. A allowlist inverte o default pra "nada entra sem permissão".
 - **Por linguagem** (`python/`, `bash/`, `terraform/`) — rejeitado: esconde quem roda o quê; uma instância de encode teria que vasculhar `python/` e `bash/` pra montar seu papel. Por papel, o papel é o diretório.
 - **Flat (tudo na raiz)** — rejeitado: 4 papéis + spec + infra + análise na raiz vira ruído; perde a fronteira de propriedade.
 - **`pyproject.toml` com extras** — rejeitado: sem pacote a distribuir e sem código compartilhado, adicionaria build backend e `pip install -e .[extra]` no bootstrap sem ganho. Config de linter mora em `ruff.toml` no topo.
-- **Segredos/artefatos versionados** — rejeitado por construção: o repo é clonado em instâncias com IP público. `scenarios.json`, `quality_plan.json`, `meta.json`, `*.pem` são runtime/segredo e entram no `.gitignore`; o state do Terraform é remoto (ADR-0020).
+- **Segredos/artefatos versionados** — rejeitado por construção: `scenarios.json`, `quality_plan.json`, `meta.json`, `*.pem` são runtime/segredo e ficam fora pela allowlist (seção acima); o state do Terraform é remoto (ADR-0020).
 
 ## Consequences
 

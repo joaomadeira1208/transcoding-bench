@@ -6,7 +6,7 @@ O Pass de qualidade (ADR-0005) é orquestrado em duas etapas: **triage no orques
 
 1. As 3 instâncias de encode terminam → orquestrador detecta (SSH + marcador S3)
 2. Orquestrador termina as instâncias de encode (`aws ec2 terminate-instances`)
-3. Orquestrador roda `quality_triage.py` na instância de controle:
+3. Orquestrador roda `quality_triage.py` na instância do Orquestrador:
    - Baixa os 810 `output.sha256` do S3
    - Agrupa por `(codec × pair × video × rep)` → 270 grupos de 3 outputs (um por arch)
    - Compara hashes dentro de cada grupo
@@ -26,7 +26,7 @@ Estimativa de tempo do Pass: ~2–4h (VMAF de ~10–20 outputs, mix de resoluç�
 
 ## Bootstrap dos masters
 
-Os masters (4K, 1080p, 720p × 2 vídeos = 6 arquivos) são gerados na **instância de controle** como etapa de bootstrap antes do experimento. Downscale Lanczos lossless (FFV1) do master 4K canônico, com validação automática via `ffprobe` (resolução, codec, duração). Uploadados pro S3 uma vez e consumidos por todas as instâncias.
+Os masters (4K, 1080p, 720p × 2 vídeos = 6 arquivos) são gerados na **instância do Orquestrador** como etapa de bootstrap antes do experimento. Downscale Lanczos lossless (FFV1) do master 4K canônico, com validação automática via `ffprobe` (resolução, codec, duração). Uploadados pro S3 uma vez e consumidos por todas as instâncias.
 
 ## Consolidação do Parquet
 
@@ -36,11 +36,11 @@ Acontece **na máquina local** do pesquisador, pós-experimento. Um script `cons
 
 - **Juiz decide sozinho o que processar** — rejeitado: hash-first triage é lógica de decisão (agrupamento, comparação, seleção de amostra) — pertence ao orquestrador Python, não a um shell script no Juiz. Mantém o princípio "Python decide, shell executa".
 - **Juiz provisionado no início junto com instâncias de encode** — rejeitado: ficaria idle ~46h, desperdiçando ~$8. Provisionado sob demanda via AWS CLI quando o Pass começa.
-- **Consolidação do Parquet na instância de controle** — rejeitado: o Parquet é o dataset de análise — o pesquisador vai iterar nele muitas vezes (plots, tabelas, artigo). Manter localmente é mais natural.
-- **Bootstrap dos masters na máquina local** — rejeitado: upload de masters FFV1 4K (dezenas de GB) depende da conexão doméstica. Na instância de controle, download do source + geração + upload pro S3 usa rede AWS interna.
+- **Consolidação do Parquet na instância do Orquestrador** — rejeitado: o Parquet é o dataset de análise — o pesquisador vai iterar nele muitas vezes (plots, tabelas, artigo). Manter localmente é mais natural.
+- **Bootstrap dos masters na máquina local** — rejeitado: upload de masters FFV1 4K (dezenas de GB) depende da conexão doméstica. Na instância do Orquestrador, download do source + geração + upload pro S3 usa rede AWS interna.
 
 ## Consequences
 
-- O Juiz é a última instância a rodar e a última a ser destruída. Após ele, só resta o bucket S3 e a instância de controle.
-- A instância de controle tem dupla função: orquestração do experimento + bootstrap dos masters. Ambas são one-shot e não concorrem.
+- O Juiz é a última instância a rodar e a última a ser destruída. Após ele, só resta o bucket S3 e a instância do Orquestrador.
+- A instância do Orquestrador tem dupla função: orquestração do experimento + bootstrap dos masters. Ambas são one-shot e não concorrem.
 - Limpeza seletiva dos `.mkv` no S3 acontece após o Pass: orquestrador deleta os outputs que não fazem parte da amostra retida (ADR-0007).

@@ -18,7 +18,7 @@ O encode mais longo estimado (libx265, 4K→4K, ~10 min de vídeo) leva ~60 min.
 
 Terraform configura um AWS Budget com teto de **$150**. Se o custo acumulado ultrapassar, o proprietário recebe email. Não mata instâncias automaticamente, mas alerta.
 
-Estimativa de custo normal do experimento: ~$70 de compute + ~$4 de S3 + instância de controle + Juiz ≈ ~$85. Teto de $150 dá margem pra um re-run completo.
+Estimativa de custo normal do experimento: ~$70 de compute + ~$4 de S3 + instância do Orquestrador + Juiz ≈ ~$85. Teto de $150 dá margem pra um re-run completo.
 
 ## Retomada semi-automática
 

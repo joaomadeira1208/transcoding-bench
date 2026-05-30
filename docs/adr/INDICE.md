@@ -22,9 +22,10 @@ Decisões sobre como a pipeline é construída: tooling, orquestração, storage
 | ADR | Título | Descrição |
 |---|---|---|
 | [0009](0009-tooling-and-languages.md) | Tooling e linguagens | Terraform pra infra estática, Python+AWS CLI pra orquestração, shell dentro das instâncias |
-| [0010](0010-orchestration-model.md) | Modelo de orquestração | Instância de controle (t3.micro); instâncias auto-dirigem; SSH + marcador S3; mesma seed |
+| [0010](0010-orchestration-model.md) | Modelo de orquestração | Instância do Orquestrador (t3.micro); instâncias auto-dirigem; SSH + marcador S3; mesma seed |
 | [0011](0011-storage-and-transport.md) | Storage e transporte | S3 como storage central; upload de todos artefatos após cada run; limpeza seletiva pós-Pass |
 | [0012](0012-resilience-and-safeguards.md) | Resiliência e salvaguardas | Timeout por run (4h), timeout total (72h), budget alert ($150), retomada semi-automática |
 | [0013](0013-docker-build-strategy.md) | Bootstrap e build do Docker | Git clone em todas as instâncias; Docker build local no encode; ~$0.18 total; garante -march=native correto |
-| [0014](0014-quality-pass-orchestration.md) | Orquestração do Pass de qualidade | Triage no orquestrador, execução no Juiz; bootstrap de masters no controle; Parquet local |
+| [0014](0014-quality-pass-orchestration.md) | Orquestração do Pass de qualidade | Triage no orquestrador, execução no Juiz; bootstrap de masters no Orquestrador; Parquet local |
 | [0015](0015-aws-infrastructure-config.md) | Configuração da infra AWS | us-east-1; subnets públicas; Ubuntu 24.04 LTS; Docker/AWS CLI instalados no bootstrap |
+| [0016](0016-iam-and-orchestrator-invocation.md) | IAM e invocação do orquestrador | Instance profiles (sem chave estática); PassRole escopado; EC2 com condições região+tipo; chave SSH via SSM; orquestrador em tmux |

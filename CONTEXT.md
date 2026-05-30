@@ -48,12 +48,21 @@ _Avoid_: avaliação de qualidade (sugere variável dependente), validação vis
 Instância EC2 dedicada ao **Pass de qualidade**. Mesma arquitetura/instância para todos os outputs amostrados, independentemente da instância que gerou cada output. Isola o cálculo de SSIM/VMAF da variável arquitetural.
 _Avoid_: avaliador, validador.
 
+**Orquestrador** (`orchestrator`):
+O programa Python que coordena o **Experimento**: gera o `scenarios.json` com seed, lança/destrói as **Instâncias de encode** e o **Juiz**, monitora o progresso, e roda o triage do **Pass de qualidade**. Roda numa instância EC2 (t3.micro) dedicada, provisionada pelo Terraform, que persiste durante todo o Experimento e também faz o bootstrap dos **Masters**. Por extensão, "a instância do Orquestrador" é essa máquina. Decide; nunca encoda.
+_Avoid_: controle, instância de controle, controlador, scheduler.
+
+**Instância de encode** (`encode`):
+As instâncias EC2 efêmeras (c7g/c7i/c7a.xlarge) que auto-dirigem os **Cenários** via `run_all.sh`. Criadas e destruídas pelo **Orquestrador**, uma por arquitetura.
+_Avoid_: worker, runner, nó.
+
 ## Relacionamentos
 
 - Um **Experimento** consiste em N **Cenários** × 5 **Replicações** reportadas
 - Um **Cenário** é uma tupla de parâmetros; cada **Execução** materializa um Cenário
 - Cada **Cenário** consome o **Master** que corresponde à sua `input_res`
 - A **Pipeline** orquestra Experimentos: prepara Masters, executa Cenários, coleta métricas, e executa o **Pass de qualidade** no **Juiz** sobre uma amostra dos outputs
+- O **Orquestrador** é o motor da Pipeline: lança as **Instâncias de encode** (uma por arquitetura) e, depois que terminam, o **Juiz**; as Instâncias de encode auto-dirigem os Cenários sem o Orquestrador controlar cada Execução
 
 ## Exemplo de diálogo
 
@@ -67,4 +76,5 @@ _Avoid_: avaliador, validador.
 - **"pipeline"** era usado no artigo em três sentidos (experimental, transcoding de produção, comando FFmpeg) — resolvido: no projeto, **Pipeline** refere-se exclusivamente ao arcabouço experimental.
 - **"workload"** aparecia indistinto entre "execução individual" e "campanha completa" — resolvido: usamos **Execução** e **Experimento** respectivamente.
 - **"source"** era usado pra denotar tanto o arquivo de origem 4K canônico quanto o input de uma execução — resolvido: usamos **Master** pro input de qualquer execução (incluindo 1080p e 720p, derivados); o source 4K canônico não tem termo próprio porque não aparece em código (é só artefato de bootstrap).
+- **"instância de controle" / "controle"** era usado nos ADRs como sinônimo de "orquestrador" — resolvido: o termo canônico é **Orquestrador** (o programa), e a máquina onde ele roda é "a instância do Orquestrador". Não se usa "Controle" como termo próprio.
 - **"qualidade do vídeo gerado"** apareceu no artigo como variável dependente ao lado de tempo/CPU/custo — resolvido: com encoder e CRF fixos, qualidade é esperada invariante entre arquiteturas; entra como **validação amostral da premissa** via **Pass de qualidade** rodando no **Juiz**, não como variável dependente. ADR a criar quando os parâmetros de amostragem estiverem fechados.

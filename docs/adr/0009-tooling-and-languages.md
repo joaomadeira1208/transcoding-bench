@@ -4,7 +4,7 @@ O projeto usa **três linguagens/ferramentas**, cada uma na camada onde é natur
 
 | Camada | Ferramenta | Justificativa |
 |---|---|---|
-| Infra estática (S3, VPC, SG, IAM, key pair, instância de controle) | **Terraform** | Declarativo; cria uma vez, `terraform destroy` no fim. Ideal pra recursos que persistem o experimento inteiro. |
+| Infra estática (S3, VPC, SG, IAM, key pair, instância do Orquestrador) | **Terraform** | Declarativo; cria uma vez, `terraform destroy` no fim. Ideal pra recursos que persistem o experimento inteiro. |
 | Orquestração (criar/destruir instâncias efêmeras, disparar cenários, monitorar, coletar) | **Python + AWS CLI (via subprocess)** | Imperativo; natural pra lógica com estado (retomada, seed, meta.json). AWS CLI via subprocess evita aprender boto3. Mesma linguagem da análise pós-experimento. |
 | Dentro das instâncias de encode/Juiz (invocar FFmpeg, instrumentação, upload S3) | **Shell (bash)** | FFmpeg, `perf stat`, `pidstat`, `/usr/bin/time` são comandos de terminal. Shell é o wrapper natural. Instâncias são "burras" — recebem plano pronto e executam. |
 
@@ -20,5 +20,5 @@ Instâncias efêmeras (encode e Juiz) são criadas/destruídas pelo orquestrador
 ## Consequences
 
 - Python é a linguagem dominante do projeto (orquestração + análise). Shell é auxiliar e contido dentro das instâncias.
-- AWS CLI precisa estar instalada nas instâncias de encode, no Juiz, e na instância de controle.
+- AWS CLI precisa estar instalada nas instâncias de encode, no Juiz, e na instância do Orquestrador.
 - A fronteira é clara: Python decide, shell executa.

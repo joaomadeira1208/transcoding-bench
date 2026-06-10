@@ -7,13 +7,15 @@ O Pass de qualidade (ADR-0005) é orquestrado em duas etapas: **triage no orques
 1. As 3 instâncias de encode terminam → orquestrador detecta (SSH + marcador S3)
 2. Orquestrador termina as instâncias de encode (`aws ec2 terminate-instances`)
 3. Orquestrador roda `quality_triage.py` na instância do Orquestrador:
-   - Baixa os 810 `output.sha256` do S3
+   - Lista `runs/` e baixa os `meta.json` (~972 arquivos de KBs)
+   - Filtra `warmup == false` + `exit_code == 0` e deduplica por `scenario_id` (último `started_at` vence — ADR-0019)
+   - Baixa os 810 `output.sha256` correspondentes
    - Agrupa por `(codec × pair × video × rep)` → 270 grupos de 3 outputs (um por arch)
    - Compara hashes dentro de cada grupo
    - Seleciona amostra metodológica fixa (~6–10 outputs estratificados por codec × output_res)
-   - Gera `quality_plan.json`: lista de outputs a processar + paths dos masters de referência
+   - Gera `quality_plan.json` (outputs a processar + paths dos masters de referência) e sobe pra `s3://bucket/quality/plan.json` (layout-contrato, ADR-0011)
 4. Orquestrador cria o Juiz (`aws ec2 run-instances`)
-5. SSH pro Juiz: `bash run_quality.sh --plan quality_plan.json`
+5. `bootstrap.sh` do Juiz baixa `quality/plan.json` pro work dir — mesmo mecanismo do `scenarios.json` no encode (ADR-0018); orquestrador dispara via SSH: `bash run_quality.sh --plan <work dir>/plan.json`
 6. Juiz baixa do S3 os `.mkv` listados no plano + masters de referência
 7. Juiz roda VMAF/SSIM, sobe resultados pro S3
 8. Orquestrador detecta término, termina o Juiz
@@ -43,4 +45,4 @@ Acontece **na máquina local** do pesquisador, pós-experimento. Um script `cons
 
 - O Juiz é a última instância a rodar e a última a ser destruída. Após ele, só resta o bucket S3 e a instância do Orquestrador.
 - A instância do Orquestrador tem dupla função: orquestração do experimento + bootstrap dos masters. Ambas são one-shot e não concorrem.
-- Limpeza seletiva dos `.mkv` no S3 acontece após o Pass: orquestrador deleta os outputs que não fazem parte da amostra retida (ADR-0007).
+- Limpeza seletiva dos `.mkv` no S3 acontece após o Pass: orquestrador deleta os outputs que não fazem parte da amostra retida (ADR-0007), incluindo os `.mkv` de warm-up — sobem uniformemente (ADR-0011) e nunca são amostrados. Requer o `s3:DeleteObject` escopado a `runs/*` (ADR-0016).

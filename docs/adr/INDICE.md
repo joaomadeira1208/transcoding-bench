@@ -23,7 +23,7 @@ Decisões sobre como a pipeline é construída: tooling, orquestração, storage
 |---|---|---|
 | [0009](0009-tooling-and-languages.md) | Tooling e linguagens | Terraform pra infra estática, Python+AWS CLI pra orquestração, shell dentro das instâncias |
 | [0010](0010-orchestration-model.md) | Modelo de orquestração | Instância do Orquestrador (t3.micro); instâncias auto-dirigem; SSH + marcador S3; mesma seed |
-| [0011](0011-storage-and-transport.md) | Storage e transporte | S3 como storage central; upload de todos artefatos após cada run; limpeza seletiva pós-Pass |
+| [0011](0011-storage-and-transport.md) | Storage e transporte | S3 como storage central; layout de prefixos como contrato; upload de todos artefatos após cada run; limpeza seletiva pós-Pass |
 | [0012](0012-resilience-and-safeguards.md) | Resiliência e salvaguardas | Timeout por run (4h), timeout total (72h), budget alert ($150), retomada semi-automática |
 | [0013](0013-docker-build-strategy.md) | Bootstrap e build do Docker | Git clone em todas as instâncias; Docker build local no encode; ~$0.18 total; garante -march=native correto |
 | [0014](0014-quality-pass-orchestration.md) | Orquestração do Pass de qualidade | Triage no orquestrador, execução no Juiz; bootstrap de masters no Orquestrador; Parquet local |
@@ -38,5 +38,5 @@ Decisões sobre a estrutura física do projeto: organização do repo, fronteira
 |---|---|---|
 | [0017](0017-repository-structure.md) | Estrutura do repositório | Organização por papel de execução; config como spec; bootstrap por papel; dois requirements.txt; Python 3.12 |
 | [0018](0018-host-container-boundary.md) | Fronteira host/container | Execução dentro do container; imagem = ambiente, scripts bind-mounted; uma imagem (encoders+libvmaf); IMDS hop limit 2 |
-| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; Python forma scenario_id (bash ecoa); instância cunha run_id; meta.json validado na leitura |
+| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
 | [0020](0020-terraform-state-backend.md) | State do Terraform | Backend S3 remoto (bucket fora-de-banda); chave privada no state + re-applies do resume.py justificam durabilidade |

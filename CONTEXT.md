@@ -33,7 +33,7 @@ Re-execução do mesmo cenário pra estimativa estatística. Cada cenário tem 6
 _Avoid_: repetição.
 
 **`scenario_id`**:
-Chave legível canônica de um Cenário + replicação (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`). É a identidade **lógica**: `resume.py` e `consolidate.py` raciocinam sobre ela. Formada uma vez pelo Orquestrador e ecoada pelas instâncias (ADR-0019).
+Chave legível canônica de um Cenário + replicação (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`). É a identidade **lógica**: `resume.py` e `consolidate.py` raciocinam sobre ela. Formada uma vez pelo Orquestrador e ecoada pelas instâncias (ADR-0019). O warm-up carrega o sufixo `_warmup` (não `rep0`) — warm-up não é **Replicação**; o filtro warm-up/replicação é o campo `warmup` do `meta.json`, nunca parsing desta string.
 _Não confundir com_: `run_id` (identidade física).
 
 **`run_id`**:

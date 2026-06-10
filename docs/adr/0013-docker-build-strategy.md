@@ -10,7 +10,7 @@ Nas instâncias de encode, após o clone, `docker build` compila FFmpeg localmen
 2. Orquestrador faz SSH e dispara: `git clone` do repositório
 3. `docker build -t transcoding-bench .`
 4. Build leva ~10–20 min — custo: ~$0.03–0.06 por instância ($0.18 total pras 3)
-5. Orquestrador envia `scenarios.json` via SCP
+5. Orquestrador sobe a fatia do `scenarios.json` pro S3; o `bootstrap.sh` do encode a baixa pro work dir antes do `docker run` (ADR-0018/0019)
 6. Instância começa a rodar cenários via `run_all.sh`
 
 ## Considered Options

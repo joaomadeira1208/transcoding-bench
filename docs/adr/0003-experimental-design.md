@@ -12,7 +12,7 @@ Inputs são **vídeos inteiros** (Big Buck Bunny ~9,5 min, Tears of Steel ~12,2 
 - **Sem warm-up run (todas as 5 contam)** — rejeitado: primeira execução em instância fria é sistematicamente mais lenta; sem descarte, o viés inflaria a média.
 - **Instâncias diferentes por replicação** — rejeitado para experimento primário: captura heterogeneidade entre hosts físicos (relevante), mas dobra ou quintuplica custo de provisioning. Fica como sub-experimento opcional.
 
-Cada tipo de instância (`c7g`, `c7i`, `c7a`) é provisionado **uma vez**, e todos os ~54 cenários daquele tipo rodam na mesma instância EC2. Isso mantém o host físico constante (isolando a "loteria de hardware" como constante, não variável) e é coerente com o warm-up por cenário — trocar de host entre cenários resettaria o estado térmico/frequência que o warm-up existe pra estabilizar.
+Cada tipo de instância (`c7g`, `c7i`, `c7a`) é provisionado **uma vez**, e todos os ~54 cenários daquele tipo rodam na mesma instância EC2. Isso mantém o host físico constante (isolando a "loteria de hardware" como constante, não variável) e é coerente com o warm-up por cenário — trocar de host entre cenários resettaria o estado térmico/frequência que o warm-up existe pra estabilizar. A atomicidade do bloco vale também na retomada: um bloco interrompido no meio é re-executado inteiro, com warm-up novo (ADR-0012/0019).
 
 Dentro de cada instância, a **ordem entre cenários é randomizada** (com seed persistido em `meta.json`). O bloco de 6 execuções consecutivas por cenário permanece atômico — randomiza-se a ordem dos blocos, não das replicações internas. Isso evita que efeitos temporais do host (aquecimento térmico, migração de VM, throttling) se correlacionem sistematicamente com codec ou resolução.
 

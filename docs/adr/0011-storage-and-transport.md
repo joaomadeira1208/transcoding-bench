@@ -4,6 +4,21 @@
 
 O bucket S3 é criado pelo Terraform como parte da infra base e **não é destruído com urgência** — o custo de storage é ~$3.40/mês pra ~146 GB (todos os outputs), caindo pra centavos após limpeza dos `.mkv`. Pode ser destruído manualmente ao final do TCC.
 
+## Layout de prefixos do bucket (contrato)
+
+```
+s3://<bucket>/
+  masters/          # 6 masters (bootstrap no Orquestrador, ADR-0014)
+  scenarios/        # scenarios.json canônico + fatias por arch (ex.: canonical.json, c7g.json)
+  runs/{run_id}/    # raw dirs das Execuções (ADR-0007), warm-ups inclusos
+  status/           # marcadores de término ({instance_type}_done, judge_done)
+  quality/
+    plan.json       # quality_plan.json gerado pelo triage (ADR-0014)
+    results/        # resultados VMAF/SSIM do Juiz
+```
+
+Os prefixos são **contrato**, não convenção: a matriz IAM (ADR-0016) escopa permissões por prefixo, e cada bootstrap recebe o path exato do que consome — a instância nunca decide path, coerente com "a seleção mora no lado inteligente" (ADR-0019). Dado de runtime (`scenarios.json`, `quality_plan.json`) viaja **sempre via S3 pro work dir** (ADR-0018), nunca por SCP — um mecanismo, dois consumidores (encode e Juiz).
+
 ## Fluxo de upload
 
 Cada `run_scenario.sh`, ao terminar uma Execução, faz:

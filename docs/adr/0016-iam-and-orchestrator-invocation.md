@@ -13,13 +13,14 @@ As três instâncias (Orquestrador, encode, Juiz) recebem **IAM roles via instan
 | **orchestrator** | `ec2:RunInstances`, `ec2:TerminateInstances`, `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus` | `*` + condições (ver abaixo) |
 | | `iam:PassRole` | ARNs das roles `encode` e `judge` |
 | | `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` | bucket do experimento |
+| | `s3:DeleteObject` | `bucket/runs/*` (limpeza seletiva pós-Pass, ADR-0014) |
 | | `ssm:GetParameter`, `kms:Decrypt` | parâmetro da chave SSH |
-| **encode** | `s3:GetObject` | `bucket/masters/*` |
-| | `s3:PutObject` | `bucket/runs/*` |
-| **judge** | `s3:GetObject` | `bucket/runs/*`, `bucket/masters/*` |
-| | `s3:PutObject` | `bucket/quality/*` |
+| **encode** | `s3:GetObject` | `bucket/masters/*`, `bucket/scenarios/*` |
+| | `s3:PutObject` | `bucket/runs/*`, `bucket/status/*` |
+| **judge** | `s3:GetObject` | `bucket/runs/*`, `bucket/masters/*`, `bucket/quality/plan.json` |
+| | `s3:PutObject` | `bucket/quality/results/*`, `bucket/status/*` |
 
-O Orquestrador precisa de S3 r/w/list porque faz o bootstrap dos Masters (ADR-0014), o `quality_triage.py` baixa os 810 `output.sha256`, e o `resume.py` lista `runs/`. **Não** precisa de permissão de Budgets — o budget alert (ADR-0012) é criado pelo Terraform e dispara email; o Orquestrador não o consulta.
+Os escopos seguem o layout-contrato de prefixos da ADR-0011. O Orquestrador precisa de S3 r/w/list porque faz o bootstrap dos Masters (ADR-0014), o `quality_triage.py` baixa `meta.json` e `output.sha256` de `runs/`, e o `resume.py` lista `runs/`. O `DeleteObject` existe pra exatamente um caso de uso — a limpeza seletiva pós-Pass (ADR-0014) — e é **escopado a `runs/*`**: deleção é a única operação destrutiva, e o escopo protege `masters/`, `scenarios/` e `quality/` de um path malformado no script de limpeza (mesmo instinto do PassRole escopado). O `PutObject` do Orquestrador segue bucket-wide deliberadamente: ele escreve em três prefixos (`masters/`, `scenarios/`, `quality/`) e escopar daria três statements por ganho marginal. **Não** precisa de permissão de Budgets — o budget alert (ADR-0012) é criado pelo Terraform e dispara email; o Orquestrador não o consulta.
 
 ### PassRole
 

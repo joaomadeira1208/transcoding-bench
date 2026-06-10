@@ -8,7 +8,7 @@ Pipeline de validação:
 2. **SSIM + VMAF nos grupos com hash divergente.** Referência = master de input do cenário em FFV1, Lanczos-downscaled para `output_res`; comparação em `output_res` (não upsampled VMAF). Métricas por output: mean SSIM, mean VMAF, std VMAF, percentil 5 de VMAF por frame. Série por frame de VMAF e SSIM persistida (kilobytes, abre análise post-hoc sem re-rodar).
 3. **Amostra metodológica fixa (~6–10 outputs estratificados por codec × output_res) sempre roda SSIM + VMAF**, independente de hash, pra reportar faixa absoluta de VMAF no paper como contexto.
 
-Critério de equivalência por grupo: **VMAF Δ ≤ 0.5 + SSIM Δ ≤ 0.001** (max menos min entre as 3 arch). Resultado reportado como distribuição (`X/162 grupos passaram`), não como gate binário do experimento. Grupos que falham viram subseção de "casos divergentes investigados" no paper, não invalidam o experimento.
+Critério de equivalência por grupo: **VMAF Δ ≤ 0.5 + SSIM Δ ≤ 0.001** (max menos min entre as 3 arch). Resultado reportado como distribuição (`X/270 grupos passaram` — 810 outputs ÷ 3 arch, ADR-0014), não como gate binário do experimento. Grupos que falham viram subseção de "casos divergentes investigados" no paper, não invalidam o experimento.
 
 ## Considered Options
 
@@ -28,5 +28,5 @@ O Pass de qualidade roda **em batch, após todos os encodes terminarem** nas 3 i
 - **Qualidade muda de status no artigo.** Deixa de ser variável dependente listada ao lado de tempo/CPU/custo (objetivos específicos linha 103) e vira *validação metodológica*. Os objetivos do `.tex` precisam ser ajustados — esta é a primeira consequência redacional a propagar (consistente com a hierarquia documentada no `CONTEXT.md`: ADR prevalece, artigo se ajusta).
 - **Outputs precisam ser retidos** até o Juiz consumir cada grupo. Storage transiente é não-trivial (centenas de arquivos `.mkv`, dezenas a baixas centenas de GB total dependendo de codec/bitrate). Decisão de transporte/storage é da próxima sessão (arquitetura).
 - **Juiz é uma instância adicional além das 3 do experimento primário.** Tipo/tamanho/arquitetura do Juiz ficam abertos pra ADR de arquitetura. Premissa: mesma instância pra todos os outputs amostrados.
-- **Bit-identity ≠ idêntica em todos os campos.** Container `.mkv` pode ter metadados de mux com timestamps de criação, etc. Hash deve cobrir apenas o bitstream codificado (extraído via `ffmpeg -i ... -c copy -f rawvideo` ou similar), não o container inteiro.
+- **Bit-identity ≠ idêntica em todos os campos.** Container `.mkv` pode ter metadados de mux com timestamps de criação, etc. Hash deve cobrir apenas o bitstream codificado (extraído via `ffmpeg -i ... -c copy -f $codec -`, elementary stream do codec — mesmo comando da ADR-0007), não o container inteiro.
 - **Se a validação falhar inesperadamente em vários grupos,** isso é achado relevante por si só sobre não-determinismo do encoder no FFmpeg moderno entre arquiteturas — vale documentar e investigar, não esconder.

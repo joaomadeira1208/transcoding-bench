@@ -24,8 +24,8 @@ Estimativa de custo normal do experimento: ~$70 de compute + ~$4 de S3 + instân
 
 Quando algo falha (instância morre, cenários falham), a retomada é **semi-automática**:
 
-1. Um script `resume.py` lista `s3://bucket/runs/`, parseia os `meta.json`, identifica quais cenários/replicações já completaram.
-2. Gera novo `scenarios.json` sem os cenários completos.
+1. Um script `resume.py` lista `s3://bucket/runs/`, parseia os `meta.json`, identifica quais cenários completaram — completude é por **bloco**: as 5 reps com `exit_code == 0` (ADR-0019).
+2. Gera novo `scenarios.json` sem os cenários completos. Bloco parcial volta **inteiro** (warm-up novo + 5 reps, novos `run_id`): re-executar só as reps faltantes numa instância recém-criada rodaria a frio, perdendo a estabilização que o warm-up garante (ADR-0003). Os runs do bloco interrompido ficam no S3 como registro forense; os leitores deduplicam por `scenario_id` ("último `started_at` vence", ADR-0019).
 3. Se a instância morreu: `aws ec2 run-instances` recria (ou `terraform apply` se infra base foi afetada).
 4. Orquestrador dispara `run_all.sh` com o `scenarios.json` reduzido.
 

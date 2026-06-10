@@ -13,7 +13,7 @@ runs/{run_id}/
   output.sha256     ← hash do bitstream codificado (não do container .mkv inteiro)
 ```
 
-`run_id` é um UUID v4 (à prova de retomada do experimento). `scenario_id` legível também persistido em `meta.json` pra debug humano (ex.: `libx264_4k_1080p_bbb_c7g_rep1`).
+`run_id` é um UUID v4 (à prova de retomada do experimento). `scenario_id` legível também persistido em `meta.json` pra debug humano (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`).
 
 **Tabela consolidada (Parquet)**: uma linha por Execução. Campos = cenário (chave composta) + run metadata + agregados de `time` e `perf` + parseados de FFmpeg + derivados (`ipc`, `cache_miss_rate`, `branch_mispredict_rate`, `cpu_pct_avg`). **Time series do pidstat NÃO entram no Parquet** — ficam nos diretórios raw e são consultadas sob demanda quando análise profunda precisa.
 

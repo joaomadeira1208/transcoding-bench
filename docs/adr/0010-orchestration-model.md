@@ -6,7 +6,7 @@ O orquestrador **não controla cada execução individualmente**. Em vez disso, 
 
 ## Comunicação orquestrador → instâncias
 
-**SSH (key pair gerenciado pelo Terraform)** como canal primário. O orquestrador faz `ssh -i key.pem ec2-user@<ip> "bash run_all.sh ..."` pra disparar cada instância.
+**SSH (key pair gerenciado pelo Terraform)** como canal primário. O orquestrador faz `ssh -i key.pem ubuntu@<ip> "bash run_all.sh ..."` (usuário `ubuntu` — AMI Ubuntu 24.04, ADR-0015) pra disparar cada instância.
 
 Security group permite porta 22 apenas do IP da instância do Orquestrador dentro da VPC.
 

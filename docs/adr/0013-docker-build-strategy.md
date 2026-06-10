@@ -7,7 +7,7 @@ Nas instâncias de encode, após o clone, `docker build` compila FFmpeg localmen
 ## Fluxo (instância de encode)
 
 1. Instância sobe (via `aws ec2 run-instances`)
-2. Orquestrador faz SSH e dispara: `git clone` do repositório
+2. Orquestrador faz SSH e dispara: `git clone` + `git checkout <sha>` — o SHA é o do checkout do próprio Orquestrador, passado como argumento de bootstrap (ADR-0021)
 3. `docker build -t transcoding-bench .`
 4. Build leva ~10–20 min — custo: ~$0.03–0.06 por instância ($0.18 total pras 3)
 5. Orquestrador sobe a fatia do `scenarios.json` pro S3; o `bootstrap.sh` do encode a baixa pro work dir antes do `docker run` (ADR-0018/0019)

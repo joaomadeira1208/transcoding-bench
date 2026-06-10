@@ -40,3 +40,4 @@ Decisões sobre a estrutura física do projeto: organização do repo, fronteira
 | [0018](0018-host-container-boundary.md) | Fronteira host/container | Execução dentro do container; imagem = ambiente, scripts bind-mounted; uma imagem (encoders+libvmaf); IMDS hop limit 2 |
 | [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
 | [0020](0020-terraform-state-backend.md) | State do Terraform | Backend S3 remoto (bucket fora-de-banda); chave privada no state + re-applies do resume.py justificam durabilidade |
+| [0021](0021-campaign-code-versioning.md) | Versionamento do código da campanha | Repo público; instâncias clonam o SHA do checkout do Orquestrador; hotfix mid-campanha em duas classes (medição invalida, encanamento retoma) |

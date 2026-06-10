@@ -46,6 +46,8 @@ Cada linguagem usa o linter/formatter padrão da sua camada, decididos antes do 
 
 O **`pre-commit` é a casa oficial dos linters** (não opcional): amarra os quatro hooks — `ruff`, `shellcheck`/`shfmt`, `terraform fmt` e o `gitleaks` (seção de segredos abaixo) — com as versões pinadas no `.pre-commit-config.yaml`. Por isso os linters **não entram em nenhum `requirements`**: o pre-commit gerencia os próprios ambientes. O `ruff.toml` no topo segue sendo a config consumida tanto pelo hook quanto por execução manual.
 
+Um **CI mínimo no GitHub Actions** mecaniza essas fronteiras a cada PR (grátis em repo público — ADR-0021): um job de `pre-commit run --all-files` (mesmos hooks pinados, zero drift local/CI) e um job de pytest **por papel Python, em venvs separados** — o do `orchestrator/` instala só o seu `requirements-dev.txt`, então um `import pandas` acidental quebra no ambiente limpo do CI, exatamente o modo de falha previsto acima. O CI é evidência anexada ao PR, não gate autônomo: merge continua decisão do review (humano + agente). Extensões aceitáveis se continuarem grátis e rápidas: `terraform validate -backend=false`, `hadolint`. Fora por design: qualquer coisa que exija credencial AWS (a validação de fumaça da ADR-0016 é manual) e build do Docker (`-march=native` em runner de CPU errada, ADR-0013). Com o repo público, o secret scanning + push protection do GitHub (o "bônus server-side" da seção de segredos) ficam ativados.
+
 ## Segredos e segurança do versionamento
 
 O repo é clonado em instâncias com IP público (ADR-0016), então nada sensível pode entrar no histórico. Duas camadas, cobrindo vetores ortogonais:

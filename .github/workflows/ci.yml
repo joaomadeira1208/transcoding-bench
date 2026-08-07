@@ -1,0 +1,52 @@
+# CI mínimo (ADR-0017): evidência anexada a cada PR, não gate autônomo — o merge
+# continua sendo decisão do review. Fora por design: qualquer coisa que exija
+# credencial AWS e o build do Docker (`-march=native` em runner de CPU errada,
+# ADR-0013).
+#
+# Um job nesta etapa. O pytest do `orchestrator/` entra junto com o primeiro teste
+# de verdade (um job sem teste algum sai com "no tests ran" e nasce vermelho) e o
+# smoke local entra com o `smoke/`, que depende dos `run_*.sh` (ADR-0022).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # O hook terraform_validate exige o binário `terraform` no PATH: o
+      # pre-commit não gerencia esse ambiente (ADR-0017/0022).
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install pre-commit
+        run: python -m pip install pre-commit==4.6.1
+
+      - name: pre-commit run --all-files
+        run: pre-commit run --all-files --show-diff-on-failure

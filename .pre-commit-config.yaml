@@ -1,0 +1,59 @@
+# Casa oficial dos linters (ADR-0017): local e CI rodam exatamente os mesmos
+# hooks, nas mesmas versões pinadas, então não há drift entre `pre-commit run
+# --all-files` na máquina do pesquisador e o job do GitHub Actions.
+#
+# O conjunto entra completo desde já (ADR-0017/0022): os hooks de shell,
+# Terraform e Docker ficam inertes enquanto `encode/`, `infra/` e `docker/` não
+# existirem — pre-commit pula hook cujo filtro de arquivos não casa com nada.
+#
+# Linters não entram em nenhum `requirements`: o pre-commit gerencia os próprios
+# ambientes (ADR-0017).
+
+minimum_pre_commit_version: "3.2.0"
+
+repos:
+  # Python: lint + format (ADR-0017). Config em ruff.toml no topo.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Bash: lint. Distribuição via wheel — não exige shellcheck instalado no host.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  # Bash: format. Executável pré-compilado; não exige Go nem Docker no host.
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        args: [--write, --indent, "2", --case-indent]
+
+  # Terraform: fmt + validate (ADR-0017/0022). O terraform_validate faz o
+  # `init -backend=false` internamente, mas exige o binário `terraform` no PATH —
+  # daí o passo de setup no workflow do CI.
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.108.1
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+
+  # Docker: hadolint (ADR-0022). Variante em wheel — não exige daemon Docker,
+  # que o Mac do pesquisador e o runner do CI não precisam ligar por causa disso.
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.15.1
+    hooks:
+      - id: hadolint
+
+  # Segredos: segunda camada da ADR-0017 — pega chave colada dentro de um arquivo
+  # que a allowlist do .gitignore permite. Varre o conteúdo staged, então no CI
+  # (árvore limpa, nada staged) ele passa sem trabalho: lá quem cobre o vetor
+  # server-side é o secret scanning + push protection do GitHub.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

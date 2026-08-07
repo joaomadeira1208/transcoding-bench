@@ -14,10 +14,19 @@
 !*.md
 !Dockerfile
 !requirements.txt
+!requirements-dev.txt
 !ruff.toml
 !.gitignore
 !.pre-commit-config.yaml
 !meta.schema.json
+
+# Workflows do CI (ADR-0017) — .yml não está na allowlist por extensão
+!.github/workflows/*.yml
+
+# Fixtures de teste (ADR-0022): exceção deliberada ao "nenhum .json entra".
+# Escopada a diretórios literalmente chamados fixtures/ — o meta.json de
+# runtime, o scenarios.json e o quality_plan.json continuam fora.
+!**/fixtures/*.json
 
 # Re-nega diretórios gerados (higiene; o sensível já está negado por extensão)
 .venv/

@@ -32,7 +32,7 @@ Decisões sobre como a pipeline é construída: tooling, orquestração, storage
 
 ## Scaffolding
 
-Decisões sobre a estrutura física do projeto: organização do repo, fronteira host/container, contratos de dados, state do Terraform.
+Decisões sobre a estrutura física do projeto: organização do repo, fronteira host/container, contratos de dados, state do Terraform, estratégia de testes.
 
 | ADR | Título | Descrição |
 |---|---|---|
@@ -41,3 +41,4 @@ Decisões sobre a estrutura física do projeto: organização do repo, fronteira
 | [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
 | [0020](0020-terraform-state-backend.md) | State do Terraform | Backend S3 remoto (bucket fora-de-banda); chave privada no state + re-applies do resume.py justificam durabilidade |
 | [0021](0021-campaign-code-versioning.md) | Versionamento do código da campanha | Repo público; instâncias clonam o SHA do checkout do Orquestrador; hotfix mid-campanha em duas classes (medição invalida, encanamento retoma) |
+| [0022](0022-testing-strategy.md) | Estratégia de testes | Critério = falha silenciosa; módulo único de seam pro `subprocess`; fixtures híbridas com âncora real; smoke em duas camadas (shims local com asserção de argv + caminho completo na AWS + check de PMU nas 3 archs) |

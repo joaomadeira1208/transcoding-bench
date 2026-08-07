@@ -20,6 +20,9 @@ judge/         # shell do Juiz: HOST bootstrap (sem perf); CONTAINER (montado): 
 docker/        # AMBIENTE de medição, compartilhado encode+judge → Dockerfile (ver ADR-0018)
 analysis/      # Python local (pandas/pyarrow): consolidate.py + schema do meta.json (pydantic, ADR-0019) + requirements + notebooks
                #   tests/ (pytest) + requirements-dev.txt
+smoke/         # Smoke local (ADR-0022), só do Mac + CI: pytest dirigindo os run_*.sh
+               #   com shims de ffmpeg/perf/pidstat/aws. Nunca importa; só invoca.
+               #   + requirements-dev.txt próprio (pytest + pydantic)
 infra/         # Terraform, só do Mac. Arquivos planos por preocupação. Backend S3 remoto (ADR-0020).
 docs/          # adr/ + CONTEXT.md
 ```
@@ -32,9 +35,11 @@ Três escolhas de fronteira que o layout codifica:
 
 ## Empacotamento Python
 
-Dois `requirements.txt` separados (`orchestrator/` quase vazio — stdlib + AWS CLI via `subprocess`; `analysis/` com pandas/pyarrow), não um `pyproject` com extras. Não há pacote a construir nem código compartilhado entre as pontas (o contrato entre `generate_scenarios`/`orchestrator` e `consolidate` é o JSON validado da ADR-0019, não um módulo comum). Python pinado em **3.12** (o que o Ubuntu 24.04 LTS entrega — ADR-0015 — e que tem `tomllib` na stdlib).
+Dois `requirements.txt` de runtime separados (`orchestrator/` quase vazio — stdlib + AWS CLI via `subprocess`; `analysis/` com pandas/pyarrow), não um `pyproject` com extras. Não há pacote a construir nem código compartilhado entre as pontas (o contrato entre `generate_scenarios`/`orchestrator` e `consolidate` é o JSON validado da ADR-0019, não um módulo comum). Python pinado em **3.12** (o que o Ubuntu 24.04 LTS entrega — ADR-0015 — e que tem `tomllib` na stdlib).
 
-Os testes automatizados moram **co-localizados por papel** — `orchestrator/tests/` e `analysis/tests/` — coerente com "o papel é o dono". Só os dois papéis Python têm testes (a fronteira de testabilidade é "núcleo lógico determinístico, sem side-effect externo"); `encode/`/`judge/` (shell) ficam fora do TDD. As **dependências de teste** ficam num `requirements-dev.txt` por papel (runtime + `pytest`), **separado** do `requirements.txt` de runtime: o bootstrap da t3.micro instala só o runtime (ADR-0013), nunca o `-dev` — mantém a instância magra e os testes do orquestrador rodando num ambiente stdlib-only fiel ao dela (um `import pandas` acidental no orquestrador quebra o teste). Testes rodam só no Mac; as instâncias clonam e ignoram `tests/` (custo zero, coerente com a organização por papel).
+Os testes automatizados moram **co-localizados por papel** — `orchestrator/tests/` e `analysis/tests/` — coerente com "o papel é o dono". Só os dois papéis Python têm testes unitários (a fronteira de testabilidade é "núcleo lógico determinístico, sem side-effect externo"); `encode/`/`judge/` (shell) ficam fora do TDD — mas não sem verificação: o smoke local da ADR-0022 (em `smoke/`, que é papel próprio porque quem o roda é o Mac do pesquisador) é onde os `run_*.sh` são exercitados. As **dependências de teste** ficam num `requirements-dev.txt` por papel (runtime + `pytest`), **separado** do `requirements.txt` de runtime: o bootstrap da t3.micro instala só o runtime (ADR-0013), nunca o `-dev` — mantém a instância magra e os testes do orquestrador rodando num ambiente stdlib-only fiel ao dela (um `import pandas` acidental no orquestrador quebra o teste). São três `requirements-dev.txt` ao todo, contando o do `smoke/`. Testes rodam só no Mac (e no CI); as instâncias clonam e ignoram `tests/` e `smoke/` (custo zero, coerente com a organização por papel).
+
+**O quê** ganha teste, **como** o `subprocess`/AWS CLI é isolado, de onde vêm as fixtures e o que o smoke cobre são decisões da ADR-0022, não deste ADR.
 
 ## Convenções e linters
 
@@ -44,15 +49,17 @@ Cada linguagem usa o linter/formatter padrão da sua camada, decididos antes do 
 - **Bash:** `shellcheck` (lint) + `shfmt` (format).
 - **Terraform:** `terraform fmt`.
 
-O **`pre-commit` é a casa oficial dos linters** (não opcional): amarra os quatro hooks — `ruff`, `shellcheck`/`shfmt`, `terraform fmt` e o `gitleaks` (seção de segredos abaixo) — com as versões pinadas no `.pre-commit-config.yaml`. Por isso os linters **não entram em nenhum `requirements`**: o pre-commit gerencia os próprios ambientes. O `ruff.toml` no topo segue sendo a config consumida tanto pelo hook quanto por execução manual.
+O **`pre-commit` é a casa oficial dos linters** (não opcional): amarra os hooks — `ruff`, `shellcheck`/`shfmt`, `terraform fmt`, `terraform validate` (precedido de `terraform init -backend=false`, que o hook faz internamente), `hadolint` e o `gitleaks` (seção de segredos abaixo) — com as versões pinadas no `.pre-commit-config.yaml`. `terraform validate` e `hadolint` foram promovidos de "extensão aceitável" a decididos pela ADR-0022. O hook `terraform_validate` exige o binário `terraform` no `PATH` (o pre-commit não gerencia esse ambiente), então o workflow do CI ganha um passo de setup. Por isso os linters **não entram em nenhum `requirements`**: o pre-commit gerencia os próprios ambientes. O `ruff.toml` no topo segue sendo a config consumida tanto pelo hook quanto por execução manual.
 
-Um **CI mínimo no GitHub Actions** mecaniza essas fronteiras a cada PR (grátis em repo público — ADR-0021): um job de `pre-commit run --all-files` (mesmos hooks pinados, zero drift local/CI) e um job de pytest **por papel Python, em venvs separados** — o do `orchestrator/` instala só o seu `requirements-dev.txt`, então um `import pandas` acidental quebra no ambiente limpo do CI, exatamente o modo de falha previsto acima. O CI é evidência anexada ao PR, não gate autônomo: merge continua decisão do review (humano + agente). Extensões aceitáveis se continuarem grátis e rápidas: `terraform validate -backend=false`, `hadolint`. Fora por design: qualquer coisa que exija credencial AWS (a validação de fumaça da ADR-0016 é manual) e build do Docker (`-march=native` em runner de CPU errada, ADR-0013). Com o repo público, o secret scanning + push protection do GitHub (o "bônus server-side" da seção de segredos) ficam ativados.
+Um **CI mínimo no GitHub Actions** mecaniza essas fronteiras a cada PR (grátis em repo público — ADR-0021), em **três jobs**: `pre-commit run --all-files` (mesmos hooks pinados, zero drift local/CI); pytest **por papel Python, em venvs separados** — o do `orchestrator/` instala só o seu `requirements-dev.txt`, então um `import pandas` acidental quebra no ambiente limpo do CI, exatamente o modo de falha previsto acima; e o **smoke local** da ADR-0022, que é elegível porque não usa Docker, credencial AWS nem FFmpeg de verdade (tudo shimado). O CI é evidência anexada ao PR, não gate autônomo: merge continua decisão do review (humano + agente). Fora por design: qualquer coisa que exija credencial AWS (a validação de fumaça da ADR-0016/0022 é manual) e build do Docker (`-march=native` em runner de CPU errada, ADR-0013). Com o repo público, o secret scanning + push protection do GitHub (o "bônus server-side" da seção de segredos) ficam ativados.
 
 ## Segredos e segurança do versionamento
 
 O repo é clonado em instâncias com IP público (ADR-0016), então nada sensível pode entrar no histórico. Duas camadas, cobrindo vetores ortogonais:
 
 1. **`.gitignore` deny-by-default (allowlist).** Ignora `*` e re-permite só extensões/arquivos de fonte. Arquivo sensível de tipo inesperado (`*.pem`, `.env`, dump de credencial) fica fora por padrão — esquecer passa a ser seguro. O que é sensível por extensão (`*.pem`, `*.tfstate`, `*.tfvars`) nunca está na allowlist. Se fosse pra ter só uma camada, seria essa.
+
+   O default correto tem um custo: **um arquivo que o projeto precisa e que ninguém lembrou de permitir simplesmente não entra, sem aviso.** Três casos apareceram assim — `requirements-dev.txt` (que `!requirements.txt` não casa), o workflow do CI (`.yml` não está na allowlist por extensão) e as fixtures de teste da ADR-0022 (`.json` idem). Todos foram adicionados explicitamente; a exceção das fixtures é escopada a diretórios literalmente chamados `fixtures/`, de modo que `scenarios.json`, `quality_plan.json` e o `meta.json` de runtime continuam fora. Ampliar a allowlist é decisão de ADR, nunca `git add -f`.
 2. **`gitleaks` no `pre-commit`.** Varre o conteúdo staged e bloqueia segredo embutido dentro de um arquivo *permitido* (ex.: chave colada num `.sh` durante debug) — o vetor que a camada 1 não pega. Incluída porque o `pre-commit` já existe pros linters, então o custo marginal é ≈ zero.
 
 Por design quase nada sensível nasce dentro do repo: chave SSH via SSM → `~/.ssh` (ADR-0016), state remoto (ADR-0020), sem credencial estática (instance profiles). As camadas são rede de segurança, não a defesa primária. Bônus opcional server-side: push protection do GitHub (não burlável por `--no-verify`).
@@ -63,7 +70,7 @@ Por design quase nada sensível nasce dentro do repo: chave SSH via SSM → `~/.
 - **Por linguagem** (`python/`, `bash/`, `terraform/`) — rejeitado: esconde quem roda o quê; uma instância de encode teria que vasculhar `python/` e `bash/` pra montar seu papel. Por papel, o papel é o diretório.
 - **Flat (tudo na raiz)** — rejeitado: 4 papéis + spec + infra + análise na raiz vira ruído; perde a fronteira de propriedade.
 - **`pyproject.toml` com extras** — rejeitado: sem pacote a distribuir e sem código compartilhado, adicionaria build backend e `pip install -e .[extra]` no bootstrap sem ganho. Config de linter mora em `ruff.toml` no topo.
-- **Segredos/artefatos versionados** — rejeitado por construção: `scenarios.json`, `quality_plan.json`, `meta.json`, `*.pem` são runtime/segredo e ficam fora pela allowlist (seção acima); o state do Terraform é remoto (ADR-0020).
+- **Segredos/artefatos versionados** — rejeitado por construção: `scenarios.json`, `quality_plan.json`, o `meta.json` de runtime e `*.pem` são runtime/segredo e ficam fora pela allowlist (seção acima); o state do Terraform é remoto (ADR-0020). A única exceção é o `meta.json` capturado como fixture de contrato sob `fixtures/` (ADR-0022) — um artefato de teste commitado de propósito, não dado de campanha.
 
 ## Consequences
 

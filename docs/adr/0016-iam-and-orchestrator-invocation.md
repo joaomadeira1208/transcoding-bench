@@ -47,6 +47,8 @@ O Orquestrador é iniciado **manualmente dentro de um `tmux`** na sua instância
 
 Antes da campanha, validar o IAM lançando uma instância descartável e confirmando que ela sobe, acessa S3 e termina. Pega `AccessDenied` opaco (ex.: PassRole, condição de InstanceType) antes de desperdiçar horas de compute.
 
+O escopo dessa validação foi **ampliado pela ADR-0022** (e já vinha sendo, pela ADR-0021, que mandou incluir o caminho do clone): em vez de só "sobe, toca S3, termina", ela roda o **caminho completo numa `c7g.xlarge`** — `run-instances` → clone + `git checkout <sha>` → `docker build` → um `run_scenario.sh` com `perf` real → upload → `quality_triage.py` → Juiz → terminate, sobre um clip curto — mais uma **verificação dos eventos PMU** (ADR-0006) nas outras duas arquiteturas. É a primeira e única vez que PassRole, condição de InstanceType, chave via SSM, hop limit 2 do IMDS, `-march=native` e `perf` dentro do container rodam juntos antes de a campanha valer dado.
+
 ## Considered Options
 
 - **Credenciais estáticas (`aws configure`)** — rejeitado: chave de longa duração no disco de uma instância com IP público; risco de vazamento permanente. Instance profile rotaciona sozinho e não expõe segredo.

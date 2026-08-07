@@ -28,3 +28,4 @@ __pycache__/
 
 # Re-nega doc local de trabalho (é .md, a allowlist o pegaria)
 docs/DECISOES-PENDENTES.md
+docs/DEVELOPMENT-PLAN.md

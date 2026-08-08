@@ -14,6 +14,10 @@ The five canonical roles, each label string equal to its name. See `docs/agents/
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### Toolchain versions
+
+Before creating a local environment or invoking a pinned tool, check the local version against the repo's pin. Never fall back to whatever the system happens to provide — a system interpreter that merely *works* is the failure mode this rule exists for. The pins are not copied here; they live where they are declared: `.github/workflows/ci.yml` (Python, `pre-commit`, Terraform), `.pre-commit-config.yaml` (hook revisions), `ruff.toml` (`target-version`) and each role's `requirements.txt`/`requirements-dev.txt`. Python is managed with `asdf`; if the pinned version is not installed, install it rather than downgrading the work to what is there.
+
 ### Commits
 
 Every commit message must follow Conventional Commits 1.0.0: `<type>[optional scope][!]: <description>`.

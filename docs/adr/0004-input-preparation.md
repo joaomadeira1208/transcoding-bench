@@ -12,6 +12,8 @@ Pares input → output do experimento primário:
 
 O scaling em execução (master → output_res) também usa Lanczos: `-vf scale=W:H:flags=lanczos`.
 
+Os tiers acima são **rótulos nominais**, não dimensões: os dois vídeos têm aspect ratios diferentes, e a geometria exata de cada tier por vídeo é decidida na ADR-0023.
+
 ## Considered Options
 
 - **4K como único input** — rejeitado: viesa o estudo para "premium content workload"; produção real recebe masters em várias resoluções (4K para originais; 1080p para a maioria do conteúdo legado e UGC; 720p para conteúdo mais antigo/mobile). Variar `input_res` aumenta validade externa.

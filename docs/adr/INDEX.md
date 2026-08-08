@@ -14,6 +14,7 @@ Decisões sobre o desenho experimental: o que medir, como medir, com quais input
 | [0006](0006-performance-metrics-collection.md) | Coleta de métricas de desempenho | time -v, perf stat, pidstat 1 Hz, FFmpeg stderr; IPC/cache/branch como indicadores-chave |
 | [0007](0007-raw-data-schema.md) | Schema do dado bruto | Diretório runs/{run_id}/ com artefatos raw + Parquet consolidado como projeção analítica |
 | [0008](0008-ffmpeg-build-strategy.md) | Build do FFmpeg | Compilação from source com -march=native via Docker multi-arch pra exercer SIMD paths nativos |
+| [0023](0023-per-video-tier-geometry.md) | Geometria por vídeo | Tiers são rótulos nominais; largura × altura de cada tier declarada por vídeo no experiment.toml; "nunca upscale" verificado sobre pixels |
 
 ## Arquitetura
 

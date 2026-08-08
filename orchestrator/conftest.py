@@ -11,13 +11,26 @@
 from __future__ import annotations
 
 import copy
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
+from experiment_config import ExperimentConfig, validate_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
+
+
+def real_config() -> ExperimentConfig:
+    """A spec real do Experimento, validada — âncora dos testes que a citam.
+
+    Mora aqui porque mais de um módulo de teste precisa dela e é *fixture*, não
+    helper de asserção: a ADR-0022 permite compartilhar a primeira dentro de um
+    papel e recusa a segunda.
+    """
+    with REAL_EXPERIMENT_TOML.open("rb") as handle:
+        return validate_config(tomllib.load(handle))
 
 
 # Configuração mínima e válida, na forma que o `tomllib` devolve — não a matriz

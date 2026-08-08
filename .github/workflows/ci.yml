@@ -3,9 +3,8 @@
 # credencial AWS e o build do Docker (`-march=native` em runner de CPU errada,
 # ADR-0013).
 #
-# Um job nesta etapa. O pytest do `orchestrator/` entra junto com o primeiro teste
-# de verdade (um job sem teste algum sai com "no tests ran" e nasce vermelho) e o
-# smoke local entra com o `smoke/`, que depende dos `run_*.sh` (ADR-0022).
+# Dois jobs nesta etapa. O smoke local entra como terceiro junto com o `smoke/`,
+# que depende dos `run_*.sh` (ADR-0022).
 
 name: CI
 
@@ -50,3 +49,27 @@ jobs:
 
       - name: pre-commit run --all-files
         run: pre-commit run --all-files --show-diff-on-failure
+
+  # pytest por papel, cada um no seu venv (ADR-0017): este instala **apenas** o
+  # `orchestrator/requirements-dev.txt`, que puxa um `requirements.txt` de runtime
+  # vazio. É o que faz o job ter valor além de rodar os testes — um `import
+  # pandas` acidental no orquestrador quebra aqui, no ambiente limpo, em vez de
+  # passar porque a máquina do pesquisador tinha o pacote instalado.
+  orchestrator-tests:
+    name: pytest (orchestrator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Create the role venv
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r orchestrator/requirements-dev.txt
+
+      - name: pytest orchestrator/
+        run: .venv/bin/python -m pytest orchestrator/

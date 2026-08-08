@@ -126,6 +126,7 @@ def validate_config(raw: Mapping[str, Any]) -> ExperimentConfig:
     # mudança cosmética na mensagem de erro virar mudança de semântica.
     _reject_duplicates(config.pairs, "pair", "pair")
 
+    _reject_ambiguous_warmup(config.warmup_runs)
     _reject_missing_geometry(config.pairs, config.videos)
     _reject_upscale(config.pairs, config.videos)
 
@@ -213,6 +214,21 @@ def _geometry(record: Mapping[str, Any], where: str) -> Mapping[str, Geometry]:
 
 
 # --- checagens cruzadas ------------------------------------------------------
+
+
+def _reject_ambiguous_warmup(warmup_runs: int) -> None:
+    """No máximo um warm-up por Cenário: a `scenario_id` tem uma vaga só.
+
+    A chave termina em `_warmup` na Execução descartada (ADR-0019), sem índice —
+    uma segunda Execução de warm-up produziria duas chaves idênticas, que é
+    exatamente a falha silenciosa que aquela ADR existe para impedir. O desenho
+    da ADR-0003 pede um; o que se recusa aqui é o dois.
+    """
+    if warmup_runs > 1:
+        raise ConfigError(
+            f"experiment: 'warmup_runs' must be 0 or 1, got {warmup_runs} "
+            "(a second warm-up would collide on the scenario_id, which has a single slot)"
+        )
 
 
 def _reject_missing_geometry(pairs: Sequence[PairRecord], videos: Sequence[VideoRecord]) -> None:

@@ -9,17 +9,15 @@
 
 from __future__ import annotations
 
-import tomllib
-
 import pytest
 from conftest import (
     ABSENT,
-    REAL_EXPERIMENT_TOML,
     make_codec,
     make_encode,
     make_geometry,
     make_instance,
     make_video,
+    real_config,
 )
 from experiment_config import ConfigError, validate_config
 
@@ -54,11 +52,6 @@ EXPECTED_GEOMETRY = {
         "480p": (854, 358),
     },
 }
-
-
-def real_config():
-    with REAL_EXPERIMENT_TOML.open("rb") as handle:
-        return validate_config(tomllib.load(handle))
 
 
 class TestAccepts:
@@ -314,6 +307,15 @@ class TestRejectsMissingExperimentDesign:
         raw = make_raw_config(experiment={"seed": True, "replications": 5, "warmup_runs": 1})
 
         with pytest.raises(ConfigError, match="seed"):
+            validate_config(raw)
+
+    def test_more_than_one_warmup_run(self, make_raw_config):
+        # A `scenario_id` tem uma única vaga `_warmup` (ADR-0019): dois warm-ups
+        # por Cenário produziriam chaves duplicadas, e a duplicata só apareceria
+        # na consolidação, depois do compute gasto.
+        raw = make_raw_config(experiment={"seed": 1, "replications": 5, "warmup_runs": 2})
+
+        with pytest.raises(ConfigError, match="warmup_runs"):
             validate_config(raw)
 
     def test_replications_below_one(self, make_raw_config):

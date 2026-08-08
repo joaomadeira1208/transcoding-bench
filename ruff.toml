@@ -1,0 +1,22 @@
+# Config única de lint/format Python do repositório (ADR-0017): mora no topo e é
+# consumida tanto pelo hook do pre-commit quanto por execução manual de `ruff`.
+# Não há `pyproject.toml` — a ADR-0017 o rejeitou junto com `pip install -e`.
+
+# Python pinado em 3.12: é o que o Ubuntu 24.04 LTS entrega (ADR-0015) e o que
+# tem `tomllib` na stdlib, do qual o gerador do plano depende.
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+  "E",   # pycodestyle
+  "F",   # pyflakes
+  "I",   # isort
+  "B",   # bugbear
+  "UP",  # pyupgrade
+  "SIM", # flake8-simplify
+  "RUF",
+]
+
+[format]
+docstring-code-format = true

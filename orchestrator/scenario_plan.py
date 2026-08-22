@@ -1,9 +1,10 @@
-"""Construção do plano canônico de Cenários — função pura, sem I/O.
+"""Construção do plano de Cenários — funções puras, sem I/O.
 
 Recebe a configuração **já validada** (`experiment_config.ExperimentConfig`) e
-devolve o plano como estrutura JSON-serializável; escrever o arquivo é casca e
-mora no CLI (decisão D4 da spec). Assim o plano é função pura do
-`config/experiment.toml`: mesma entrada, mesmos bytes.
+devolve o plano canônico como estrutura JSON-serializável, mais a projeção dele
+numa fatia por arquitetura; escrever os arquivos é casca e mora no CLI (decisão
+D4 da spec). Assim o plano é função pura do `config/experiment.toml`: mesma
+entrada, mesmos bytes.
 
 A forma é a da ADR-0019. O plano é **aninhado**: blocos de Cenário, cada bloco
 com os 6 runs pré-formados (1 warm-up + 5 Replicações), warm-up primeiro. A
@@ -85,6 +86,27 @@ def build_canonical_plan(config: ExperimentConfig) -> dict[str, Any]:
     }
 
 
+def build_instance_slices(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Projeta o canônico numa fatia por arquitetura, chaveada pelo id curto.
+
+    É a fatia que cada Instância de encode recebe, e ela roda **todo** bloco do
+    arquivo que recebeu — a seleção por arquitetura mora aqui, no lado
+    inteligente (ADR-0019). Um `jq select(.instance == ...)` no bash
+    reintroduziria a divergência de string (`c7g` vs `c7g.xlarge`) que já
+    justifica o Python formar a `scenario_id`.
+
+    Os ids vêm do **próprio plano**, na ordem em que aparecem nele: passar a
+    configuração de novo criaria uma segunda fonte para o mesmo dado, e uma
+    instância declarada no TOML mas ausente do plano (ou vice-versa) sairia
+    daqui como fatia vazia em vez de erro.
+
+    A projeção é pura: o canônico não é tocado, e como ele é arch-major
+    (decisão D8) cada fatia é um trecho contíguo dele — a ordem relativa dos
+    blocos sobrevive por construção, não por cuidado.
+    """
+    return {instance: _slice(plan, instance) for instance in _instances(plan)}
+
+
 def serialize_plan(plan: dict[str, Any]) -> str:
     """Serializa o plano de forma byte-determinística (decisão D7).
 
@@ -106,6 +128,21 @@ def summarize_plan(plan: dict[str, Any]) -> str:
     runs = [run for block in plan["blocks"] for run in block["runs"]]
     replications = sum(1 for run in runs if not run["warmup"])
     return f"{len(plan['blocks'])} blocks, {len(runs)} runs, {replications} replications"
+
+
+def _slice(plan: dict[str, Any], instance: str) -> dict[str, Any]:
+    """A fatia carrega a mesma forma de topo do canônico.
+
+    Copiar o plano e trocar só os blocos — em vez de remontar `schema_version` e
+    `seed` à mão — é o que faz quem lê uma fatia não precisar saber que ela é um
+    recorte, inclusive depois de um campo novo entrar no topo do plano.
+    """
+    return {**plan, "blocks": [block for block in plan["blocks"] if block["instance"] == instance]}
+
+
+def _instances(plan: dict[str, Any]) -> list[str]:
+    """Os ids de instância do plano, na ordem de primeira aparição."""
+    return list(dict.fromkeys(block["instance"] for block in plan["blocks"]))
 
 
 def _scenarios(config: ExperimentConfig) -> Iterator[Scenario]:

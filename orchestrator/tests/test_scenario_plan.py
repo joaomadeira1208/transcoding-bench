@@ -17,6 +17,7 @@ import random
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import (
@@ -28,13 +29,24 @@ from conftest import (
     real_config,
 )
 from experiment_config import validate_config
-from scenario_plan import build_canonical_plan, serialize_plan
+from scenario_plan import build_canonical_plan, build_instance_slices, serialize_plan
 
 # Cardinalidade da spec (ADR-0003): 3 codecs x 9 pares x 2 vídeos x 3 instâncias.
 EXPECTED_COMBINATIONS = 54
 EXPECTED_BLOCKS = 162
 EXPECTED_RUNS = EXPECTED_BLOCKS * 6
 EXPECTED_REPLICATIONS = EXPECTED_BLOCKS * 5
+
+# Por fatia: as 54 combinações de uma arquitetura, x6 runs, x5 replicações.
+EXPECTED_SLICE_BLOCKS = EXPECTED_COMBINATIONS
+EXPECTED_SLICE_RUNS = EXPECTED_SLICE_BLOCKS * 6
+EXPECTED_SLICE_REPLICATIONS = EXPECTED_SLICE_BLOCKS * 5
+
+# Os três ids curtos da spec (ADR-0001), transcritos como o conjunto de pares
+# acima. A ordem entre eles não é requisito de ADR nenhum — arch-major diz que os
+# blocos de cada arquitetura são contíguos, não qual vem primeiro —, então quem
+# os usa compara conjuntos.
+EXPECTED_INSTANCES = ("c7g", "c7i", "c7a")
 
 # Transcrição deliberada da spec (ADR-0004), duplicada de propósito em relação ao
 # teste da configuração: contagem é invariante sob **substituição** de par, e o
@@ -59,14 +71,32 @@ SCENARIO_ID = re.compile(
 
 GENERATOR = REPO_ROOT / "orchestrator" / "generate_scenarios.py"
 
+# Nome do canônico transcrito, não importado: o teste do CLI é caixa-preta, e o
+# nome é contrato do layout de prefixos da ADR-0011.
+CANONICAL_FILENAME = "canonical.json"
+
 
 @pytest.fixture(scope="module")
 def plan() -> dict:
     return build_canonical_plan(real_config())
 
 
+@pytest.fixture(scope="module")
+def slices(plan: dict) -> dict[str, dict]:
+    return build_instance_slices(plan)
+
+
 def all_runs(plan: dict) -> list[dict]:
     return [run for block in plan["blocks"] for run in block["runs"]]
+
+
+def scenario_ids(plan: dict) -> set[str]:
+    return {run["scenario_id"] for run in all_runs(plan)}
+
+
+def block_key(block: dict) -> str:
+    """Identidade de um bloco: a `scenario_id` do seu warm-up, única no plano."""
+    return block["runs"][0]["scenario_id"]
 
 
 def blocks_of(plan: dict, instance: str) -> list[dict]:
@@ -349,7 +379,7 @@ class TestSeededShuffle:
         # combinações e o eixo `instância` entra depois (decisão D1).
         orders = {
             instance: [combination_of(b) for b in blocks_of(plan, instance)]
-            for instance in ("c7g", "c7i", "c7a")
+            for instance in EXPECTED_INSTANCES
         }
 
         assert len(set(map(tuple, orders.values()))) == 1
@@ -430,33 +460,128 @@ class TestSeededShuffle:
         assert sorted(order(1)) == sorted(order(2))
 
 
+class TestSlices:
+    # Invariantes escritas à mão, nunca golden: o que se quer garantir é a
+    # *relação* entre canônico e fatias — nenhuma célula da matriz de comparação
+    # duplicada ou vazia —, e uma lista congelada de `scenario_id` não expressa
+    # relação nenhuma. O golden do repositório é um só, o do shuffle, porque lá
+    # congelar a ordem *é* o requisito.
+
+    def test_one_slice_per_instance_keyed_by_the_short_id(self, plan, slices):
+        # Id curto, nunca o `instance_type`: é o que a decisão D8 fixou para o
+        # nome do artefato (`c7g.json`, não `c7g.xlarge.json`), e é a mesma
+        # divergência de string (`c7g` vs `c7g.xlarge`) que a ADR-0019 evita ao
+        # tirar a seleção do bash.
+        assert set(slices) == set(EXPECTED_INSTANCES)
+
+    def test_counts_of_each_slice(self, slices):
+        for instance, plan_slice in slices.items():
+            runs = all_runs(plan_slice)
+
+            assert len(plan_slice["blocks"]) == EXPECTED_SLICE_BLOCKS, instance
+            assert len(runs) == EXPECTED_SLICE_RUNS, instance
+            assert sum(1 for run in runs if run["warmup"] is False) == EXPECTED_SLICE_REPLICATIONS
+
+    def test_each_slice_carries_only_blocks_of_its_architecture(self, slices):
+        # A Instância roda **todo** bloco do arquivo que recebeu (ADR-0019): um
+        # bloco alheio numa fatia não é filtrado por ninguém — ele é executado, e
+        # a arquitetura registrada no `meta.json` seria a errada.
+        for instance, plan_slice in slices.items():
+            assert {block["instance"] for block in plan_slice["blocks"]} == {instance}
+
+    def test_the_union_of_the_slices_is_the_canonical(self, plan, slices):
+        # Célula ausente = coluna vazia na comparação cross-arch da ADR-0010,
+        # descoberta só na consolidação. Igualdade profunda, não contagem: uma
+        # projeção que remontasse os blocos em vez de reaproveitá-los — e
+        # remontasse algum campo errado — contaria igual.
+        united = [block for plan_slice in slices.values() for block in plan_slice["blocks"]]
+
+        assert sorted(united, key=block_key) == sorted(plan["blocks"], key=block_key)
+
+    def test_the_slices_are_pairwise_disjoint(self, slices):
+        # A recíproca: um bloco em duas fatias roda duas vezes, em arquiteturas
+        # diferentes, e a `scenario_id` duplicada vira dedup silencioso ("último
+        # `started_at` vence") no `consolidate.py`.
+        for first, second in itertools.combinations(slices.values(), 2):
+            assert scenario_ids(first) & scenario_ids(second) == set()
+
+    def test_the_relative_order_of_the_canonical_is_preserved(self, plan, slices):
+        # Fatiar não pode desfazer a randomização: se a ordem dentro da fatia
+        # divergisse da do canônico, as três arquiteturas deixariam de ver a
+        # mesma sequência e o cancelamento de efeitos temporais da ADR-0010 iria
+        # embora — sem que contagem, união ou disjunção acusassem nada.
+        position = {block_key(block): index for index, block in enumerate(plan["blocks"])}
+
+        for instance, plan_slice in slices.items():
+            positions = [position[block_key(block)] for block in plan_slice["blocks"]]
+
+            assert positions == sorted(positions), instance
+
+    def test_a_slice_carries_the_top_shape_of_the_canonical(self, plan, slices):
+        # Quem lê uma fatia não precisa saber que ela é um recorte: mesma forma
+        # de topo, mesmo `schema_version`, mesma seed.
+        for plan_slice in slices.values():
+            assert set(plan_slice) == set(plan)
+            assert plan_slice["schema_version"] == plan["schema_version"]
+            assert plan_slice["seed"] == plan["seed"]
+
+    def test_the_projection_leaves_the_canonical_untouched(self, plan):
+        # Projeção é função pura: se ela mutasse o canônico — um `pop` no lugar
+        # de uma cópia —, o arquivo escrito depois dela seria o recorte.
+        before = serialize_plan(plan)
+
+        build_instance_slices(plan)
+
+        assert serialize_plan(plan) == before
+
+    def test_slicing_twice_produces_identical_bytes(self):
+        first = build_instance_slices(build_canonical_plan(real_config()))
+        second = build_instance_slices(build_canonical_plan(real_config()))
+
+        assert [serialize_plan(s) for s in first.values()] == [
+            serialize_plan(s) for s in second.values()
+        ]
+
+
 class TestCli:
-    def test_writes_the_canonical_plan_to_the_output_directory(self, tmp_path):
-        # Casca de I/O verificada como caixa-preta, depois do fato (ADR-0022).
-        first = tmp_path / "first"
-        second = tmp_path / "second"
+    def test_writes_the_canonical_and_one_slice_per_architecture(self, tmp_path):
+        # A casca de I/O tem uma verificação só, de caixa-preta e depois do fato
+        # (ADR-0022): o CLI invocado como processo sobre o `experiment.toml`
+        # real, duas vezes, em diretórios temporários. Duas invocações porque o
+        # determinismo byte-a-byte prometido ao `diff` vale para os quatro
+        # artefatos, não só para o canônico. Nada aqui importa o núcleo.
+        first = generate_into(tmp_path / "first")
+        second = generate_into(tmp_path / "second")
+        expected = {CANONICAL_FILENAME, *(f"{instance}.json" for instance in EXPECTED_INSTANCES)}
 
-        for out in (first, second):
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(GENERATOR),
-                    "--config",
-                    str(REAL_EXPERIMENT_TOML),
-                    "--out",
-                    str(out),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+        assert {path.name for path in first.iterdir()} == expected
 
-            assert result.returncode == 0, result.stderr
+        for name in expected:
+            written = (first / name).read_bytes()
 
-        written = (first / "canonical.json").read_bytes()
+            assert written == (second / name).read_bytes(), name
 
-        assert written == (second / "canonical.json").read_bytes()
-        assert len(json.loads(written)["blocks"]) == EXPECTED_BLOCKS
+        canonical = json.loads((first / CANONICAL_FILENAME).read_text(encoding="utf-8"))
+
+        assert len(canonical["blocks"]) == EXPECTED_BLOCKS
+
+        for instance in EXPECTED_INSTANCES:
+            plan_slice = json.loads((first / f"{instance}.json").read_text(encoding="utf-8"))
+
+            assert len(plan_slice["blocks"]) == EXPECTED_SLICE_BLOCKS, instance
+            assert {block["instance"] for block in plan_slice["blocks"]} == {instance}
+
+
+def generate_into(out: Path) -> Path:
+    result = subprocess.run(
+        [sys.executable, str(GENERATOR), "--config", str(REAL_EXPERIMENT_TOML), "--out", str(out)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    return out
 
 
 def one_run(plan: dict, scenario_id: str) -> dict:

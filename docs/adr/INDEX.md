@@ -39,7 +39,7 @@ Decisões sobre a estrutura física do projeto: organização do repo, fronteira
 |---|---|---|
 | [0017](0017-repository-structure.md) | Estrutura do repositório | Organização por papel de execução; config como spec; bootstrap por papel; dois requirements.txt; Python 3.12 |
 | [0018](0018-host-container-boundary.md) | Fronteira host/container | Execução dentro do container; imagem = ambiente, scripts bind-mounted; uma imagem (encoders+libvmaf); IMDS hop limit 2 |
-| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
+| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; shuffle com seed sobre as 54 combinações e eixo instância depois (canônico arch-major); Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
 | [0020](0020-terraform-state-backend.md) | State do Terraform | Backend S3 remoto (bucket fora-de-banda); chave privada no state + re-applies do resume.py justificam durabilidade |
 | [0021](0021-campaign-code-versioning.md) | Versionamento do código da campanha | Repo público; instâncias clonam o SHA do checkout do Orquestrador; hotfix mid-campanha em duas classes (medição invalida, encanamento retoma) |
 | [0022](0022-testing-strategy.md) | Estratégia de testes | Critério = falha silenciosa; módulo único de seam pro `subprocess`; fixtures híbridas com âncora real; smoke em duas camadas (shims local com asserção de argv + caminho completo na AWS + check de PMU nas 3 archs) |

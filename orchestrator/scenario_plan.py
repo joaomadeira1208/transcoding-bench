@@ -20,13 +20,19 @@ Não há `run_id`: ele é cunhado pela instância no momento da execução (ADR-
 Não há índice de replicação como campo próprio: o sufixo da `scenario_id` já o
 expressa e a completude é avaliada por ela (ADR-0012).
 
-A ordem dos blocos é a ordem de declaração do TOML, percorrida em ordem fixa —
-o embaralhamento com seed entra depois, e é sobre esta ordem que ele opera.
+A ordem dos blocos é o **embaralhamento com a seed do TOML** das 54 combinações
+`codec x par x vídeo`, replicado nas três arquiteturas: o eixo `instância` é
+aplicado depois do shuffle (decisão D1 da spec, emenda à ADR-0019). É isso que
+faz as três instâncias executarem os Cenários na mesma sequência, que é a
+premissa de cancelamento de efeitos temporais da ADR-0010 — embaralhar os 162
+blocos do produto completo daria a cada arquitetura uma ordem *diferente* das
+suas 54 combinações e destruiria a propriedade.
 """
 
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -103,22 +109,46 @@ def summarize_plan(plan: dict[str, Any]) -> str:
 
 
 def _scenarios(config: ExperimentConfig) -> Iterator[Scenario]:
-    """As 162 células da matriz, na ordem de declaração do TOML.
+    """As 162 células da matriz, arch-major sobre uma única ordem embaralhada.
 
-    Instância por fora, combinação por dentro: as três arquiteturas recebem assim
-    a **mesma** sequência de combinações, que é a premissa de cancelamento de
-    efeitos temporais da ADR-0010 e o que o embaralhamento do ticket seguinte
-    preserva ao operar só sobre `_combinations`.
+    A sequência embaralhada é computada **uma vez** e percorrida igual para cada
+    instância: a invariante da ADR-0010 — as três arquiteturas veem a mesma
+    ordem relativa de combinações — é estrutural aqui, não algo que dependa de o
+    shuffle ser reexecutado com a mesma seed.
+
+    Instância por fora deixa os 54 blocos de cada arquitetura contíguos
+    (decisão D8), o que torna o fatiamento uma fatia contígua do canônico.
     """
+    order = _shuffled_combinations(config)
     for instance in config.instances:
-        for codec, pair, video in _combinations(config):
+        for codec, pair, video in order:
             yield Scenario(codec=codec, pair=pair, video=video, instance=instance)
+
+
+def _shuffled_combinations(
+    config: ExperimentConfig,
+) -> list[tuple[CodecRecord, PairRecord, VideoRecord]]:
+    """As 54 combinações `codec x par x vídeo`, embaralhadas com a seed do TOML.
+
+    O gerador é uma instância própria, semeada aqui — nunca o estado global do
+    módulo `random` (decisão D7). Com o global, qualquer outra chamada no
+    processo entraria no plano, e "mesmo TOML ⇒ mesmos bytes" deixaria de valer
+    sem que nada falhasse.
+    """
+    combinations = list(_combinations(config))
+    random.Random(config.seed).shuffle(combinations)
+    return combinations
 
 
 def _combinations(
     config: ExperimentConfig,
 ) -> Iterator[tuple[CodecRecord, PairRecord, VideoRecord]]:
-    """As 54 combinações `codec x par x vídeo`, na ordem de declaração do TOML."""
+    """As 54 combinações `codec x par x vídeo`, na ordem de declaração do TOML.
+
+    A ordem pré-shuffle precisa ser determinística para que a pós-shuffle seja:
+    laços aninhados sobre as listas do TOML, sem conjunto nem dicionário no
+    caminho.
+    """
     for codec in config.codecs:
         for pair in config.pairs:
             for video in config.videos:

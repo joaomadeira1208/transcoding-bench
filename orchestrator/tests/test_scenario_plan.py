@@ -11,17 +11,27 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+import random
 import re
 import subprocess
 import sys
 
 import pytest
-from conftest import REAL_EXPERIMENT_TOML, REPO_ROOT, make_instance, real_config
+from conftest import (
+    REAL_EXPERIMENT_TOML,
+    REPO_ROOT,
+    make_codec,
+    make_instance,
+    make_video,
+    real_config,
+)
 from experiment_config import validate_config
 from scenario_plan import build_canonical_plan, serialize_plan
 
 # Cardinalidade da spec (ADR-0003): 3 codecs x 9 pares x 2 vídeos x 3 instâncias.
+EXPECTED_COMBINATIONS = 54
 EXPECTED_BLOCKS = 162
 EXPECTED_RUNS = EXPECTED_BLOCKS * 6
 EXPECTED_REPLICATIONS = EXPECTED_BLOCKS * 5
@@ -57,6 +67,15 @@ def plan() -> dict:
 
 def all_runs(plan: dict) -> list[dict]:
     return [run for block in plan["blocks"] for run in block["runs"]]
+
+
+def blocks_of(plan: dict, instance: str) -> list[dict]:
+    return [block for block in plan["blocks"] if block["instance"] == instance]
+
+
+def combination_of(block: dict) -> tuple[str, str, str, str]:
+    """O Cenário sem o eixo `instância` — o que o shuffle ordena (decisão D1)."""
+    return (block["encoder"], block["input_res"], block["output_res"], block["video"])
 
 
 def scenario_of(block: dict) -> tuple[str, str, str, str, str]:
@@ -282,6 +301,32 @@ class TestDeterminism:
 
         assert first == second
 
+    def test_the_plan_does_not_depend_on_the_global_random_state(self):
+        # O embaralhamento usa uma instância própria de gerador semeada pela seed
+        # do TOML (decisão D7). Se ele lesse o estado global do módulo `random`,
+        # qualquer outra chamada no processo — hoje nenhuma, amanhã qualquer uma
+        # — mudaria o plano, e o determinismo prometido ao `diff` sumiria sem
+        # ninguém notar.
+        random.seed(1)
+        first = serialize_plan(build_canonical_plan(real_config()))
+        random.seed(2)
+        for _ in range(10):
+            random.random()
+        second = serialize_plan(build_canonical_plan(real_config()))
+
+        assert first == second
+
+    def test_the_plan_does_not_consume_the_global_random_stream(self):
+        # A recíproca: gerar o plano não pode mexer no estado global, ou o
+        # gerador passaria a interferir em quem o importar.
+        random.seed(7)
+        expected = [random.random() for _ in range(3)]
+
+        random.seed(7)
+        build_canonical_plan(real_config())
+
+        assert [random.random() for _ in range(3)] == expected
+
     def test_the_plan_carries_no_timestamp_or_environment_field(self, plan):
         assert set(plan) == {"schema_version", "seed", "blocks"}
         assert "generated_at" not in serialize_plan(plan)
@@ -295,25 +340,94 @@ class TestDeterminism:
         assert plan["schema_version"] == "1"
 
 
-class TestDeclarationOrder:
-    def test_blocks_follow_the_declaration_order_of_the_toml(self, make_raw_config):
-        # A ordem pré-shuffle é a ordem de declaração, percorrida em ordem fixa
-        # (decisão D7). É sobre ela que o embaralhamento do ticket seguinte opera,
-        # então ela precisa ser determinística antes de ser embaralhada.
+class TestSeededShuffle:
+    def test_the_three_architectures_see_the_same_order_of_combinations(self, plan):
+        # A propriedade que a ADR-0010 compra, asserida como invariante sobre a
+        # matriz real: com a mesma ordem nas três instâncias, efeitos temporais do
+        # host atingem os mesmos Cenários em todas as arquiteturas e se cancelam
+        # na comparação cross-arch. É por isso que o shuffle roda sobre as 54
+        # combinações e o eixo `instância` entra depois (decisão D1).
+        orders = {
+            instance: [combination_of(b) for b in blocks_of(plan, instance)]
+            for instance in ("c7g", "c7i", "c7a")
+        }
+
+        assert len(set(map(tuple, orders.values()))) == 1
+        assert len(orders["c7g"]) == EXPECTED_COMBINATIONS
+
+    def test_the_canonical_is_arch_major_with_contiguous_slices(self, plan):
+        # Decisão D8: os 54 blocos de cada arquitetura são contíguos, o que torna
+        # o fatiamento do ticket seguinte uma fatia contígua e mantém
+        # trivialmente a invariante de ordem relativa. Um canônico intercalado
+        # passaria em todos os outros testes deste arquivo.
+        instances = [block["instance"] for block in plan["blocks"]]
+        runs = [instance for instance, _ in itertools.groupby(instances)]
+
+        assert runs == ["c7g", "c7i", "c7a"]
+
+    def test_the_order_is_not_the_declaration_order_of_the_toml(self, plan):
+        # Sem isto, um shuffle que virasse no-op (seed trocada por constante,
+        # `shuffle` removido numa refatoração) passaria em tudo o mais: ordem
+        # replicada nas três arquiteturas e determinismo continuariam verdes.
+        config = real_config()
+        declared = [
+            (codec.slug, pair.input_res, pair.output_res, video.slug)
+            for codec in config.codecs
+            for pair in config.pairs
+            for video in config.videos
+        ]
+
+        assert [combination_of(b) for b in blocks_of(plan, "c7g")] != declared
+
+    def test_the_order_is_the_shuffle_of_the_seed_of_the_toml(self, make_raw_config):
+        # Golden inline (ADR-0022): a sequência congelada sobre um
+        # `experiment.toml` mínimo. Nada de `scenarios.json` commitado — o que se
+        # quer pegar é `random.shuffle` mudando entre versões de Python, ou
+        # alguém reordenando o produto cartesiano sem perceber. Congelar a ordem
+        # **é** o requisito: o cancelamento de efeitos temporais da ADR-0010
+        # depende de ela não mudar por baixo do experimento.
         raw = make_raw_config(
+            experiment={"seed": 20260808, "replications": 5, "warmup_runs": 1},
+            codec=[make_codec(slug="libx264"), make_codec(slug="libx265", codec="h265")],
+            video=[make_video(slug="bbb"), make_video(slug="tos")],
             instance=[
                 make_instance(id="c7g", instance_type="c7g.xlarge", arch="arm64"),
                 make_instance(id="c7i", instance_type="c7i.xlarge", arch="x86_64"),
-            ]
+            ],
         )
+
         blocks = build_canonical_plan(validate_config(raw))["blocks"]
 
-        assert [scenario_of(b) for b in blocks] == [
-            ("libx264", "1080p", "1080p", "bbb", "c7g"),
-            ("libx264", "1080p", "720p", "bbb", "c7g"),
-            ("libx264", "1080p", "1080p", "bbb", "c7i"),
-            ("libx264", "1080p", "720p", "bbb", "c7i"),
+        assert [block["runs"][0]["scenario_id"] for block in blocks] == [
+            "libx264_1080p_720p_tos_c7g_warmup",
+            "libx265_1080p_1080p_tos_c7g_warmup",
+            "libx265_1080p_720p_tos_c7g_warmup",
+            "libx264_1080p_1080p_tos_c7g_warmup",
+            "libx265_1080p_1080p_bbb_c7g_warmup",
+            "libx264_1080p_720p_bbb_c7g_warmup",
+            "libx265_1080p_720p_bbb_c7g_warmup",
+            "libx264_1080p_1080p_bbb_c7g_warmup",
+            "libx264_1080p_720p_tos_c7i_warmup",
+            "libx265_1080p_1080p_tos_c7i_warmup",
+            "libx265_1080p_720p_tos_c7i_warmup",
+            "libx264_1080p_1080p_tos_c7i_warmup",
+            "libx265_1080p_1080p_bbb_c7i_warmup",
+            "libx264_1080p_720p_bbb_c7i_warmup",
+            "libx265_1080p_720p_bbb_c7i_warmup",
+            "libx264_1080p_1080p_bbb_c7i_warmup",
         ]
+
+    def test_a_different_seed_produces_a_different_order(self, make_raw_config):
+        def order(seed: int) -> list[tuple[str, str, str, str]]:
+            raw = make_raw_config(
+                experiment={"seed": seed, "replications": 5, "warmup_runs": 1},
+                codec=[make_codec(slug="libx264"), make_codec(slug="libx265", codec="h265")],
+                video=[make_video(slug="bbb"), make_video(slug="tos")],
+            )
+            return [combination_of(b) for b in build_canonical_plan(validate_config(raw))["blocks"]]
+
+        assert order(1) != order(2)
+        assert sorted(order(1)) == sorted(order(2))
 
 
 class TestCli:

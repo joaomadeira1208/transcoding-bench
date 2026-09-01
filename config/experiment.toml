@@ -43,11 +43,44 @@ container = "mkv"
 # Downscale Lanczos, o que pipelines ABR de produção usam (ADR-0004).
 scale_flags = "lanczos"
 
+# Instrumentação da Execução (ADR-0006). Os dez eventos de PMU são **desenho
+# experimental**, não constante de script: IPC, cache miss rate e branch
+# mispredict rate — os três indicadores arquiteturais que o artigo reporta —
+# saem deles, e trocar um evento muda o que o Experimento mede. A ordem é a que a
+# ADR lista e é a que vai para o `-e` do `perf stat`.
+#
+# O modo de falha é silencioso: `perf stat` não falha com um evento que a
+# arquitetura não expõe — ele o reporta como `<not supported>` e segue. Que os
+# dez existam em cada arquitetura é verificado por smoke antes da campanha.
+#
+# Os limites operacionais da ADR-0012 (4 h por run, 72 h totais) não moram aqui:
+# não afetam número medido nenhum e são flags do `run_all.sh`.
+[instrumentation]
+pmu_events = [
+  "cycles",
+  "instructions",
+  "cache-references",
+  "cache-misses",
+  "branch-instructions",
+  "branch-misses",
+  "task-clock",
+  "context-switches",
+  "cpu-migrations",
+  "page-faults",
+]
+
 # Codecs (ADR-0002). O `slug` é o token que entra na `scenario_id` e é o nome do
 # encoder, conforme o exemplo canônico do CONTEXT.md
 # (`libx264_2160p_1080p_bbb_c7g_rep1`); `codec` é o rótulo de leitura humana.
 # CRF não é intercambiável entre codecs — cada um tem o seu alvo de qualidade, e
 # qualidade não é variável dependente (ADR-0005).
+#
+# `bitstream_muxer` é o muxer do elementary stream do codec: o `output.sha256`
+# cobre o bitstream codificado, extraído com `ffmpeg -i output.mkv -c copy -f
+# <muxer> -` antes do hash, porque o container `.mkv` carrega metadado de mux que
+# mudaria o hash sem o bitstream ter mudado (ADR-0005/0007). O nome difere por
+# codec e não sai do `slug` nem do rótulo — derivá-lo seria a mesma manipulação
+# de string que faz o Python formar a `scenario_id` (ADR-0019).
 [[codec]]
 slug = "libx264"
 codec = "h264"
@@ -55,6 +88,7 @@ encoder = "libx264"
 preset = "medium"
 crf = 23
 encoder_args = ["-sc_threshold", "0"]
+bitstream_muxer = "h264"
 
 [[codec]]
 slug = "libx265"
@@ -63,6 +97,7 @@ encoder = "libx265"
 preset = "medium"
 crf = 28
 encoder_args = ["-x265-params", "scenecut=0"]
+bitstream_muxer = "hevc"
 
 [[codec]]
 slug = "libsvtav1"
@@ -73,6 +108,7 @@ encoder = "libsvtav1"
 preset = "8"
 crf = 35
 encoder_args = ["-svtav1-params", "scd=0"]
+bitstream_muxer = "obu"
 
 # Pares input→output (ADR-0004). Os 9 registros são o conjunto recortado: só
 # downscale ou no-scale, nunca upscale. Estarem declarados um a um é o ponto —

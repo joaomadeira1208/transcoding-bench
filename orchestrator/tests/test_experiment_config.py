@@ -16,6 +16,7 @@ from conftest import (
     make_encode,
     make_geometry,
     make_instance,
+    make_instrumentation,
     make_video,
     real_config,
 )
@@ -34,6 +35,32 @@ EXPECTED_PAIRS = {
     ("1080p", "480p"),
     ("720p", "720p"),
     ("720p", "480p"),
+}
+
+# Os dez eventos da ADR-0006, transcritos **na ordem em que ela os lista**. São
+# desenho experimental: trocar um evento muda o que o artigo reporta, e o modo de
+# falha é o mais caro do projeto — `perf stat` não falha com um evento que a
+# arquitetura não tem, apenas o reporta como `<not supported>` e segue.
+EXPECTED_PMU_EVENTS = [
+    "cycles",
+    "instructions",
+    "cache-references",
+    "cache-misses",
+    "branch-instructions",
+    "branch-misses",
+    "task-clock",
+    "context-switches",
+    "cpu-migrations",
+    "page-faults",
+]
+
+# O muxer do elementary stream de cada codec (ADR-0005/0007). Transcrito, não
+# derivado: é justamente por não sair do `slug` nem do rótulo do codec por
+# manipulação de string que ele é dado declarado.
+EXPECTED_BITSTREAM_MUXERS = {
+    "libx264": "h264",
+    "libx265": "hevc",
+    "libsvtav1": "obu",
 }
 
 # Mesmo instinto, para a tabela da ADR-0023: os tiers são rótulos nominais, e um
@@ -106,6 +133,19 @@ class TestRealExperimentToml:
         }
 
         assert declared == EXPECTED_GEOMETRY
+
+    def test_declares_the_bitstream_muxer_of_every_codec(self):
+        # Sem o campo, o `run_scenario.sh` teria de mapear codec → muxer em
+        # bash, e o erro sairia como um `output.sha256` de um bitstream que não
+        # é o do Cenário — perfeitamente válido, e errado.
+        muxers = {c.slug: c.bitstream_muxer for c in real_config().codecs}
+
+        assert muxers == EXPECTED_BITSTREAM_MUXERS
+
+    def test_declares_the_ten_pmu_events_of_the_adr_in_order(self):
+        # Lista, não conjunto: a ordem é a que a ADR-0006 escreveu e é a que vai
+        # para o `-e` do `perf stat`, então ela é parte do que se congela.
+        assert list(real_config().instrumentation.pmu_events) == EXPECTED_PMU_EVENTS
 
     def test_ties_preset_and_crf_to_each_codec(self):
         codecs = {c.slug: (c.preset, c.crf) for c in real_config().codecs}
@@ -331,12 +371,17 @@ class TestRejectsIncompleteRecords:
         with pytest.raises(ConfigError, match=family):
             validate_config(make_raw_config(**{family: []}))
 
-    @pytest.mark.parametrize("family", ["codec", "pair", "video", "instance", "encode"])
+    @pytest.mark.parametrize(
+        "family", ["codec", "pair", "video", "instance", "encode", "instrumentation"]
+    )
     def test_absent_family(self, make_raw_config, family):
         with pytest.raises(ConfigError, match=family):
             validate_config(make_raw_config(**{family: ABSENT}))
 
-    @pytest.mark.parametrize("field", ["slug", "codec", "encoder", "preset", "crf", "encoder_args"])
+    @pytest.mark.parametrize(
+        "field",
+        ["slug", "codec", "encoder", "preset", "crf", "encoder_args", "bitstream_muxer"],
+    )
     def test_codec_missing_field(self, make_raw_config, field):
         codec = make_codec()
         del codec[field]
@@ -403,3 +448,75 @@ class TestRejectsIncompleteRecords:
     def test_encoder_args_that_is_not_a_list_of_strings(self, make_raw_config):
         with pytest.raises(ConfigError, match="encoder_args"):
             validate_config(make_raw_config(codec=[make_codec(encoder_args="-sc_threshold 0")]))
+
+    def test_empty_bitstream_muxer(self, make_raw_config):
+        # String vazia chegaria ao `ffmpeg -c copy -f '' -` como um argumento
+        # presente e sem valor: o campo existe, e a extração falha longe daqui.
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(codec=[make_codec(bitstream_muxer="")]))
+
+        message = str(excinfo.value)
+        assert "codec[0]" in message
+        assert "bitstream_muxer" in message
+
+
+class TestRejectsBadInstrumentation:
+    """Os dez eventos são desenho experimental (ADR-0006), não constante de script."""
+
+    def test_missing_pmu_events(self, make_raw_config):
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(instrumentation={}))
+
+        message = str(excinfo.value)
+        assert "instrumentation" in message
+        assert "pmu_events" in message
+
+    def test_empty_pmu_events(self, make_raw_config):
+        # Lista vazia é o pior caso: `perf stat` sem `-e` roda, coleta o conjunto
+        # default de eventos e devolve um JSON plausível — sem os dez que o
+        # artigo reporta.
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(instrumentation=make_instrumentation(pmu_events=[])))
+
+        message = str(excinfo.value)
+        assert "instrumentation" in message
+        assert "pmu_events" in message
+
+    def test_duplicate_pmu_event(self, make_raw_config):
+        # `perf stat` aceita o evento repetido e emite duas entradas com o mesmo
+        # nome; quem lê o JSON por nome fica com uma delas, escolhida por acaso.
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(pmu_events=["cycles", "instructions", "cycles"])
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "pmu_events[2]" in message
+        assert "cycles" in message
+
+    def test_empty_pmu_event(self, make_raw_config):
+        # Um elemento vazio não é "lista vazia" nem duplicata, e chega ao
+        # `perf stat` como um `-e cycles,,instructions` — o mesmo silêncio que a
+        # string vazia do `bitstream_muxer`, um nível mais fundo.
+        raw = make_raw_config(instrumentation=make_instrumentation(pmu_events=["cycles", ""]))
+
+        with pytest.raises(ConfigError, match="pmu_events"):
+            validate_config(raw)
+
+    def test_pmu_events_that_is_not_a_list_of_strings(self, make_raw_config):
+        raw = make_raw_config(instrumentation=make_instrumentation(pmu_events="cycles"))
+
+        with pytest.raises(ConfigError, match="pmu_events"):
+            validate_config(raw)
+
+    def test_unknown_key_in_the_instrumentation_table(self, make_raw_config):
+        raw = make_raw_config(instrumentation=make_instrumentation(sample_rate=1))
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "instrumentation" in message
+        assert "sample_rate" in message

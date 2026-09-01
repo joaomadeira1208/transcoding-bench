@@ -225,6 +225,12 @@ def _run(config: ExperimentConfig, scenario: Scenario, suffix: str) -> dict[str,
         "strip_audio": encode.strip_audio,
         "container": encode.container,
         "scale_flags": encode.scale_flags,
+        # O que o run precisa **depois** do encode: o muxer com que o bitstream é
+        # extraído do container antes do `output.sha256` (ADR-0005/0007) e os
+        # eventos que instrumentam a Execução (ADR-0006). Viajam no run como todo
+        # o resto pelo mesmo motivo (decisão D5): o bash copia, nunca deriva.
+        "bitstream_muxer": codec.bitstream_muxer,
+        "pmu_events": list(config.instrumentation.pmu_events),
     }
 
 

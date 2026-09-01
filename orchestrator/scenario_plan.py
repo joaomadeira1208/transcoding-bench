@@ -225,6 +225,10 @@ def _run(config: ExperimentConfig, scenario: Scenario, suffix: str) -> dict[str,
         "strip_audio": encode.strip_audio,
         "container": encode.container,
         "scale_flags": encode.scale_flags,
+        # Copiados como o resto (decisão D5): o `run_scenario.sh` monta o `-f`
+        # da extração do bitstream e o `-e` do `perf stat` sem derivar nada.
+        "bitstream_muxer": codec.bitstream_muxer,
+        "pmu_events": list(config.instrumentation.pmu_events),
     }
 
 

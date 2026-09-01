@@ -64,6 +64,21 @@ EXPECTED_PAIRS = {
     ("720p", "480p"),
 }
 
+# Duplicada em relação ao teste da configuração pelo mesmo motivo que os pares
+# acima: lá se verifica o TOML, aqui o plano.
+EXPECTED_PMU_EVENTS = [
+    "cycles",
+    "instructions",
+    "cache-references",
+    "cache-misses",
+    "branch-instructions",
+    "branch-misses",
+    "task-clock",
+    "context-switches",
+    "cpu-migrations",
+    "page-faults",
+]
+
 SCENARIO_ID = re.compile(
     r"^(?P<encoder>[a-z0-9]+)_(?P<input_res>[0-9]+p)_(?P<output_res>[0-9]+p)"
     r"_(?P<video>[a-z0-9]+)_(?P<instance>[a-z0-9]+)_(?P<suffix>warmup|rep[1-9][0-9]*)$"
@@ -270,6 +285,8 @@ class TestRunParameters:
                 "strip_audio",
                 "container",
                 "scale_flags",
+                "bitstream_muxer",
+                "pmu_events",
             }
 
     def test_a_known_run_repeats_the_identity_of_its_block(self, plan):
@@ -302,6 +319,7 @@ class TestRunParameters:
                 codec.crf,
             )
             assert run["encoder_args"] == list(codec.encoder_args)
+            assert run["bitstream_muxer"] == codec.bitstream_muxer
 
     def test_every_run_carries_the_fixed_encode_params(self, plan):
         encode = real_config().encode
@@ -313,6 +331,24 @@ class TestRunParameters:
             assert run["strip_audio"] == encode.strip_audio
             assert run["container"] == encode.container
             assert run["scale_flags"] == encode.scale_flags
+
+    def test_every_run_carries_the_pmu_events_of_the_spec(self, plan):
+        # Em **cada** run, não só no bloco: o `run_scenario.sh` recebe um run por
+        # vez e monta o `-e` do `perf stat` sem olhar para cima (decisão D5).
+        events = list(real_config().instrumentation.pmu_events)
+
+        for run in all_runs(plan):
+            assert run["pmu_events"] == events
+
+    def test_a_known_run_carries_the_bitstream_muxer_and_the_pmu_events(self, plan):
+        # O codec cujo muxer menos se parece com o nome do encoder: `libsvtav1`
+        # → `obu` não sai de manipulação de string nenhuma. Os eventos são
+        # conferidos contra a ADR — os testes acima os conferem contra o TOML, e
+        # o que falta é o TOML ser o da ADR.
+        run = one_run(plan, "libsvtav1_2160p_480p_bbb_c7a_rep2")
+
+        assert run["bitstream_muxer"] == "obu"
+        assert run["pmu_events"] == EXPECTED_PMU_EVENTS
 
     def test_every_run_names_the_master_of_its_input_res(self, plan):
         # Basename apenas: o prefixo S3 vem por argumento de bootstrap (ADR-0011),

@@ -18,7 +18,9 @@ from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-_TOP_LEVEL_KEYS = frozenset({"experiment", "encode", "codec", "pair", "video", "instance"})
+_TOP_LEVEL_KEYS = frozenset(
+    {"experiment", "encode", "instrumentation", "codec", "pair", "video", "instance"}
+)
 
 
 class ConfigError(Exception):
@@ -41,7 +43,13 @@ class Geometry:
 
 @dataclass(frozen=True)
 class CodecRecord:
-    """Codec com preset, CRF e parâmetros de encoder amarrados (ADR-0002/0019)."""
+    """Codec com preset, CRF e parâmetros de encoder amarrados (ADR-0002/0019).
+
+    O `bitstream_muxer` é declarado, e não derivado do `slug`, pelo mesmo motivo
+    que a `scenario_id` é formada em Python: um mapa codec → muxer em bash é
+    manipulação de string, e o erro sairia como o hash de um bitstream que não é
+    o do Cenário.
+    """
 
     slug: str
     codec: str
@@ -49,6 +57,7 @@ class CodecRecord:
     preset: str
     crf: int
     encoder_args: tuple[str, ...]
+    bitstream_muxer: str
 
 
 @dataclass(frozen=True)
@@ -89,11 +98,23 @@ class FixedEncodeParams:
 
 
 @dataclass(frozen=True)
+class Instrumentation:
+    """Os eventos de PMU que instrumentam cada Execução (ADR-0006).
+
+    Moram na spec, e não no `run_scenario.sh`, porque trocar um evento muda o que
+    o artigo reporta: é desenho experimental, não detalhe de operação.
+    """
+
+    pmu_events: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ExperimentConfig:
     seed: int
     replications: int
     warmup_runs: int
     encode: FixedEncodeParams
+    instrumentation: Instrumentation
     codecs: tuple[CodecRecord, ...]
     pairs: tuple[PairRecord, ...]
     videos: tuple[VideoRecord, ...]
@@ -112,6 +133,7 @@ def validate_config(raw: Mapping[str, Any]) -> ExperimentConfig:
         replications=_int(experiment, "replications", "experiment", minimum=1),
         warmup_runs=_int(experiment, "warmup_runs", "experiment", minimum=0),
         encode=_encode(_table(raw, "encode")),
+        instrumentation=_instrumentation(_table(raw, "instrumentation")),
         codecs=tuple(_codec(r, i) for i, r in enumerate(_records(raw, "codec"))),
         pairs=tuple(_pair(r, i) for i, r in enumerate(_records(raw, "pair"))),
         videos=tuple(_video(r, i) for i, r in enumerate(_records(raw, "video"))),
@@ -153,9 +175,30 @@ def _encode(record: Mapping[str, Any]) -> FixedEncodeParams:
     )
 
 
+def _instrumentation(record: Mapping[str, Any]) -> Instrumentation:
+    where = "instrumentation"
+    _reject_unknown(record, {"pmu_events"}, where)
+
+    events = _str_list(record, "pmu_events", where)
+    # Lista vazia é o pior caso e não seria pega por "chave presente": um
+    # `perf stat` sem `-e` roda, coleta o conjunto default de eventos e devolve
+    # um JSON plausível, sem os que o artigo reporta.
+    if not events:
+        raise ConfigError(f"{where}: 'pmu_events' must declare at least one event")
+    # Evento repetido também não estoura no `perf`: ele emite duas entradas com o
+    # mesmo nome, e quem lê o JSON por nome fica com uma delas, escolhida por acaso.
+    _reject_duplicates(events, "pmu_events", "event")
+
+    return Instrumentation(pmu_events=events)
+
+
 def _codec(record: Mapping[str, Any], index: int) -> CodecRecord:
     where = _where("codec", index, record.get("slug"))
-    _reject_unknown(record, {"slug", "codec", "encoder", "preset", "crf", "encoder_args"}, where)
+    _reject_unknown(
+        record,
+        {"slug", "codec", "encoder", "preset", "crf", "encoder_args", "bitstream_muxer"},
+        where,
+    )
     return CodecRecord(
         slug=_str(record, "slug", where),
         codec=_str(record, "codec", where),
@@ -163,6 +206,7 @@ def _codec(record: Mapping[str, Any], index: int) -> CodecRecord:
         preset=_str(record, "preset", where),
         crf=_int(record, "crf", where, minimum=0),
         encoder_args=_str_list(record, "encoder_args", where),
+        bitstream_muxer=_str(record, "bitstream_muxer", where),
     )
 
 
@@ -346,9 +390,16 @@ def _bool(record: Mapping[str, Any], key: str, where: str) -> bool:
 
 
 def _str_list(record: Mapping[str, Any], key: str, where: str) -> tuple[str, ...]:
+    """Lista de strings **não vazias**, pela mesma razão que `_str` recusa a vazia.
+
+    Um elemento vazio não some: ele vira um argumento presente e sem valor no
+    argv do FFmpeg ou no `-e` do `perf stat`, e o erro aparece longe daqui.
+    """
     value = _require(record, key, where)
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ConfigError(f"{where}: '{key}' must be a list of strings")
+    if any(not item for item in value):
+        raise ConfigError(f"{where}: '{key}' must not contain an empty string")
     return tuple(value)
 
 

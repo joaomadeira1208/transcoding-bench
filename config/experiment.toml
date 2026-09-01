@@ -43,11 +43,38 @@ container = "mkv"
 # Downscale Lanczos, o que pipelines ABR de produção usam (ADR-0004).
 scale_flags = "lanczos"
 
+# Instrumentação da Execução (ADR-0006). Os eventos são desenho experimental, não
+# constante de script: IPC, cache miss rate e branch mispredict rate saem deles,
+# e trocar um muda o que o artigo reporta. A ordem é a da ADR porque é ela que
+# vai para o `-e` do `perf stat`.
+#
+# Os limites operacionais da ADR-0012 (4 h por run, 72 h totais) não entram aqui:
+# não afetam número medido nenhum e são flags do `run_all.sh`.
+[instrumentation]
+pmu_events = [
+  "cycles",
+  "instructions",
+  "cache-references",
+  "cache-misses",
+  "branch-instructions",
+  "branch-misses",
+  "task-clock",
+  "context-switches",
+  "cpu-migrations",
+  "page-faults",
+]
+
 # Codecs (ADR-0002). O `slug` é o token que entra na `scenario_id` e é o nome do
 # encoder, conforme o exemplo canônico do CONTEXT.md
 # (`libx264_2160p_1080p_bbb_c7g_rep1`); `codec` é o rótulo de leitura humana.
 # CRF não é intercambiável entre codecs — cada um tem o seu alvo de qualidade, e
 # qualidade não é variável dependente (ADR-0005).
+#
+# O `bitstream_muxer` existe porque o `output.sha256` não pode cobrir o `.mkv`:
+# o container carrega metadado de mux que mudaria o hash sem o bitstream ter
+# mudado, então o hash roda sobre o que `ffmpeg -c copy -f <muxer> -` extrai
+# (ADR-0005/0007). Ele é declarado, e não derivado do `slug` ou do rótulo, pelo
+# mesmo motivo que a `scenario_id` é formada em Python (ADR-0019).
 [[codec]]
 slug = "libx264"
 codec = "h264"
@@ -55,6 +82,7 @@ encoder = "libx264"
 preset = "medium"
 crf = 23
 encoder_args = ["-sc_threshold", "0"]
+bitstream_muxer = "h264"
 
 [[codec]]
 slug = "libx265"
@@ -63,6 +91,7 @@ encoder = "libx265"
 preset = "medium"
 crf = 28
 encoder_args = ["-x265-params", "scenecut=0"]
+bitstream_muxer = "hevc"
 
 [[codec]]
 slug = "libsvtav1"
@@ -73,6 +102,7 @@ encoder = "libsvtav1"
 preset = "8"
 crf = 35
 encoder_args = ["-svtav1-params", "scd=0"]
+bitstream_muxer = "obu"
 
 # Pares input→output (ADR-0004). Os 9 registros são o conjunto recortado: só
 # downscale ou no-scale, nunca upscale. Estarem declarados um a um é o ponto —

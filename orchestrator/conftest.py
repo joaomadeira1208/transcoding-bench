@@ -54,8 +54,13 @@ _MINIMAL: dict[str, Any] = {
             "preset": "medium",
             "crf": 23,
             "encoder_args": ["-sc_threshold", "0"],
+            "bitstream_muxer": "h264",
         }
     ],
+    # Dois eventos bastam para um arquivo válido; a lista real da ADR-0006 tem
+    # dez e é asserida contra o `experiment.toml` de verdade, não contra esta
+    # configuração mínima.
+    "instrumentation": {"pmu_events": ["cycles", "instructions"]},
     "pair": [
         {"input_res": "1080p", "output_res": "1080p"},
         {"input_res": "1080p", "output_res": "720p"},
@@ -93,6 +98,10 @@ def make_instance(**overrides: Any) -> dict[str, Any]:
 
 def make_encode(**overrides: Any) -> dict[str, Any]:
     return {**copy.deepcopy(_MINIMAL["encode"]), **overrides}
+
+
+def make_instrumentation(**overrides: Any) -> dict[str, Any]:
+    return {**copy.deepcopy(_MINIMAL["instrumentation"]), **overrides}
 
 
 @pytest.fixture

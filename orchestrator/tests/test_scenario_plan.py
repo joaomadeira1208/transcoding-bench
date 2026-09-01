@@ -64,9 +64,8 @@ EXPECTED_PAIRS = {
     ("720p", "480p"),
 }
 
-# Transcrição da ADR-0006, duplicada em relação ao teste da configuração pelo
-# mesmo motivo que os pares acima: lá se verifica o TOML, aqui o plano. A ordem
-# faz parte do que se congela — é ela que vai para o `-e` do `perf stat`.
+# Duplicada em relação ao teste da configuração pelo mesmo motivo que os pares
+# acima: lá se verifica o TOML, aqui o plano.
 EXPECTED_PMU_EVENTS = [
     "cycles",
     "instructions",
@@ -334,20 +333,18 @@ class TestRunParameters:
             assert run["scale_flags"] == encode.scale_flags
 
     def test_every_run_carries_the_pmu_events_of_the_spec(self, plan):
-        # Os dez eventos viajam em cada run como todo o resto que o bash copia
-        # (decisão D5): o `run_scenario.sh` recebe o objeto de run e monta o `-e`
-        # do `perf stat` sem conhecer a ADR-0006.
+        # Em **cada** run, não só no bloco: o `run_scenario.sh` recebe um run por
+        # vez e monta o `-e` do `perf stat` sem olhar para cima (decisão D5).
         events = list(real_config().instrumentation.pmu_events)
 
         for run in all_runs(plan):
             assert run["pmu_events"] == events
 
     def test_a_known_run_carries_the_bitstream_muxer_and_the_pmu_events(self, plan):
-        # Sobre um Cenário conhecido, e no codec cujo muxer menos se parece com o
-        # nome do encoder: `libsvtav1` → `obu` não sai de manipulação de string
-        # nenhuma, que é exatamente o motivo de o campo ser dado declarado. Os
-        # eventos são conferidos contra a ADR-0006 — os testes acima os conferem
-        # contra o TOML, e o que se quer aqui é que o TOML seja o da ADR.
+        # O codec cujo muxer menos se parece com o nome do encoder: `libsvtav1`
+        # → `obu` não sai de manipulação de string nenhuma. Os eventos são
+        # conferidos contra a ADR — os testes acima os conferem contra o TOML, e
+        # o que falta é o TOML ser o da ADR.
         run = one_run(plan, "libsvtav1_2160p_480p_bbb_c7a_rep2")
 
         assert run["bitstream_muxer"] == "obu"

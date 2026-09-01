@@ -37,10 +37,9 @@ EXPECTED_PAIRS = {
     ("720p", "480p"),
 }
 
-# Os dez eventos da ADR-0006, transcritos **na ordem em que ela os lista**. São
-# desenho experimental: trocar um evento muda o que o artigo reporta, e o modo de
-# falha é o mais caro do projeto — `perf stat` não falha com um evento que a
-# arquitetura não tem, apenas o reporta como `<not supported>` e segue.
+# Transcrição da ADR-0006, não uma contagem: um evento trocado mantém o `len`
+# intacto, e a ordem é parte do que se congela — é ela que vai para o `-e` do
+# `perf stat`.
 EXPECTED_PMU_EVENTS = [
     "cycles",
     "instructions",
@@ -54,9 +53,8 @@ EXPECTED_PMU_EVENTS = [
     "page-faults",
 ]
 
-# O muxer do elementary stream de cada codec (ADR-0005/0007). Transcrito, não
-# derivado: é justamente por não sair do `slug` nem do rótulo do codec por
-# manipulação de string que ele é dado declarado.
+# Transcritos, e não computados a partir do `slug`: um teste que derivasse o
+# muxer repetiria o bug que o campo existe para impedir.
 EXPECTED_BITSTREAM_MUXERS = {
     "libx264": "h264",
     "libx265": "hevc",
@@ -143,8 +141,7 @@ class TestRealExperimentToml:
         assert muxers == EXPECTED_BITSTREAM_MUXERS
 
     def test_declares_the_ten_pmu_events_of_the_adr_in_order(self):
-        # Lista, não conjunto: a ordem é a que a ADR-0006 escreveu e é a que vai
-        # para o `-e` do `perf stat`, então ela é parte do que se congela.
+        # Lista, não conjunto: a ordem é requisito, não coincidência.
         assert list(real_config().instrumentation.pmu_events) == EXPECTED_PMU_EVENTS
 
     def test_ties_preset_and_crf_to_each_codec(self):

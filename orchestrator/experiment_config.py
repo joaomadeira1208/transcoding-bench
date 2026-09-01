@@ -45,11 +45,10 @@ class Geometry:
 class CodecRecord:
     """Codec com preset, CRF e parâmetros de encoder amarrados (ADR-0002/0019).
 
-    `bitstream_muxer` é o muxer do elementary stream usado na extração que
-    precede o `output.sha256` (ADR-0005/0007). Ele é declarado, e não derivado do
-    `slug` ou do rótulo do codec, pelo mesmo motivo que a `scenario_id` é formada
-    em Python: um mapa codec → muxer em bash é manipulação de string, e o erro
-    apareceria como o hash de um bitstream que não é o do Cenário.
+    O `bitstream_muxer` é declarado, e não derivado do `slug`, pelo mesmo motivo
+    que a `scenario_id` é formada em Python: um mapa codec → muxer em bash é
+    manipulação de string, e o erro sairia como o hash de um bitstream que não é
+    o do Cenário.
     """
 
     slug: str
@@ -102,11 +101,8 @@ class FixedEncodeParams:
 class Instrumentation:
     """Os eventos de PMU que instrumentam cada Execução (ADR-0006).
 
-    São desenho experimental, não detalhe de operação: IPC, cache miss rate e
-    branch mispredict rate saem deles, e trocar um evento muda o que o artigo
-    reporta. Por isso moram na spec e viajam até o objeto de run, como todo o
-    resto que o bash copia — o `run_scenario.sh` monta o `-e` do `perf stat` sem
-    conhecer a ADR.
+    Moram na spec, e não no `run_scenario.sh`, porque trocar um evento muda o que
+    o artigo reporta: é desenho experimental, não detalhe de operação.
     """
 
     pmu_events: tuple[str, ...]

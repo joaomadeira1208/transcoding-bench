@@ -3,8 +3,9 @@
 # credencial AWS e o build do Docker (`-march=native` em runner de CPU errada,
 # ADR-0013).
 #
-# Dois jobs nesta etapa. O smoke local entra como terceiro junto com o `smoke/`,
-# que depende dos `run_*.sh` (ADR-0022).
+# Três jobs nesta etapa: o pre-commit e um pytest por papel Python, cada um no
+# seu venv. O smoke local entra como quarto junto com o `smoke/`, que depende dos
+# `run_*.sh` (ADR-0022, decisão D22 da Spec 2).
 
 name: CI
 
@@ -73,3 +74,26 @@ jobs:
 
       - name: pytest orchestrator/
         run: .venv/bin/python -m pytest orchestrator/
+
+  # O mesmo isolamento pelo motivo oposto: aqui o venv tem `pydantic` e nada
+  # além dele, então o dia em que o `consolidate.py` chegar com `pandas`, é este
+  # job que exige a dependência declarada em vez de aceitar o que a máquina do
+  # pesquisador por acaso tinha.
+  analysis-tests:
+    name: pytest (analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Create the role venv
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r analysis/requirements-dev.txt
+
+      - name: pytest analysis/
+        run: .venv/bin/python -m pytest analysis/

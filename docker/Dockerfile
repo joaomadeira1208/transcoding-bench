@@ -33,6 +33,7 @@ RUN apt-get update \
     sysstat \
     time \
     unzip \
+    uuid-runtime \
     zlib1g-dev \
   && rm -rf /var/lib/apt/lists/* \
   && perf_bin="$(find /usr/lib -maxdepth 3 -type f -name perf | sort | tail -n 1)" \

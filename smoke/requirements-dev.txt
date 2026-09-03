@@ -1,0 +1,13 @@
+# Dependências do papel `smoke/` (ADR-0022). Não há `requirements.txt` de
+# runtime ao lado: o smoke não é implantado em lugar nenhum — ele é o que o Mac
+# do pesquisador e o CI rodam.
+#
+# O `pydantic` não é importado por nada daqui. Ele está na lista porque o smoke
+# valida o `meta.json` que o bash acabou de escrever invocando
+# `analysis/validate_meta.py` como caixa-preta, com o mesmo interpretador
+# (decisão D11) — e é o modelo estrito daquele papel que dá a resposta.
+#
+# Os linters não entram aqui: o pre-commit gerencia os próprios ambientes.
+
+pytest==9.1.1
+pydantic==2.13.5

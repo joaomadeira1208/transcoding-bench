@@ -20,7 +20,7 @@ Before creating a local environment or invoking a pinned tool, check the local v
 
 ### Comment convention
 
-A comment earns its place only if it says something the code cannot. The code already states *what* it does — restating that duplicates a fact that will drift out of sync. What code cannot state: why this option and not the obvious alternative, what breaks if someone changes it, which failure mode it defends against, and which outside constraint forces it (an ADR, a tool's actual behavior, the experimental design).
+A comment earns its place only if it says something the code cannot and if it is extremally important. The code already states *what* it does — restating that duplicates a fact that will drift out of sync. What code cannot state: why this option and not the obvious alternative, what breaks if someone changes it, which failure mode it defends against, and which outside constraint forces it (an ADR, a tool's actual behavior, the experimental design).
 
 ### Commits
 

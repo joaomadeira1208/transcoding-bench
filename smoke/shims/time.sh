@@ -8,6 +8,7 @@ set -euo pipefail
   printf '%s\0' "$@"
   printf '\n'
 } >>"$SMOKE_ARGV_DIR/time.argv"
+printf 'time\n' >>"$SMOKE_ARGV_DIR/sequence"
 
 format=""
 output=""

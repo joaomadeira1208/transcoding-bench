@@ -10,6 +10,7 @@ SCHEMA_VERSION=1
 FFMPEG_COMMAND=ffmpeg
 PERF_COMMAND=perf
 PIDSTAT_COMMAND=pidstat
+AWS_COMMAND=aws
 
 # Variável, e não literal: um caminho absoluto não é substituível por shim no
 # PATH, e o smoke roda este script de verdade no Mac, cujo `time` é o do BSD.
@@ -30,10 +31,12 @@ ENCODER_DEPTH=2
 EXIT_USAGE=2
 EXIT_INSTRUMENTATION=70
 EXIT_BITSTREAM=71
+EXIT_UPLOAD=72
+EXIT_TERMINATED=143
 
 usage_error() {
   printf 'run_scenario.sh: %s\n' "$*" >&2
-  printf 'uso: run_scenario.sh --run <json> --masters-dir <dir> --runs-dir <dir> --commit <sha> --instance-id <id> --instance-type <type> [--versions-file <path>]\n' >&2
+  printf 'uso: run_scenario.sh --run <json> --masters-dir <dir> --runs-dir <dir> --bucket <name> --commit <sha> --instance-id <id> --instance-type <type> [--versions-file <path>]\n' >&2
   exit "$EXIT_USAGE"
 }
 
@@ -108,6 +111,19 @@ cleanup() {
   fi
 }
 
+# Sem o `finish_run`, o run morto pelo timeout não tem `meta.json` e some do
+# `resume.py`.
+# shellcheck disable=SC2329 # invocada pelo `trap TERM`
+terminate() {
+  trap - TERM
+  cleanup
+  if [[ -n ${started_at:-} ]]; then
+    exit_code=$EXIT_TERMINATED
+    finish_run
+  fi
+  exit "$EXIT_TERMINATED"
+}
+
 run_field() {
   jq -r --arg name "$1" \
     'if has($name) then .[$name] else error("campo ausente no objeto de run: \($name)") end' \
@@ -141,6 +157,21 @@ instrumentation_failure_reason() {
   if [[ ! -s $pidstat_txt ]]; then
     printf '%s' "o pidstat não escreveu amostra nenhuma em $pidstat_txt"
     return 0
+  fi
+}
+
+upload_run_dir() {
+  "$AWS_COMMAND" s3 cp "$run_dir/" "s3://$bucket/runs/$run_id/" --recursive
+}
+
+finish_run() {
+  finished_at=$(date -Iseconds)
+  write_meta
+  if ! upload_run_dir; then
+    printf 'run_scenario.sh: o upload de %s falhou\n' "$run_dir" >&2
+    if ((exit_code == 0)); then
+      exit_code=$EXIT_UPLOAD
+    fi
   fi
 }
 
@@ -188,6 +219,7 @@ write_meta() {
 run=""
 masters_dir=""
 runs_dir=""
+bucket=""
 commit=""
 instance_id=""
 instance_type=""
@@ -201,6 +233,7 @@ while (($#)); do
     --run) run=$value ;;
     --masters-dir) masters_dir=$value ;;
     --runs-dir) runs_dir=$value ;;
+    --bucket) bucket=$value ;;
     --commit) commit=$value ;;
     --instance-id) instance_id=$value ;;
     --instance-type) instance_type=$value ;;
@@ -210,7 +243,7 @@ while (($#)); do
   shift 2
 done
 
-for name in run masters_dir runs_dir commit instance_id instance_type versions_file; do
+for name in run masters_dir runs_dir bucket commit instance_id instance_type versions_file; do
   [[ -n ${!name} ]] || usage_error "faltou --${name//_/-}"
 done
 
@@ -241,8 +274,6 @@ run_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
 run_dir=$runs_dir/$run_id
 mkdir -p "$run_dir"
 
-# Antes de qualquer coisa poder falhar: é por ela que o laço sabe o que subir
-# quando o run morre no meio.
 printf '%s\n' "$run_dir"
 
 meta_json=$run_dir/meta.json
@@ -275,10 +306,8 @@ fi
 ffmpeg_argv+=(-stats "$output_path")
 
 trap cleanup EXIT
-# O timeout por Execução da ADR-0012 chega como SIGTERM: sem sair pela porta do
-# `trap`, o `cleanup` não roda e o FFmpeg fica órfão faturando a instância.
 trap 'exit 130' INT
-trap 'exit 143' TERM
+trap terminate TERM
 
 started_at=$(date -Iseconds)
 
@@ -331,7 +360,6 @@ if ((encode_status == 0)); then
   fi
 fi
 
-finished_at=$(date -Iseconds)
-write_meta
+finish_run
 
 exit "$exit_code"

@@ -8,6 +8,7 @@ set -euo pipefail
   printf '%s\0' "$@"
   printf '\n'
 } >>"$SMOKE_ARGV_DIR/pidstat.argv"
+printf 'pidstat\n' >>"$SMOKE_ARGV_DIR/sequence"
 
 pid=""
 while (($#)); do

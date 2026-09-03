@@ -1,0 +1,7 @@
+# Dependências de teste do papel `analysis/` (ADR-0017): runtime + pytest.
+#
+# Os linters não entram aqui: o pre-commit gerencia os próprios ambientes.
+
+-r requirements.txt
+
+pytest==9.1.1

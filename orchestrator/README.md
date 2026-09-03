@@ -11,6 +11,13 @@ um `import pandas` acidental quebre no ambiente limpo do CI.
 Nomes já cravados por ADR: `orchestrator.py`, `resume.py`, `quality_triage.py`.
 Testes em `tests/`, rodando só no Mac e no CI.
 
+O `meta_check.py` é o segundo leitor do `meta.json`: `resume.py` e
+`quality_triage.py` decidem sobre esse arquivo e não podem importar o modelo
+pydantic do `analysis/` sem custar a invariante stdlib-only. É regra duplicada,
+não código compartilhado (ADR-0019/0022) — e o `tests/test_meta_agreement.py`,
+que mora igual nos dois papéis, é o que impede os dois leitores de divergirem
+sobre o que é um arquivo válido.
+
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano
 canônico (as duas são funções puras, e é nelas que os testes batem);

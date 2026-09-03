@@ -29,7 +29,7 @@
 !**/fixtures/*.json
 
 # Re-nega diretórios gerados (higiene; o sensível já está negado por extensão)
-.venv/
+.venv*/
 venv/
 .terraform/
 runs/

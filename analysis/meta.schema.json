@@ -1,0 +1,190 @@
+{
+  "additionalProperties": false,
+  "description": "Uma Execução, como o `run_scenario.sh` a registra.",
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scenario_id": {
+      "minLength": 1,
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "warmup": {
+      "title": "Warmup",
+      "type": "boolean"
+    },
+    "seed": {
+      "title": "Seed",
+      "type": "integer"
+    },
+    "codec": {
+      "minLength": 1,
+      "title": "Codec",
+      "type": "string"
+    },
+    "encoder": {
+      "minLength": 1,
+      "title": "Encoder",
+      "type": "string"
+    },
+    "input_res": {
+      "minLength": 1,
+      "title": "Input Res",
+      "type": "string"
+    },
+    "output_res": {
+      "minLength": 1,
+      "title": "Output Res",
+      "type": "string"
+    },
+    "video": {
+      "minLength": 1,
+      "title": "Video",
+      "type": "string"
+    },
+    "instance": {
+      "minLength": 1,
+      "title": "Instance",
+      "type": "string"
+    },
+    "master": {
+      "minLength": 1,
+      "title": "Master",
+      "type": "string"
+    },
+    "output_width": {
+      "title": "Output Width",
+      "type": "integer"
+    },
+    "output_height": {
+      "title": "Output Height",
+      "type": "integer"
+    },
+    "preset": {
+      "minLength": 1,
+      "title": "Preset",
+      "type": "string"
+    },
+    "crf": {
+      "title": "Crf",
+      "type": "integer"
+    },
+    "encoder_args": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Encoder Args",
+      "type": "array"
+    },
+    "threads": {
+      "title": "Threads",
+      "type": "integer"
+    },
+    "gop_size": {
+      "title": "Gop Size",
+      "type": "integer"
+    },
+    "pix_fmt": {
+      "minLength": 1,
+      "title": "Pix Fmt",
+      "type": "string"
+    },
+    "strip_audio": {
+      "title": "Strip Audio",
+      "type": "boolean"
+    },
+    "container": {
+      "minLength": 1,
+      "title": "Container",
+      "type": "string"
+    },
+    "scale_flags": {
+      "minLength": 1,
+      "title": "Scale Flags",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "finished_at": {
+      "format": "date-time",
+      "title": "Finished At",
+      "type": "string"
+    },
+    "exit_code": {
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "commit": {
+      "minLength": 1,
+      "title": "Commit",
+      "type": "string"
+    },
+    "instance_id": {
+      "minLength": 1,
+      "title": "Instance Id",
+      "type": "string"
+    },
+    "instance_type": {
+      "minLength": 1,
+      "title": "Instance Type",
+      "type": "string"
+    },
+    "versions": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Versions",
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "warmup",
+    "seed",
+    "codec",
+    "encoder",
+    "input_res",
+    "output_res",
+    "video",
+    "instance",
+    "master",
+    "output_width",
+    "output_height",
+    "preset",
+    "crf",
+    "encoder_args",
+    "threads",
+    "gop_size",
+    "pix_fmt",
+    "strip_audio",
+    "container",
+    "scale_flags",
+    "run_id",
+    "started_at",
+    "finished_at",
+    "exit_code",
+    "commit",
+    "instance_id",
+    "instance_type",
+    "versions"
+  ],
+  "title": "RunMeta",
+  "type": "object"
+}

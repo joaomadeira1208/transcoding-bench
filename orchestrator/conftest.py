@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,68 @@ _MINIMAL: dict[str, Any] = {
     ],
     "instance": [{"id": "c7g", "instance_type": "c7g.xlarge", "arch": "arm64"}],
 }
+
+
+# Um `meta.json` válido, como a Execução de um Cenário real o escreveria. É
+# **deliberadamente duplicado** em relação ao do `analysis/` (ADR-0022): os dois
+# papéis rodam em venvs separados, e um pacote de teste comum entre papéis é o
+# que os dois `requirements-dev.txt` existem para impedir. O checador daqui só
+# olha cinco campos, mas a factory carrega o arquivo inteiro — um `meta.json` de
+# teste que só tivesse os campos checados não seria um `meta.json`.
+_VALID_META: dict[str, Any] = {
+    "schema_version": "1",
+    "scenario_id": "libx264_2160p_1080p_bbb_c7g_rep1",
+    "warmup": False,
+    "seed": 20260808,
+    "codec": "h264",
+    "encoder": "libx264",
+    "input_res": "2160p",
+    "output_res": "1080p",
+    "video": "bbb",
+    "instance": "c7g",
+    "master": "bbb_2160p.mkv",
+    "output_width": 1920,
+    "output_height": 1080,
+    "preset": "medium",
+    "crf": 23,
+    "encoder_args": ["-sc_threshold", "0"],
+    "threads": 0,
+    "gop_size": 48,
+    "pix_fmt": "yuv420p",
+    "strip_audio": True,
+    "container": "mkv",
+    "scale_flags": "lanczos",
+    "run_id": "9f0c4a2e-6b41-4d5f-8a37-2f1c8de0b7a4",
+    "started_at": "2026-08-08T10:00:00+00:00",
+    "finished_at": "2026-08-08T10:12:31+00:00",
+    "exit_code": 0,
+    "commit": "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900",
+    "instance_id": "i-0123456789abcdef0",
+    "instance_type": "c7g.xlarge",
+    "versions": {
+        "ffmpeg": "n7.1",
+        "libx264": "31e19f92",
+        "libx265": "4.1",
+        "libsvtav1": "v2.3.0",
+        "libvmaf": "v3.0.0",
+    },
+}
+
+
+def make_meta(**overrides: Any) -> dict[str, Any]:
+    """Um `meta.json` válido como dict, com overrides por campo de topo."""
+    meta = copy.deepcopy(_VALID_META)
+    for field, value in overrides.items():
+        if value is _ABSENT:
+            meta.pop(field, None)
+        else:
+            meta[field] = value
+    return meta
+
+
+def make_meta_json(**overrides: Any) -> str:
+    """O mesmo, já serializado — o checador recebe os bytes que o bash escreveu."""
+    return json.dumps(make_meta(**overrides), indent=2) + "\n"
 
 
 def make_geometry(**tiers: tuple[int, int]) -> dict[str, dict[str, int]]:

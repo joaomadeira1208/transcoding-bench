@@ -111,9 +111,8 @@ cleanup() {
   fi
 }
 
-# O timeout por Execução da ADR-0012 chega como SIGTERM. Sem sair pela porta do
-# `trap`, o `cleanup` não roda e o FFmpeg fica órfão faturando a instância; sem
-# o `finish_run`, o run morto no meio não tem `meta.json` e some do `resume.py`.
+# Sem o `finish_run`, o run morto pelo timeout não tem `meta.json` e some do
+# `resume.py`.
 # shellcheck disable=SC2329 # invocada pelo `trap TERM`
 terminate() {
   trap - TERM
@@ -165,8 +164,6 @@ upload_run_dir() {
   "$AWS_COMMAND" s3 cp "$run_dir/" "s3://$bucket/runs/$run_id/" --recursive
 }
 
-# O `meta.json` fecha o run antes do upload, e o upload falhando não o reabre:
-# o status de saída é que carrega a falha, e a cópia local segue íntegra.
 finish_run() {
   finished_at=$(date -Iseconds)
   write_meta

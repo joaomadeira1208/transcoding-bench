@@ -1,14 +1,9 @@
 # Smoke do `encode/run_all.sh`: o laço de verdade sobre um plano de um bloco,
 # com os mesmos shims do `run_scenario.sh` mais o do `aws` (ADR-0022).
-#
-# O que se assere é o que só o laço mostra: as 6 Execuções na ordem do arquivo,
-# warm-up primeiro; o run falho que não interrompe as seguintes; as duas
-# salvaguardas da ADR-0012 disparando; e o layout de prefixos da ADR-0011 casando
-# entre quem escreve (o bash) e quem lê (o `list-objects-v2` que o `resume.py`
-# usará) — nunca semântica do S3.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from datetime import datetime
@@ -20,8 +15,10 @@ from test_run_scenario import ARTIFACTS, UUID4
 
 DONE_MARKER = f"status/{INSTANCE_TYPE}_done"
 
-# Nenhum destes é o `sleep 0.5` do encode nem o `sleep 1` do encoder invisível.
-HANG_S = "3571"
+# Único por processo: a asserção de que o encode travado morreu procura este
+# `sleep` no `ps` da máquina inteira, e outra sessão do smoke rodando ao lado
+# não pode ser confundida com ele.
+HANG_S = f"3571.{os.getpid() % 1000}"
 
 
 def scenario_ids(loop: Loop) -> list[str]:
@@ -83,8 +80,6 @@ class TestBlock:
             assert {path.name for path in run_dir.iterdir()} == ARTIFACTS, run_dir
 
     def test_warmup_first_then_the_file_order(self, loop, block):
-        # A ordem é estrutura do dado (ADR-0003/0019): o bash não a reordena nem
-        # seleciona. Assim, o que rodou é a lista de runs do arquivo, inteira.
         expected = [run["scenario_id"] for run in block["runs"]]
 
         assert scenario_ids(loop) == expected
@@ -92,8 +87,7 @@ class TestBlock:
         assert loop.metas()[loop.encoded_run_ids()[0]]["warmup"] is True
 
     def test_every_run_is_uploaded_before_the_next_encode(self, loop):
-        # Encode, extração do bitstream e upload, seis vezes: o upload fica entre
-        # runs, nunca durante um encode nem ao final do bloco (ADR-0011).
+        # Encode, extração do bitstream e upload, seis vezes.
         relevant = [tool for tool in loop.sequence() if tool in {"ffmpeg", "aws"}]
 
         assert relevant == ["ffmpeg", "ffmpeg", "aws"] * 6 + ["aws"]
@@ -136,7 +130,6 @@ class TestRunTimeout:
         assert elapsed_s(metas[loop.encoded_run_ids()[0]]) < 30
 
     def test_the_hung_encoder_does_not_outlive_the_run(self, loop_with_a_hung_run):
-        # Sem o `cleanup` o FFmpeg fica órfão faturando a instância.
         processes = subprocess.run(["ps", "-Ao", "args="], capture_output=True, text=True)
 
         assert f"sleep {HANG_S}" not in processes.stdout
@@ -171,7 +164,9 @@ class TestTotalTimeout:
 class TestPrefixLayout:
     def test_the_objects_appear_under_runs_run_id(self, loop, list_objects):
         expected = {
-            f"runs/{run_dir.name}/{artifact}" for run_dir in loop.run_dirs() for artifact in ARTIFACTS
+            f"runs/{run_dir.name}/{artifact}"
+            for run_dir in loop.run_dirs()
+            for artifact in ARTIFACTS
         }
 
         assert set(list_objects(loop, "runs/")) == expected

@@ -22,9 +22,6 @@ fi
 printf '%s\n' "$last" >>"$SMOKE_ARGV_DIR/ffmpeg.encodes"
 nth=$(wc -l <"$SMOKE_ARGV_DIR/ffmpeg.encodes" | tr -d ' ')
 
-# Sem `SMOKE_FFMPEG_NTH` o comportamento induzido vale para todo encode; com ela,
-# só para o N-ésimo — é o que deixa um run falhar no meio de um bloco cujos
-# vizinhos seguem bem.
 if [[ -z ${SMOKE_FFMPEG_NTH:-} || $SMOKE_FFMPEG_NTH == "$nth" ]]; then
   induced=1
 else

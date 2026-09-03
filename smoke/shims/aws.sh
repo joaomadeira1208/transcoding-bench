@@ -20,6 +20,10 @@ fail() {
   exit 255
 }
 
+object_keys() {
+  (cd "$1" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)
+}
+
 object_path() {
   [[ $1 == s3://*/* ]] || fail "URI fora do formato s3://<bucket>/<key>: $1"
   printf '%s\n' "$SMOKE_S3_ROOT/${1#s3://}"
@@ -55,7 +59,7 @@ s3_cp() {
       mkdir -p "$(dirname "$destination/$relative")"
       cp "$source/$relative" "$destination/$relative"
       printf 'upload: %s to %s\n' "$source/$relative" "$destination/$relative"
-    done < <(cd "$source" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)
+    done < <(object_keys "$source")
   else
     [[ -f $source ]] || fail "origem não é arquivo: $source"
     mkdir -p "$(dirname "$destination")"
@@ -93,11 +97,11 @@ s3api_list_objects_v2() {
     [[ $key == "$prefix"* ]] || continue
     size=$(wc -c <"$root/$key" | tr -d ' ')
     jq -n --arg key "$key" --argjson size "$size" '{Key: $key, Size: $size}'
-  done < <(cd "$root" && find . -type f | sed 's|^\./||' | LC_ALL=C sort) |
+  done < <(object_keys "$root") |
     jq -s 'if length == 0 then empty else {Contents: .} end'
 }
 
-case "$1 $2" in
+case "${1:-} ${2:-}" in
   "s3 cp")
     shift 2
     s3_cp "$@"
@@ -106,5 +110,5 @@ case "$1 $2" in
     shift 2
     s3api_list_objects_v2 "$@"
     ;;
-  *) fail "subcomando não shimado: $1 $2" ;;
+  *) fail "subcomando não shimado: ${1:-} ${2:-}" ;;
 esac

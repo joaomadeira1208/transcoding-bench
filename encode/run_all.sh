@@ -6,8 +6,7 @@ RUN_SCENARIO=$(dirname "${BASH_SOURCE[0]}")/run_scenario.sh
 
 AWS_COMMAND=aws
 
-# Os limites operacionais da ADR-0012: 4 h por Execução, 72 h por Instância. Não
-# são desenho experimental, e por isso não viajam no plano — são flags.
+# Defaults da ADR-0012.
 RUN_TIMEOUT_SECONDS=$((4 * 60 * 60))
 TOTAL_TIMEOUT_SECONDS=$((72 * 60 * 60))
 

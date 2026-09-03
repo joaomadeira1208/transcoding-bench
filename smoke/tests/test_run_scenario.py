@@ -391,9 +391,6 @@ class TestFailedRun:
 
 
 class TestUpload:
-    # Cada run sobe sozinho, logo após terminar: uma Instância que morra não leva
-    # o bloco junto, e o upload nunca coincide com um encode (ADR-0011).
-
     def test_the_whole_run_dir_is_uploaded(self, execution):
         assert {path.name for path in execution.uploaded(execution.run_dir).iterdir()} == ARTIFACTS
 
@@ -403,8 +400,6 @@ class TestUpload:
         assert uploaded == ARTIFACTS - {"output.sha256"}
 
     def test_the_upload_comes_after_the_meta_json(self, execution):
-        # O `meta.json` é o último artefato e o upload é o que fecha o run: um
-        # `aws` antes do `write_meta` subiria um diretório sem ele.
         uploaded_meta = execution.uploaded(execution.run_dir) / "meta.json"
 
         assert uploaded_meta.read_text() == (execution.run_dir / "meta.json").read_text()

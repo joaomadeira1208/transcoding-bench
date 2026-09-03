@@ -5,13 +5,19 @@ Cada Execução produz um **diretório `runs/{run_id}/`** com os artefatos das f
 ```
 runs/{run_id}/
   meta.json         ← cenário (chave composta), versions, instance_id, timestamps, exit code
-  time.json         ← /usr/bin/time -v parseado pra JSON
+  time.json         ← /usr/bin/time, emitindo JSON pelo próprio format string
   perf.json         ← perf stat -j output
-  pidstat.csv       ← time series CPU%/RSS a 1 Hz
+  pidstat.txt       ← time series CPU%/RSS a 1 Hz
   ffmpeg.log        ← stderr completo do FFmpeg
   output.mkv        ← o encoded output (retenção seletiva, abaixo)
   output.sha256     ← hash do bitstream codificado (não do container .mkv inteiro)
 ```
+
+### Emenda: os nomes descrevem o que os arquivos são
+
+A listagem acima dizia `pidstat.csv`. O que o `pidstat -h` emite não é CSV — é texto delimitado por espaço, com o cabeçalho prefixado por `#` —, e a decisão de preservar a saída **crua** (o parsing mora no `analysis/`, em Python, testado) faz a extensão prometer uma estrutura que o arquivo não tem. Emendado para `pidstat.txt`: um nome que descreve o conteúdo é a diferença entre um leitor futuro escrever o parser certo e descobrir o engano depois de a campanha terminar.
+
+Pelo mesmo motivo o `time.json` deixa de ser descrito como "`-v` parseado": o `/usr/bin/time` recebe um format string que **emite o objeto JSON direto**, e nenhum parser artesanal em bash fica entre a medição e o arquivo.
 
 `run_id` é um UUID v4 (à prova de retomada do experimento). `scenario_id` legível também persistido em `meta.json` pra debug humano (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`).
 

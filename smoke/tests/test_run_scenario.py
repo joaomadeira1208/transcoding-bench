@@ -390,6 +390,34 @@ class TestFailedRun:
         assert result.returncode == 0, result.stderr
 
 
+class TestUpload:
+    # Cada run sobe sozinho, logo após terminar: uma Instância que morra não leva
+    # o bloco junto, e o upload nunca coincide com um encode (ADR-0011).
+
+    def test_the_whole_run_dir_is_uploaded(self, execution):
+        assert {path.name for path in execution.uploaded(execution.run_dir).iterdir()} == ARTIFACTS
+
+    def test_the_failed_run_is_uploaded_too(self, failed_encode):
+        uploaded = {path.name for path in failed_encode.uploaded(failed_encode.run_dir).iterdir()}
+
+        assert uploaded == ARTIFACTS - {"output.sha256"}
+
+    def test_the_upload_comes_after_the_meta_json(self, execution):
+        # O `meta.json` é o último artefato e o upload é o que fecha o run: um
+        # `aws` antes do `write_meta` subiria um diretório sem ele.
+        uploaded_meta = execution.uploaded(execution.run_dir) / "meta.json"
+
+        assert uploaded_meta.read_text() == (execution.run_dir / "meta.json").read_text()
+
+    def test_a_failed_upload_is_reported_without_reopening_the_run(self, plan, execute):
+        failed_upload = execute(replication(plan["blocks"][0]), SMOKE_AWS_EXIT="1")
+
+        assert failed_upload.returncode != 0
+        assert failed_upload.meta()["exit_code"] == 0
+        assert {path.name for path in failed_upload.run_dir.iterdir()} == ARTIFACTS
+        assert not failed_upload.uploaded(failed_upload.run_dir).exists()
+
+
 class TestInstrumentationFailure:
     # Nunca existe run "bem-sucedido" sem os contadores que são o achado
     # principal, e não há flag que desligue a medição (decisão D8).

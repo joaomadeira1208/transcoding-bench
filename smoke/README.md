@@ -8,8 +8,9 @@ e quem roda isto é o Mac — mesmo dono de `analysis/` e do futuro `infra/`.
     .venv-smoke/bin/pip install -r smoke/requirements-dev.txt
     .venv-smoke/bin/python -m pytest smoke/
 
-Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `perf`, `pidstat` e
-`/usr/bin/time` são substituídos por shims, e o ciclo fecha em segundos.
+Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `perf`, `pidstat`, `aws`
+e `/usr/bin/time` são substituídos por shims, e o ciclo fecha em segundos. O
+mesmo `pytest smoke/` é o quarto job do CI.
 
 **O smoke nunca importa; só invoca.** O gerador do plano, a CLI de validação do
 `meta.json` e o checador stdlib do orquestrador entram como subprocessos, e o que
@@ -21,8 +22,20 @@ Os shims moram em `shims/` como `*.sh` e são instalados com o nome do binário 
 substituem num diretório temporário que entra no PATH: a allowlist do
 `.gitignore` (ADR-0017) admite fonte por extensão, e um arquivo chamado `ffmpeg`
 não entraria no histórico. Cada comportamento induzido é uma variável de ambiente
-(`SMOKE_FFMPEG_EXIT`, `SMOKE_PERF_EXIT`, `SMOKE_PERF_UNSUPPORTED`,
-`SMOKE_ENCODER_INVISIBLE`, `SMOKE_BITSTREAM`).
+(`SMOKE_FFMPEG_EXIT`, `SMOKE_FFMPEG_HANG`, `SMOKE_PERF_EXIT`,
+`SMOKE_PERF_UNSUPPORTED`, `SMOKE_ENCODER_INVISIBLE`, `SMOKE_BITSTREAM`,
+`SMOKE_AWS_EXIT`); `SMOKE_FFMPEG_NTH` restringe o do `ffmpeg` ao N-ésimo encode,
+que é como um run falha no meio de um bloco cujos vizinhos seguem bem.
+
+Todo shim registra o argv que recebeu em `$SMOKE_ARGV_DIR/<tool>.argv` e o seu
+nome em `$SMOKE_ARGV_DIR/sequence`, a linha do tempo comum entre ferramentas —
+é por ela que se vê o upload acontecendo **entre** runs.
+
+O shim do `aws` traduz `s3 cp` e `s3api list-objects-v2` em operações sobre
+`$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que o layout de
+prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
+`list-objects-v2` que o `resume.py` usará) — nunca semântica do S3, e por isso
+sem localstack.
 
 Eles são a única superfície nova que pode envelhecer mal — fake que diverge do
 real —, e a mitigação é o que vem depois: a camada de aceite manual com Docker e

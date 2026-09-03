@@ -10,6 +10,7 @@ set -euo pipefail
   printf '%s\0' "$@"
   printf '\n'
 } >>"$SMOKE_ARGV_DIR/perf.argv"
+printf 'perf\n' >>"$SMOKE_ARGV_DIR/sequence"
 
 shift # o subcomando `stat`
 

@@ -85,3 +85,22 @@ jobs:
 
       - name: pytest analysis/
         run: .venv/bin/python -m pytest analysis/
+
+  smoke:
+    name: smoke (shims)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Create the role venv
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r smoke/requirements-dev.txt
+
+      - name: pytest smoke/
+        run: .venv/bin/python -m pytest smoke/

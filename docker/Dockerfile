@@ -126,7 +126,11 @@ RUN git clone --depth 1 --branch "${VMAF_VERSION}" https://github.com/Netflix/vm
 
 # `--pkg-config-flags=--static`: os quatro componentes acima são bibliotecas
 # estáticas, e sem isso o linker não vê as dependências transitivas
-# (`-lstdc++`, `-lnuma`) que o `Libs.private` de cada `.pc` declara.
+# (`-lstdc++`, `-lnuma`) que o `Libs.private` de cada `.pc` declara. O `-lstdc++`
+# ainda vai explícito porque o `libvmaf.pc` do upstream é o único que não a
+# declara: o teste de link do configure puxa `svm.cpp.o` de dentro do
+# `libvmaf.a` e falha dizendo "libvmaf not found", que aponta para o lugar
+# errado.
 ARG FFMPEG_VERSION=n8.1.2
 WORKDIR /tmp/ffmpeg
 RUN git clone --depth 1 --branch "${FFMPEG_VERSION}" https://github.com/FFmpeg/FFmpeg.git . \
@@ -135,6 +139,7 @@ RUN git clone --depth 1 --branch "${FFMPEG_VERSION}" https://github.com/FFmpeg/F
     --pkg-config-flags=--static \
     --extra-cflags="${NATIVE_FLAGS}" \
     --extra-cxxflags="${NATIVE_FLAGS}" \
+    --extra-libs="-lstdc++" \
     --enable-gpl \
     --enable-libx264 \
     --enable-libx265 \

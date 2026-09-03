@@ -1,10 +1,1 @@
-# Runtime do papel `analysis/` (ADR-0017): o que o Mac do pesquisador precisa ter
-# para ler os artefatos raw. Separado do `requirements-dev.txt` porque o papel
-# roda em venv próprio, e é essa separação que faz o job de CI dele ter valor —
-# um `import pandas` que apareça sem a dependência declarada quebra no ambiente
-# limpo em vez de passar porque a máquina do pesquisador tinha o pacote.
-#
-# `pandas`/`pyarrow` entram junto com o `consolidate.py`, que é quem projeta a
-# árvore `runs/` em Parquet; hoje o papel só valida o `meta.json`.
-
 pydantic==2.13.5

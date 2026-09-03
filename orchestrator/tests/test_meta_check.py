@@ -1,17 +1,8 @@
-# Testes do checador stdlib do `meta.json`.
-#
-# Ele existe porque `resume.py` e `quality_triage.py` são stdlib-only por desenho
-# (ADR-0017) e não podem importar o modelo pydantic do `analysis/`: é regra
-# duplicada, não código compartilhado, exatamente como a ADR-0019 já faz com o
-# dedup — verificação independente é o que se compra com a duplicação.
-#
-# Os cinco campos da tabela da ADR-0022 são verificados por **presença, tipo e
-# valor**, e cada metade tem um modo de falha concreto. Presença: o jeito natural
-# de escrever o filtro é `m.get("warmup")`, e com o campo ausente isso vira
-# `None` → falsy → o warm-up entra na retomada como Replicação. Tipo: quem
-# escreve o arquivo é bash montando JSON à mão, e `"warmup": "false"` é uma
-# string truthy que produz o mesmo desastre passando por qualquer checagem de
-# presença.
+# Presença, tipo e valor, e cada metade tem um modo de falha concreto. Presença: o
+# jeito natural de escrever o filtro é `m.get("warmup")`, e com o campo ausente
+# isso vira `None` → falsy → o warm-up entra na retomada como Replicação. Tipo:
+# `"warmup": "false"` é uma string truthy que produz o mesmo desastre passando por
+# qualquer checagem de presença.
 
 from __future__ import annotations
 

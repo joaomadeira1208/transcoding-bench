@@ -1,11 +1,7 @@
-# Testes do núcleo de validação do `config/experiment.toml`.
-#
-# O critério da ADR-0022 é falha silenciosa, e este arquivo é o caso extremo dele:
-# um `experiment.toml` defeituoso não estoura em lugar nenhum — ele produz uma
-# matriz experimental errada, e o erro só apareceria depois de ~46h de compute.
-# Por isso cada modo de falha ganha um teste de rejeição próprio, e cada um
-# confere que a mensagem **nomeia o registro ofensor**: um `ConfigError` genérico
-# manda o pesquisador procurar a agulha à mão.
+# Um `experiment.toml` defeituoso não estoura em lugar nenhum: produz uma matriz
+# errada, e o erro só apareceria depois de ~46 h de compute. Cada modo de falha
+# ganha um teste próprio, e cada um confere que a mensagem **nomeia o registro
+# ofensor** — um `ConfigError` genérico manda procurar a agulha à mão.
 
 from __future__ import annotations
 

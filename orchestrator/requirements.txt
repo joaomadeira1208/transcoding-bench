@@ -1,10 +1,2 @@
-# Runtime do orquestrador — deliberadamente vazio (ADR-0017).
-#
-# O papel é stdlib-only: `tomllib`, `json`, `random`, `argparse`, `subprocess`.
-# O que ele usa de fora do Python é a AWS CLI, invocada como processo externo e
-# instalada pelo bootstrap da t3.micro, não por pip.
-#
-# Manter este arquivo vazio é o que faz o job de pytest do CI ter valor: ele
-# instala só o `requirements-dev.txt`, que puxa este aqui, então um `import
-# pandas` acidental no orquestrador quebra no ambiente limpo em vez de passar
-# porque a máquina do pesquisador tinha o pacote.
+# Vazio de propósito: o papel é stdlib-only (ADR-0017), e o que ele usa de fora
+# do Python é a AWS CLI, instalada pelo bootstrap da t3.micro e não por pip.

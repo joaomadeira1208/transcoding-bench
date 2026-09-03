@@ -1,15 +1,8 @@
 """Núcleo de validação da spec do Experimento — função pura, sem I/O.
 
-Recebe a configuração **já parseada** (o dict que o `tomllib` devolve) e entrega
-uma estrutura validada, ou levanta `ConfigError` nomeando o registro ofensor.
-Ler o arquivo e sair com código de erro é casca fina, e mora no CLI (decisão D4
-da spec): assim o gerador do plano é função pura do `config/experiment.toml`, e
-os testes exercitam a validação sem tocar em disco.
-
-A regra que atravessa o módulo é **nenhum default silencioso**: campo ausente é
-erro, tipo divergente é erro, chave desconhecida é erro. Um `experiment.toml`
-defeituoso não estoura em lugar nenhum sozinho — ele produz uma matriz
-experimental errada, e o custo de descobrir isso é ~46h de compute (ADR-0022).
+A regra que atravessa o módulo é **nenhum default silencioso**: um
+`experiment.toml` defeituoso não estoura sozinho em lugar nenhum, produz uma
+matriz experimental errada, e o custo de descobrir isso é ~46 h de compute.
 """
 
 from __future__ import annotations
@@ -45,10 +38,8 @@ class Geometry:
 class CodecRecord:
     """Codec com preset, CRF e parâmetros de encoder amarrados (ADR-0002/0019).
 
-    O `bitstream_muxer` é declarado, e não derivado do `slug`, pelo mesmo motivo
-    que a `scenario_id` é formada em Python: um mapa codec → muxer em bash é
-    manipulação de string, e o erro sairia como o hash de um bitstream que não é
-    o do Cenário.
+    O `bitstream_muxer` é declarado, e não derivado do `slug`: um mapa codec →
+    muxer em bash sairia como o hash de um bitstream que não é o do Cenário.
     """
 
     slug: str
@@ -101,8 +92,8 @@ class FixedEncodeParams:
 class Instrumentation:
     """Os eventos de PMU que instrumentam cada Execução (ADR-0006).
 
-    Moram na spec, e não no `run_scenario.sh`, porque trocar um evento muda o que
-    o artigo reporta: é desenho experimental, não detalhe de operação.
+    Na spec, e não no `run_scenario.sh`: trocar um evento muda o que o artigo
+    reporta.
     """
 
     pmu_events: tuple[str, ...]
@@ -143,9 +134,8 @@ def validate_config(raw: Mapping[str, Any]) -> ExperimentConfig:
     _reject_duplicates((c.slug for c in config.codecs), "codec", "slug")
     _reject_duplicates((v.slug for v in config.videos), "video", "slug")
     _reject_duplicates((i.id for i in config.instances), "instance", "id")
-    # A identidade de um par são os seus campos — o registro inteiro, que é
-    # frozen e portanto hashável. Chavear pelo texto do `__str__` faria uma
-    # mudança cosmética na mensagem de erro virar mudança de semântica.
+    # Chavear pelo registro, e não pelo texto do `__str__`: senão uma mudança
+    # cosmética na mensagem de erro vira mudança de semântica.
     _reject_duplicates(config.pairs, "pair", "pair")
 
     _reject_ambiguous_warmup(config.warmup_runs)
@@ -153,9 +143,6 @@ def validate_config(raw: Mapping[str, Any]) -> ExperimentConfig:
     _reject_upscale(config.pairs, config.videos)
 
     return config
-
-
-# --- registros ---------------------------------------------------------------
 
 
 def _encode(record: Mapping[str, Any]) -> FixedEncodeParams:
@@ -180,13 +167,12 @@ def _instrumentation(record: Mapping[str, Any]) -> Instrumentation:
     _reject_unknown(record, {"pmu_events"}, where)
 
     events = _str_list(record, "pmu_events", where)
-    # Lista vazia é o pior caso e não seria pega por "chave presente": um
-    # `perf stat` sem `-e` roda, coleta o conjunto default de eventos e devolve
-    # um JSON plausível, sem os que o artigo reporta.
+    # Um `perf stat` sem `-e` roda, coleta o conjunto default e devolve um JSON
+    # plausível, sem os eventos que o artigo reporta.
     if not events:
         raise ConfigError(f"{where}: 'pmu_events' must declare at least one event")
-    # Evento repetido também não estoura no `perf`: ele emite duas entradas com o
-    # mesmo nome, e quem lê o JSON por nome fica com uma delas, escolhida por acaso.
+    # Evento repetido não estoura no `perf`: emite duas entradas com o mesmo nome,
+    # e quem lê o JSON por nome fica com uma delas, escolhida por acaso.
     _reject_duplicates(events, "pmu_events", "event")
 
     return Instrumentation(pmu_events=events)
@@ -257,16 +243,11 @@ def _geometry(record: Mapping[str, Any], where: str) -> Mapping[str, Geometry]:
     return geometry
 
 
-# --- checagens cruzadas ------------------------------------------------------
-
-
 def _reject_ambiguous_warmup(warmup_runs: int) -> None:
     """No máximo um warm-up por Cenário: a `scenario_id` tem uma vaga só.
 
-    A chave termina em `_warmup` na Execução descartada (ADR-0019), sem índice —
-    uma segunda Execução de warm-up produziria duas chaves idênticas, que é
-    exatamente a falha silenciosa que aquela ADR existe para impedir. O desenho
-    da ADR-0003 pede um; o que se recusa aqui é o dois.
+    A chave termina em `_warmup`, sem índice, então um segundo warm-up produziria
+    duas chaves idênticas.
     """
     if warmup_runs > 1:
         raise ConfigError(
@@ -318,9 +299,6 @@ def _reject_duplicates(values: Iterable[Hashable], family: str, label: str) -> N
                 f"(already declared at {family}[{seen[value]}])"
             )
         seen[value] = index
-
-
-# --- primitivas de leitura ---------------------------------------------------
 
 
 def _where(family: str, index: int, identity: Any) -> str:

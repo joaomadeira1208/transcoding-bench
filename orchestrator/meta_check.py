@@ -1,23 +1,8 @@
-"""Checagem mínima do `meta.json` em stdlib pura — o outro leitor do contrato.
+"""Checagem do `meta.json` em stdlib pura — o leitor do orquestrador (ADR-0022).
 
-O `meta.json` tem três leitores programáticos, não um: o `consolidate.py`, em
-`analysis/`, valida com o modelo pydantic estrito; `resume.py` (completude por
-bloco, ADR-0012) e `quality_triage.py` (filtro + dedup, ADR-0014) moram aqui, e o
-papel é stdlib-only por desenho (ADR-0017) — não podem importar aquele modelo.
-
-A saída é **regra duplicada, não código compartilhado**, a mesma política que a
-ADR-0019 adota para o dedup: o que se compra com a duplicação é verificação
-independente, e o teste que a mantém honesta é o de concordância
-(`test_meta_agreement.py`), que roda o mesmo arquivo inválido contra os dois
-leitores.
-
-A cobertura é a tabela da ADR-0022 — `schema_version`, `scenario_id`, `warmup`,
-`exit_code`, `started_at` —, deliberadamente menor que a do modelo pydantic: são
-os campos sobre os quais o orquestrador **decide**, e decidir errado custa
-re-executar um bloco ou enviesar uma média. Cada um é verificado por presença,
-tipo e valor, porque presença sozinha não basta: quem escreve este arquivo é bash
-montando JSON à mão, e `"warmup": "false"` é uma string truthy que passa por
-qualquer checagem de presença e faz o warm-up entrar na retomada como Replicação.
+Cobre os cinco campos sobre os quais este papel decide, e não o arquivo inteiro:
+é regra duplicada em relação ao modelo pydantic do `analysis/`, não código
+compartilhado, e `test_meta_agreement.py` é o que impede os dois de divergirem.
 """
 
 from __future__ import annotations
@@ -27,8 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-# As versões de forma que este leitor sabe interpretar. Um `meta.json` escrito
-# antes de uma mudança de forma continua no S3 durante a janela de retomada da
+# Um `meta.json` de forma antiga continua no S3 durante a janela de retomada da
 # ADR-0012, e detectá-lo é o serviço deste campo.
 KNOWN_SCHEMA_VERSIONS = frozenset({"1"})
 
@@ -38,12 +22,7 @@ class MetaError(Exception):
 
 
 def check_meta(raw: str | bytes) -> dict[str, Any]:
-    """Valida os bytes crus de um `meta.json` e devolve o objeto já parseado.
-
-    Devolver o dict é o que faz o chamador não ter uma segunda leitura sem
-    checagem: `resume.py` recebe o corpo do objeto vindo do S3, passa por aqui e
-    já fica com o que precisa.
-    """
+    """Valida os bytes crus de um `meta.json` e devolve o objeto já parseado."""
     try:
         meta = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -72,16 +51,15 @@ def _check_non_empty_str(field: str, value: Any) -> None:
 
 
 def _check_bool(field: str, value: Any) -> None:
-    # Tipo exato, e não `isinstance`: em Python `bool` é subclasse de `int`, e
-    # `isinstance(0, bool)` sendo falso não ajuda no sentido que importa — o que
-    # se quer barrar é a string `"false"` que o bash escreve por acidente.
+    # Tipo exato, e não `isinstance`: o que se barra é a string `"false"` que o
+    # bash escreve por acidente.
     if type(value) is not bool:
         raise MetaError(f"{field}: esperava booleano JSON, veio {value!r}")
 
 
 def _check_int(field: str, value: Any) -> None:
-    # Pelo mesmo motivo, ao contrário: `isinstance(True, int)` é **verdadeiro**,
-    # então um `"exit_code": true` passaria e seria lido como "falhou".
+    # Ao contrário: `isinstance(True, int)` é verdadeiro, e um `"exit_code": true`
+    # passaria como "falhou".
     if type(value) is not int:
         raise MetaError(f"{field}: esperava inteiro, veio {value!r}")
 
@@ -89,12 +67,8 @@ def _check_int(field: str, value: Any) -> None:
 def _check_aware_timestamp(field: str, value: Any) -> None:
     """Parseável **e** timezone-aware — as duas metades, sempre juntas.
 
-    A dedup "último `started_at` vence" (ADR-0019) precisa de uma ordem total
-    correta, e os leitores comparam instantes, nunca strings: `date -Is` emite
-    `+00:00` e `date -u ...Z` emite `Z` para o mesmo instante, e as duas ordenam
-    diferente lexicograficamente. Um timestamp naïve é pior: se o bash escreveu
-    hora local sem offset, a informação para normalizar já se perdeu, e a leitura
-    é a única janela em que isso é detectável.
+    Naïve é rejeitado porque a informação para normalizar já se perdeu, e a
+    leitura é a única janela em que isso é detectável.
     """
     if type(value) is not str:
         raise MetaError(f"{field}: esperava timestamp ISO-8601 como string, veio {value!r}")

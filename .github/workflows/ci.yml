@@ -1,11 +1,5 @@
-# CI mínimo (ADR-0017): evidência anexada a cada PR, não gate autônomo — o merge
-# continua sendo decisão do review. Fora por design: qualquer coisa que exija
-# credencial AWS e o build do Docker (`-march=native` em runner de CPU errada,
-# ADR-0013).
-#
-# Três jobs nesta etapa: o pre-commit e um pytest por papel Python, cada um no
-# seu venv. O smoke local entra como quarto junto com o `smoke/`, que depende dos
-# `run_*.sh` (ADR-0022, decisão D22 da Spec 2).
+# Evidência anexada a cada PR, não gate autônomo (ADR-0017). Fora por design:
+# credencial AWS e o build do Docker.
 
 name: CI
 
@@ -33,8 +27,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      # O hook terraform_validate exige o binário `terraform` no PATH: o
-      # pre-commit não gerencia esse ambiente (ADR-0017/0022).
+      # O hook terraform_validate exige o binário no PATH; o pre-commit não
+      # gerencia esse ambiente.
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.15.8"
@@ -51,11 +45,9 @@ jobs:
       - name: pre-commit run --all-files
         run: pre-commit run --all-files --show-diff-on-failure
 
-  # pytest por papel, cada um no seu venv (ADR-0017): este instala **apenas** o
-  # `orchestrator/requirements-dev.txt`, que puxa um `requirements.txt` de runtime
-  # vazio. É o que faz o job ter valor além de rodar os testes — um `import
-  # pandas` acidental no orquestrador quebra aqui, no ambiente limpo, em vez de
-  # passar porque a máquina do pesquisador tinha o pacote instalado.
+  # Um venv por papel, com só o `requirements-dev.txt` daquele papel: é o que faz
+  # um `import` sem dependência declarada quebrar aqui em vez de passar porque a
+  # máquina do pesquisador tinha o pacote.
   orchestrator-tests:
     name: pytest (orchestrator)
     runs-on: ubuntu-latest
@@ -75,10 +67,6 @@ jobs:
       - name: pytest orchestrator/
         run: .venv/bin/python -m pytest orchestrator/
 
-  # O mesmo isolamento pelo motivo oposto: aqui o venv tem `pydantic` e nada
-  # além dele, então o dia em que o `consolidate.py` chegar com `pandas`, é este
-  # job que exige a dependência declarada em vez de aceitar o que a máquina do
-  # pesquisador por acaso tinha.
   analysis-tests:
     name: pytest (analysis)
     runs-on: ubuntu-latest

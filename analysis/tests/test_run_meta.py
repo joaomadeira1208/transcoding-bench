@@ -1,11 +1,8 @@
-# Testes do modelo do `meta.json` — o artefato mais perigoso do repositório.
-#
-# Ele atravessa a fronteira de linguagem no sentido mais frágil possível: bash
-# montando JSON à mão, Python lendo (ADR-0019). Nenhum dos modos de falha
-# asseridos aqui estoura sozinho — `"warmup": "false"` é uma string truthy que
-# faz o warm-up entrar na média, e um `started_at` naïve faz a dedup "último
-# vence" ordenar strings em vez de instantes. Por isso cada um ganha um teste de
-# rejeição próprio, e cada um confere que a mensagem **nomeia o campo ofensor**.
+# O `meta.json` atravessa a fronteira de linguagem no sentido mais frágil
+# possível: bash montando JSON à mão, Python lendo. Nenhum dos modos de falha
+# asseridos aqui estoura sozinho — `"warmup": "false"` é uma string truthy que faz
+# o warm-up entrar na média, e um `started_at` naïve faz a dedup ordenar strings
+# em vez de instantes.
 
 from __future__ import annotations
 

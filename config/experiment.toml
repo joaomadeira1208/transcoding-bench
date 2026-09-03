@@ -1,55 +1,33 @@
-# Definição do Experimento — fonte de verdade declarativa (ADR-0019).
-#
-# Este arquivo *é* a spec da matriz experimental: quem quiser saber quais
-# Cenários o Experimento tem lê aqui, sem ler código. O gerador do plano
-# (`orchestrator/generate_scenarios.py`) é função pura deste arquivo — mesma
-# entrada, mesmos bytes de saída —, então o `scenarios.json` nunca contradiz o
-# que está escrito abaixo, e o anexo do artigo é este TOML.
-#
-# Forma: array-of-tables, porque os parâmetros têm dependências. Preset e CRF
-# viajam *dentro* do registro do codec (ADR-0002), não como eixos livres, e os
-# pares input→output são um conjunto recortado (ADR-0004), não um filtro
-# aplicado em código.
+# Definição do Experimento — fonte de verdade declarativa (ADR-0019), e o anexo do
+# artigo. O gerador do plano é função pura deste arquivo.
 #
 # Nada aqui tem default: campo ausente, tipo divergente ou chave desconhecida
 # fazem a validação falhar alto nomeando o registro ofensor.
 
-# Desenho experimental (ADR-0003): 6 Execuções por Cenário — 1 warm-up
-# descartado + 5 Replicações reportadas, que sustentam média, desvio padrão e
-# IC 95% via t-Student.
+# 6 Execuções por Cenário: 1 warm-up descartado + 5 Replicações (ADR-0003).
 [experiment]
-# A seed mora aqui, e não na linha de comando, para que o plano seja função pura
-# deste arquivo: reproduzir a ordem do Experimento não depende de lembrar o
-# comando exato que alguém digitou. O valor é arbitrário; o que importa é estar
-# congelado e versionado.
+# Aqui, e não na linha de comando: reproduzir a ordem do Experimento não pode
+# depender de lembrar o comando que alguém digitou.
 seed = 20260808
 replications = 5
 warmup_runs = 1
 
-# Parâmetros de encode idênticos em todo Cenário (ADR-0002). Ficam na spec para
-# que o argv do FFmpeg seja inteiramente derivado de dado versionado — o bash
-# copia, nunca deriva (ADR-0019).
+# Parâmetros idênticos em todo Cenário (ADR-0002).
 [encode]
-# Auto-detect: deixa a assimetria estrutural ARM/x86 emergir (Graviton 3 entrega
-# 4 cores físicos sem SMT; Sapphire Rapids e EPYC, 2 físicos × 2 threads).
-# Fixar `-threads 4` esconderia exatamente o que se quer medir.
+# Auto-detect: fixar um valor esconderia a assimetria estrutural ARM/x86, que é o
+# que se quer medir.
 threads = 0
-# GOP determinístico de 2s @ 24fps, idêntico nos três encoders. O corte por
-# mudança de cena é desativado por `encoder_args`, cuja flag difere entre eles.
+# 2 s @ 24 fps. O corte por mudança de cena é desativado por `encoder_args`, cuja
+# flag difere entre os encoders.
 gop_size = 48
 pix_fmt = "yuv420p"
 strip_audio = true
 container = "mkv"
-# Downscale Lanczos, o que pipelines ABR de produção usam (ADR-0004).
 scale_flags = "lanczos"
 
-# Instrumentação da Execução (ADR-0006). Os eventos são desenho experimental, não
-# constante de script: IPC, cache miss rate e branch mispredict rate saem deles,
-# e trocar um muda o que o artigo reporta. A ordem é a da ADR porque é ela que
-# vai para o `-e` do `perf stat`.
-#
-# Os limites operacionais da ADR-0012 (4 h por run, 72 h totais) não entram aqui:
-# não afetam número medido nenhum e são flags do `run_all.sh`.
+# Desenho experimental, não constante de script (ADR-0006): IPC, cache miss rate e
+# branch mispredict rate saem daqui, e trocar um evento muda o que o artigo
+# reporta. A ordem é a que vai para o `-e` do `perf stat`.
 [instrumentation]
 pmu_events = [
   "cycles",
@@ -64,17 +42,11 @@ pmu_events = [
   "page-faults",
 ]
 
-# Codecs (ADR-0002). O `slug` é o token que entra na `scenario_id` e é o nome do
-# encoder, conforme o exemplo canônico do CONTEXT.md
-# (`libx264_2160p_1080p_bbb_c7g_rep1`); `codec` é o rótulo de leitura humana.
-# CRF não é intercambiável entre codecs — cada um tem o seu alvo de qualidade, e
-# qualidade não é variável dependente (ADR-0005).
+# Codecs (ADR-0002). O `slug` entra na `scenario_id`; `codec` é rótulo humano, e o
+# CRF não é intercambiável entre eles (ADR-0005).
 #
-# O `bitstream_muxer` existe porque o `output.sha256` não pode cobrir o `.mkv`:
-# o container carrega metadado de mux que mudaria o hash sem o bitstream ter
-# mudado, então o hash roda sobre o que `ffmpeg -c copy -f <muxer> -` extrai
-# (ADR-0005/0007). Ele é declarado, e não derivado do `slug` ou do rótulo, pelo
-# mesmo motivo que a `scenario_id` é formada em Python (ADR-0019).
+# O `bitstream_muxer` é declarado, e não derivado do `slug`, pelo mesmo motivo que
+# a `scenario_id` é formada em Python (ADR-0019).
 [[codec]]
 slug = "libx264"
 codec = "h264"
@@ -97,16 +69,15 @@ bitstream_muxer = "hevc"
 slug = "libsvtav1"
 codec = "av1"
 encoder = "libsvtav1"
-# Preset é string em todos os registros porque o SVT-AV1 numera os seus; o valor
-# vai literal para `-preset`.
+# String em todos os registros porque o SVT-AV1 numera os seus; vai literal para
+# o `-preset`.
 preset = "8"
 crf = 35
 encoder_args = ["-svtav1-params", "scd=0"]
 bitstream_muxer = "obu"
 
-# Pares input→output (ADR-0004). Os 9 registros são o conjunto recortado: só
-# downscale ou no-scale, nunca upscale. Estarem declarados um a um é o ponto —
-# "nunca upscale" é dado, não um filtro que alguém pode afrouxar em código.
+# Pares input→output (ADR-0004). Declarados um a um é o ponto: "nunca upscale" é
+# dado, não um filtro que alguém pode afrouxar em código.
 [[pair]]
 input_res = "2160p"
 output_res = "2160p"
@@ -143,12 +114,9 @@ output_res = "720p"
 input_res = "720p"
 output_res = "480p"
 
-# Vídeos, com a geometria exata de cada tier (ADR-0023).
-#
-# Os rótulos `2160p/1080p/720p/480p` são **nominais**: Big Buck Bunny é 16:9 e
-# Tears of Steel é ~2.39:1, então "1080p" não é 1920x1080 para os dois. Declarar
-# largura × altura por vídeo faz o `-vf scale=W:H:flags=lanczos` receber valores
-# literais e torna "nunca upscale" uma propriedade verificável sobre pixels.
+# Os rótulos são **nominais** (ADR-0023): Big Buck Bunny é 16:9 e Tears of Steel é
+# ~2.39:1, então "1080p" não é 1920x1080 para os dois. Declarar largura × altura
+# torna "nunca upscale" uma propriedade verificável sobre pixels.
 [[video]]
 slug = "bbb"
 title = "Big Buck Bunny"
@@ -159,8 +127,8 @@ title = "Big Buck Bunny"
 720p = { width = 1280, height = 720 }
 480p = { width = 854, height = 480 }
 
-# Tears of Steel: o tier 2160p é o master DCI 4K nativo (4096x1714); os demais
-# seguem a largura nominal do ladder preservando o AR nativo (ADR-0023).
+# O tier 2160p é o master DCI 4K nativo; os demais seguem a largura nominal do
+# ladder preservando o AR.
 [[video]]
 slug = "tos"
 title = "Tears of Steel"
@@ -171,12 +139,8 @@ title = "Tears of Steel"
 720p = { width = 1280, height = 536 }
 480p = { width = 854, height = 358 }
 
-# Instâncias (ADR-0001): mesma geração `c7*` e mesmo tamanho `xlarge` (4 vCPU),
-# variando só a arquitetura. `id` é a chave legível que entra na `scenario_id` e
-# nomeia a fatia do plano; `instance_type` é o parâmetro que vai para a AWS.
-# Os dois são declarados lado a lado porque nenhum pode ser derivado do outro
-# por manipulação de string — é o mesmo risco que faz o Python formar a
-# `scenario_id` em vez do bash (ADR-0019).
+# Instâncias (ADR-0001). `id` e `instance_type` são declarados lado a lado porque
+# nenhum pode ser derivado do outro por manipulação de string.
 [[instance]]
 id = "c7g"
 instance_type = "c7g.xlarge"

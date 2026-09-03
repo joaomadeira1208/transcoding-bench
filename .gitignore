@@ -1,12 +1,9 @@
-# Deny-by-default (allowlist): nada entra no histórico sem ser explicitamente
-# permitido. O repo é clonado em instâncias com IP público (ADR-0016/0017);
-# um blocklist depende de lembrar de cada segredo, a allowlist falha de forma segura.
+# Allowlist: o repo é clonado em instâncias com IP público (ADR-0016/0017), e um
+# blocklist depende de lembrar de cada segredo.
 *
 
-# Permite o git descer nos diretórios
 !*/
 
-# Fonte
 !*.py
 !*.sh
 !*.tf
@@ -20,21 +17,19 @@
 !.pre-commit-config.yaml
 !meta.schema.json
 
-# Workflows do CI (ADR-0017) — .yml não está na allowlist por extensão
+# `.yml` não entra por extensão.
 !.github/workflows/*.yml
 
-# Fixtures de teste (ADR-0022): exceção deliberada ao "nenhum .json entra".
-# Escopada a diretórios literalmente chamados fixtures/ — o meta.json de
-# runtime, o scenarios.json e o quality_plan.json continuam fora.
+# Exceção ao "nenhum .json entra", escopada a diretórios chamados fixtures/: o
+# meta.json de runtime e o scenarios.json continuam fora.
 !**/fixtures/*.json
 
-# Re-nega diretórios gerados (higiene; o sensível já está negado por extensão)
 .venv*/
 venv/
 .terraform/
 runs/
 __pycache__/
 
-# Re-nega doc local de trabalho (é .md, a allowlist o pegaria)
+# São .md, e a allowlist os pegaria.
 docs/DECISOES-PENDENTES.md
 docs/DEVELOPMENT-PLAN.md

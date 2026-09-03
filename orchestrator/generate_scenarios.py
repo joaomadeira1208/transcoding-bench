@@ -1,27 +1,12 @@
 #!/usr/bin/env python3
-"""CLI do gerador do plano de Cenários — casca fina sobre o núcleo puro.
+"""CLI do gerador do plano — casca fina sobre `experiment_config` e `scenario_plan`.
 
-Aqui mora só o I/O: parsear argv, ler o `config/experiment.toml` do disco,
-escrever os artefatos no diretório de saída e traduzir `ConfigError` em código de
-saída. O que é uma spec válida é decisão de `experiment_config.validate_config`,
-e o que são o plano e as suas fatias é decisão de `scenario_plan` — todas funções
-puras, e é nelas que os testes batem (decisão D4 da spec).
-
-Uma invocação emite os **quatro** artefatos do plano: o canônico, que é o
-registro do Experimento, e uma fatia por arquitetura, que é o que cada Instância
-de encode consome. Os nomes seguem o layout de prefixos da ADR-0011
-(`scenarios/canonical.json`, `scenarios/c7g.json`) e é aqui que eles são
-decididos — o núcleo devolve as fatias chaveadas pelo id curto da instância e não
-conhece caminho nenhum.
+Emite o canônico e uma fatia por arquitetura, e é aqui que os nomes do layout de
+prefixos da ADR-0011 são decididos: o núcleo devolve as fatias chaveadas pelo id
+da instância e não conhece caminho nenhum.
 
     python orchestrator/generate_scenarios.py \\
         --config config/experiment.toml --out build/scenarios
-
-Sai com 0 se a spec é válida e com 1 se não é, imprimindo no stderr uma mensagem
-que nomeia o registro ofensor — nada de default silencioso salvando uma matriz
-experimental defeituosa. Os arquivos escritos são função pura do TOML: gerá-los
-de novo produz bytes idênticos, então "reproduzir o plano" se verifica com
-`diff`.
 """
 
 from __future__ import annotations
@@ -44,10 +29,6 @@ from scenario_plan import (
 EXIT_OK = 0
 EXIT_INVALID_CONFIG = 1
 
-# Nomes do layout de prefixos da ADR-0011 (`scenarios/canonical.json`,
-# `scenarios/c7g.json`): o registro do Experimento e uma fatia por id curto de
-# instância. É a casca que os decide — o núcleo devolve as fatias chaveadas pelo
-# id e não conhece caminho nenhum.
 CANONICAL_FILENAME = "canonical.json"
 SLICE_FILENAME = "{instance}.json"
 
@@ -106,9 +87,6 @@ def main() -> int:
         print(f"{args.config}: {error}", file=sys.stderr)
         return EXIT_INVALID_CONFIG
 
-    # Uma linha por artefato, com a cardinalidade contada sobre o próprio
-    # artefato: o número que o pesquisador confere é o do arquivo que ele tem na
-    # mão, e as fatias somam o canônico à vista.
     for path, artifact in artifacts.items():
         print(f"{path}: {summarize_plan(artifact)}")
     return EXIT_OK

@@ -20,15 +20,17 @@ Before creating a local environment or invoking a pinned tool, check the local v
 
 ### Comment convention
 
-A comment earns its place only if it says something the code cannot and if it is extremally important. The code already states *what* it does — restating that duplicates a fact that will drift out of sync. What code cannot state: why this option and not the obvious alternative, what breaks if someone changes it, which failure mode it defends against, and which outside constraint forces it (an ADR, a tool's actual behavior, the experimental design).
+Default to none. A file with zero comments is the normal case, and the good one: it means the code says it on its own.
 
-Three tests before a comment stays:
+When you want to write one, the first move is to make the code say it — rename the variable, extract the function, give the literal a name. A comment is what is left when that fails, so treat writing one as a small defeat rather than as work delivered.
 
-- **Deletion.** If the comment vanished, what would break? If the answer is "nothing, the file is just less explained", it goes. Being interesting is not the bar.
-- **One home per fact.** A fact lives in a comment *or* a README *or* an ADR — never in two of them. The duplicate is the copy that goes stale in silence.
-- **Not already enforced.** Skip what a linter, a type or a test already guarantees — `hadolint`, `shellcheck`, the pydantic model of the `meta.json`.
+If what you want to record is *why* — the rejected alternative, the constraint the experimental design imposes — its home is an ADR or a README. A comment repeating it is the copy that goes stale in silence.
 
-Never calibrate comment density against what is already in this repo: it is still being pruned, and over-commenting — not under-commenting — is the failure mode observed so far. Config and infrastructure files (Dockerfile, CI, pre-commit) attract the most over-explaining, because every line rests on some external tool's behaviour; the deletion test bites hardest there.
+Whatever survives that has to name the **concrete wrong edit** someone makes without it. "Deletes `--quiet` and every failed run's `time.json` stops being JSON" is an answer; "the file would be less explained" is not. Being true is not the bar, and neither is being interesting. Moving the same prose into a docstring does not change the answer.
+
+Skip what a linter, a type or a test already guarantees — `hadolint`, `shellcheck`, the pydantic model of the `meta.json`.
+
+Judge one comment at a time, on its own — how many a file has measures nothing. Over-explaining collects in the Dockerfile and the CI config, where every line rests on some external tool's behaviour.
 
 ### Commits
 

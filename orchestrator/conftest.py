@@ -1,12 +1,6 @@
-# conftest.py no nível do papel: é ele que torna o núcleo do orquestrador
-# importável pelos testes de `tests/`. O pytest insere no `sys.path` o diretório
-# de cada `conftest.py` que coleta (import mode `prepend`), então `import
-# experiment_config` funciona sem `pyproject.toml`, sem `pip install -e` e sem
-# `sys.path` manipulado nos módulos de teste — as três coisas que as ADR-0017 e
-# 0022 rejeitaram (decisão D9 da spec).
-#
-# Também é a casa das factories de teste (ADR-0022): fixture/factory compartilhada
-# dentro de um papel, tudo bem; helper de asserção compartilhado, não.
+# O `conftest.py` no nível do papel é o que torna o núcleo importável pelos testes
+# sem `pyproject.toml` e sem `sys.path` manipulado: o pytest insere no `sys.path`
+# o diretório de cada `conftest.py` que coleta.
 
 from __future__ import annotations
 
@@ -24,19 +18,13 @@ REAL_EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 
 
 def real_config() -> ExperimentConfig:
-    """A spec real do Experimento, validada — âncora dos testes que a citam.
-
-    Mora aqui porque mais de um módulo de teste precisa dela e é *fixture*, não
-    helper de asserção: a ADR-0022 permite compartilhar a primeira dentro de um
-    papel e recusa a segunda.
-    """
+    """A spec real do Experimento, validada — âncora dos testes que a citam."""
     with REAL_EXPERIMENT_TOML.open("rb") as handle:
         return validate_config(tomllib.load(handle))
 
 
-# Configuração mínima e válida, na forma que o `tomllib` devolve — não a matriz
-# real. Os testes de rejeição sobrescrevem uma família de cada vez, de modo que a
-# falha asserida seja a única diferença em relação a um arquivo que passa.
+# Os testes de rejeição sobrescrevem uma família de cada vez, de modo que a falha
+# asserida seja a única diferença em relação a um arquivo que passa.
 _MINIMAL: dict[str, Any] = {
     "experiment": {"seed": 1, "replications": 5, "warmup_runs": 1},
     "encode": {
@@ -58,9 +46,6 @@ _MINIMAL: dict[str, Any] = {
             "bitstream_muxer": "h264",
         }
     ],
-    # Dois eventos bastam para um arquivo válido; a lista real da ADR-0006 tem
-    # dez e é asserida contra o `experiment.toml` de verdade, não contra esta
-    # configuração mínima.
     "instrumentation": {"pmu_events": ["cycles", "instructions"]},
     "pair": [
         {"input_res": "1080p", "output_res": "1080p"},
@@ -80,12 +65,9 @@ _MINIMAL: dict[str, Any] = {
 }
 
 
-# Um `meta.json` válido, como a Execução de um Cenário real o escreveria. É
-# **deliberadamente duplicado** em relação ao do `analysis/` (ADR-0022): os dois
-# papéis rodam em venvs separados, e um pacote de teste comum entre papéis é o
-# que os dois `requirements-dev.txt` existem para impedir. O checador daqui só
-# olha cinco campos, mas a factory carrega o arquivo inteiro — um `meta.json` de
-# teste que só tivesse os campos checados não seria um `meta.json`.
+# Deliberadamente duplicado em relação ao do `analysis/` (ADR-0022). O checador
+# daqui só olha cinco campos, mas a factory carrega o arquivo inteiro: um
+# `meta.json` de teste que só tivesse os campos checados não seria um `meta.json`.
 _VALID_META: dict[str, Any] = {
     "schema_version": "1",
     "scenario_id": "libx264_2160p_1080p_bbb_c7g_rep1",
@@ -169,7 +151,7 @@ def make_instrumentation(**overrides: Any) -> dict[str, Any]:
 
 @pytest.fixture
 def make_raw_config():
-    """Devolve uma factory de configuração já parseada, com overrides por chave de topo."""
+    """Uma factory de configuração já parseada, com overrides por chave de topo."""
 
     def _make(**overrides: Any) -> dict[str, Any]:
         raw = copy.deepcopy(_MINIMAL)
@@ -188,7 +170,7 @@ class _Absent:
         return "<absent>"
 
 
-# Sentinela: `make_raw_config(encode=ABSENT)` remove a chave em vez de escrevê-la
-# como `None`, porque "chave ausente" e "chave nula" são modos de falha distintos.
+# `make_raw_config(encode=ABSENT)` remove a chave em vez de escrevê-la como
+# `None`: "ausente" e "nula" são modos de falha distintos.
 _ABSENT = _Absent()
 ABSENT: Any = _ABSENT

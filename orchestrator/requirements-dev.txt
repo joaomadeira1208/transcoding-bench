@@ -1,9 +1,3 @@
-# Dependências de teste do papel `orchestrator/` (ADR-0017): runtime + pytest,
-# separado do `requirements.txt` de runtime porque o bootstrap da t3.micro
-# instala só o runtime e nunca este arquivo.
-#
-# Os linters não entram aqui: o pre-commit gerencia os próprios ambientes.
-
 -r requirements.txt
 
 pytest==9.1.1

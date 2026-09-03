@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""CLI do contrato do `meta.json` — casca fina sobre o modelo.
+"""CLI do contrato do `meta.json` — casca fina sobre o modelo de `run_meta`.
 
-Valida um `meta.json` avulso e sai com código não-zero se ele não for válido,
-imprimindo no stderr uma mensagem que **nomeia o campo ofensor**: diagnosticar um
-arquivo suspeito sem abrir um REPL, e — o motivo pelo qual ela existe agora — dar
-ao `smoke/` uma caixa-preta para validar o `meta.json` que o bash acabou de
-escrever. O smoke nunca importa; só invoca (ADR-0022, decisão D11).
-
-    python analysis/validate_meta.py runs/<run_id>/meta.json
-
-O outro modo emite o JSON Schema derivado do modelo, que é como o arquivo
-commitado (e o anexo do artigo, ADR-0019) é regenerado:
-
-    python analysis/validate_meta.py --emit-schema > analysis/meta.schema.json
-
-O que é um `meta.json` válido é decisão de `run_meta`, e é lá que os testes do
-contrato batem; aqui mora só o I/O e a tradução de erro em código de saída.
+python analysis/validate_meta.py runs/<run_id>/meta.json
+python analysis/validate_meta.py --emit-schema > analysis/meta.schema.json
 """
 
 from __future__ import annotations
@@ -29,8 +16,7 @@ from run_meta import load_meta, render_json_schema
 
 EXIT_OK = 0
 EXIT_INVALID_META = 1
-# Arquivo ilegível sai com o mesmo código que o argparse usa para invocação
-# errada: não se sabe nada sobre o conteúdo, então dizer "inválido" seria mentir.
+# Não se sabe nada sobre o conteúdo, então dizer "inválido" seria mentir.
 EXIT_UNREADABLE = 2
 
 

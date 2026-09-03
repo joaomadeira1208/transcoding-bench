@@ -1,16 +1,6 @@
-# conftest.py no nível do papel: é ele que torna o núcleo do `analysis/`
-# importável pelos testes de `tests/`. O pytest insere no `sys.path` o diretório
-# de cada `conftest.py` que coleta (import mode `prepend`), então `import
-# run_meta` funciona sem `pyproject.toml`, sem `pip install -e` e sem `sys.path`
-# manipulado nos módulos de teste — as três coisas que as ADR-0017 e 0022
-# rejeitaram (decisão D9 da Spec 1).
-#
-# Também é a casa das factories de teste (ADR-0022): fixture/factory
-# compartilhada dentro de um papel, tudo bem; helper de asserção compartilhado,
-# não. A factory de `meta.json` daqui é **deliberadamente duplicada** em relação
-# à do `orchestrator/`: os dois papéis rodam em venvs separados, e um pacote de
-# teste comum entre papéis é exatamente o que os dois `requirements-dev.txt`
-# existem para impedir.
+# O `conftest.py` no nível do papel é o que torna o núcleo importável pelos testes
+# sem `pyproject.toml` e sem `sys.path` manipulado: o pytest insere no `sys.path`
+# o diretório de cada `conftest.py` que coleta.
 
 from __future__ import annotations
 
@@ -21,21 +11,11 @@ from typing import Any
 
 ROLE_ROOT = Path(__file__).resolve().parent
 
-# O JSON Schema commitado (decisão D12): gerado do modelo, anexado ao artigo, e
-# conferido por teste — um schema no anexo divergindo do modelo que valida é
-# falha silenciosa de documentação.
 META_SCHEMA_PATH = ROLE_ROOT / "meta.schema.json"
 
-# Um `meta.json` válido, com os valores que a Execução de um Cenário real
-# produziria — o `libx264_2160p_1080p_bbb_c7g_rep1` do CONTEXT.md. Os testes de
-# rejeição sobrescrevem um campo de cada vez, de modo que a falha asserida seja
-# a única diferença em relação a um arquivo que passa.
-#
-# Factory é âncora fraca de propósito: ela é escrita em Python, pelo mesmo
-# raciocínio que escreveu o modelo, então valida Python contra Python. A âncora
-# de verdade do contrato cross-language é um `meta.json` que o bash produziu, e
-# ela chega com o smoke (ADR-0022).
-
+# Âncora fraca de propósito: escrita em Python, pelo mesmo raciocínio que
+# escreveu o modelo, ela valida Python contra Python. A âncora do contrato
+# cross-language é um `meta.json` que o bash produziu, e vem do smoke.
 _VALID: dict[str, Any] = {
     "schema_version": "1",
     "scenario_id": "libx264_2160p_1080p_bbb_c7g_rep1",
@@ -88,13 +68,7 @@ def make_meta(**overrides: Any) -> dict[str, Any]:
 
 
 def make_meta_json(**overrides: Any) -> str:
-    """O mesmo, já serializado — é sobre os **bytes crus** que o modelo roda.
-
-    Os testes passam por aqui em vez de por `make_meta` porque validar o JSON
-    cru, e não `json.load()` + `model_validate()`, é o que a ADR-0022 decidiu: em
-    modo estrito o pydantic aplica regras diferentes às duas entradas, e só a
-    primeira aceita `str` → `datetime` enquanto recusa `"warmup": "false"`.
-    """
+    """O mesmo, já serializado — é sobre os **bytes crus** que o modelo roda."""
     return json.dumps(make_meta(**overrides), indent=2) + "\n"
 
 
@@ -103,7 +77,7 @@ class _Absent:
         return "<absent>"
 
 
-# Sentinela: `make_meta(warmup=ABSENT)` remove o campo em vez de escrevê-lo como
-# `null`, porque "campo ausente" e "campo nulo" são modos de falha distintos.
+# `make_meta(warmup=ABSENT)` remove o campo em vez de escrevê-lo como `null`:
+# "ausente" e "nulo" são modos de falha distintos.
 _ABSENT = _Absent()
 ABSENT: Any = _ABSENT

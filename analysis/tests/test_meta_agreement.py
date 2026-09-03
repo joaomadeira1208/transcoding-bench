@@ -1,17 +1,9 @@
-# O `meta.json` de campanha é escrito por bash e lido por dois leitores
-# independentes: o modelo pydantic estrito do `analysis/` e o checador stdlib do
-# `orchestrator/`. Dois leitores do mesmo arquivo discordando sobre se ele é
-# válido é um estado pior do que qualquer uma das duas políticas adotada sozinha
-# — e some justamente a evidência de que o bash está escrevendo JSON errado.
+# Dois leitores do mesmo arquivo discordando sobre se ele é válido é um estado
+# pior do que qualquer uma das duas políticas sozinha, e some justamente a
+# evidência de que o bash está escrevendo JSON errado.
 #
-# Por isso este teste **mora duas vezes**, uma em cada papel, com a mesma dupla
-# de fixtures escrita à mão nos dois: os papéis rodam em venvs separados e não há
-# módulo comum entre eles (ADR-0017/0022). O par é o gêmeo mínimo — o mesmo
-# arquivo, diferindo só no campo que decide tudo.
-#
-# `"warmup": "false"` é o caso canônico: string truthy que o pydantic em modo
-# lax coagiria para `False` em silêncio, fazendo o warm-up entrar na média pela
-# razão que a ADR-0003 documenta.
+# Por isso este teste **mora duas vezes**, uma em cada papel, com as fixtures
+# escritas à mão nos dois: os venvs são separados e não há módulo comum.
 
 from __future__ import annotations
 

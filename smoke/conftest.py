@@ -19,6 +19,7 @@ RUN_SCENARIO = REPO_ROOT / "encode" / "run_scenario.sh"
 RUN_ALL = REPO_ROOT / "encode" / "run_all.sh"
 GENERATE_SCENARIOS = REPO_ROOT / "orchestrator" / "generate_scenarios.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
+CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 META_CHECK_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 
@@ -301,6 +302,17 @@ def run_all(
 
 
 @pytest.fixture(scope="session")
+def block(plan: dict[str, Any]) -> dict[str, Any]:
+    return plan["blocks"][0]
+
+
+@pytest.fixture(scope="session")
+def loop(block: dict[str, Any], run_all) -> Loop:
+    """A árvore de um bloco: o warm-up mais as cinco Replicações."""
+    return run_all([block])
+
+
+@pytest.fixture(scope="session")
 def list_objects(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
     """O lado leitor do layout de prefixos: `s3api list-objects-v2` pelo shim,
     como o `resume.py` fará, devolvendo as chaves sob `prefix`."""
@@ -358,6 +370,16 @@ def validate_with_cli(meta_path: Path) -> subprocess.CompletedProcess[str]:
     """A CLI de validação do `analysis/`, invocada como caixa-preta."""
     return subprocess.run(
         [sys.executable, str(VALIDATE_META), str(meta_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def consolidate_with_cli(runs_dir: Path, out: Path) -> subprocess.CompletedProcess[str]:
+    """A CLI de consolidação do `analysis/`, sobre a árvore que o laço produziu."""
+    return subprocess.run(
+        [sys.executable, str(CONSOLIDATE), "--runs", str(runs_dir), "--out", str(out)],
         capture_output=True,
         text=True,
         check=False,

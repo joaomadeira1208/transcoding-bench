@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 # Eixo próprio, independente do `schema_version` do plano: os dois valem "1" hoje
 # e evoluem por motivos diferentes.
@@ -70,6 +70,14 @@ def load_meta(raw: str | bytes) -> RunMeta:
     voltar para o modo lax pelo motivo errado.
     """
     return RunMeta.model_validate_json(raw)
+
+
+def offending_fields(error: ValidationError) -> list[str]:
+    """Uma entrada `campo: motivo` por campo ofensor."""
+    return [
+        f"{'.'.join(str(part) for part in item['loc']) or '<raiz>'}: {item['msg']}"
+        for item in error.errors()
+    ]
 
 
 def render_json_schema() -> str:

@@ -47,13 +47,8 @@ NonEmptyStr = Annotated[str, Field(min_length=1)]
 class RunMeta(BaseModel):
     """Uma Execução, como o `run_scenario.sh` a registra."""
 
-    # A docstring acima vira a `description` do JSON Schema, que é anexo do
-    # artigo: o porquê fica em comentário para não virar texto de anexo.
-    #
-    # `extra="forbid"` porque o modelo descreve o arquivo **inteiro**: campo novo
-    # é mudança de forma, e mudança de forma passa pelo `schema_version`, que
-    # existe para que a janela de retomada da ADR-0012 não atravesse uma em
-    # silêncio.
+    # `extra="forbid"`: campo novo é mudança de forma, e mudança de forma tem
+    # que passar pelo `schema_version` — não entrar em silêncio.
     model_config = ConfigDict(strict=True, extra="forbid")
 
     schema_version: Literal[SCHEMA_VERSION]
@@ -121,6 +116,4 @@ def render_json_schema() -> str:
     coisa.
     """
     schema: dict[str, Any] = RunMeta.model_json_schema()
-    # `ensure_ascii=False`: o anexo é lido por gente, e acento escapado como
-    # `\u00e7` é ruído num documento que vai para o artigo.
     return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"

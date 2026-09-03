@@ -108,7 +108,6 @@ def _check_aware_timestamp(field: str, value: Any) -> None:
         raise MetaError(f"{field}: timestamp sem offset de fuso: {value!r}")
 
 
-# A tabela da ADR-0022, na ordem em que ela a escreve.
 _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "schema_version": _check_schema_version,
     "scenario_id": _check_non_empty_str,

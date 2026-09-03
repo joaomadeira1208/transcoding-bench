@@ -35,9 +35,9 @@ META_SCHEMA_PATH = ROLE_ROOT / "meta.schema.json"
 # raciocínio que escreveu o modelo, então valida Python contra Python. A âncora
 # de verdade do contrato cross-language é um `meta.json` que o bash produziu, e
 # ela chega com o smoke (ADR-0022).
+
 _VALID: dict[str, Any] = {
     "schema_version": "1",
-    # Ecoados verbatim do objeto de run (decisão D4 da spec).
     "scenario_id": "libx264_2160p_1080p_bbb_c7g_rep1",
     "warmup": False,
     "seed": 20260808,
@@ -59,16 +59,13 @@ _VALID: dict[str, Any] = {
     "strip_audio": True,
     "container": "mkv",
     "scale_flags": "lanczos",
-    # Cunhados pela Execução.
     "run_id": "9f0c4a2e-6b41-4d5f-8a37-2f1c8de0b7a4",
     "started_at": "2026-08-08T10:00:00+00:00",
     "finished_at": "2026-08-08T10:12:31+00:00",
     "exit_code": 0,
-    # Argumentos de bootstrap.
     "commit": "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900",
     "instance_id": "i-0123456789abcdef0",
     "instance_type": "c7g.xlarge",
-    # Copiado da imagem.
     "versions": {
         "ffmpeg": "n7.1",
         "libx264": "31e19f92",

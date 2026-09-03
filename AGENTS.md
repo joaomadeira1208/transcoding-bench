@@ -22,6 +22,14 @@ Before creating a local environment or invoking a pinned tool, check the local v
 
 A comment earns its place only if it says something the code cannot and if it is extremally important. The code already states *what* it does — restating that duplicates a fact that will drift out of sync. What code cannot state: why this option and not the obvious alternative, what breaks if someone changes it, which failure mode it defends against, and which outside constraint forces it (an ADR, a tool's actual behavior, the experimental design).
 
+Three tests before a comment stays:
+
+- **Deletion.** If the comment vanished, what would break? If the answer is "nothing, the file is just less explained", it goes. Being interesting is not the bar.
+- **One home per fact.** A fact lives in a comment *or* a README *or* an ADR — never in two of them. The duplicate is the copy that goes stale in silence.
+- **Not already enforced.** Skip what a linter, a type or a test already guarantees — `hadolint`, `shellcheck`, the pydantic model of the `meta.json`.
+
+Never calibrate comment density against what is already in this repo: it is still being pruned, and over-commenting — not under-commenting — is the failure mode observed so far. Config and infrastructure files (Dockerfile, CI, pre-commit) attract the most over-explaining, because every line rests on some external tool's behaviour; the deletion test bites hardest there.
+
 ### Commits
 
 Every commit message must follow Conventional Commits 1.0.0: `<type>[optional scope][!]: <description>`.

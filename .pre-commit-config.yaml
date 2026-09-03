@@ -2,9 +2,10 @@
 # hooks, nas mesmas versões pinadas, então não há drift entre `pre-commit run
 # --all-files` na máquina do pesquisador e o job do GitHub Actions.
 #
-# O conjunto entra completo desde já (ADR-0017/0022): os hooks de shell,
-# Terraform e Docker ficam inertes enquanto `encode/`, `infra/` e `docker/` não
-# existirem — pre-commit pula hook cujo filtro de arquivos não casa com nada.
+# O conjunto entra completo desde já (ADR-0017/0022): os hooks de shell e
+# Terraform ficam inertes enquanto `encode/` e `infra/` não existirem —
+# pre-commit pula hook cujo filtro de arquivos não casa com nada. O de Docker
+# passou a trabalhar com o `docker/Dockerfile`.
 #
 # Linters não entram em nenhum `requirements`: o pre-commit gerencia os próprios
 # ambientes (ADR-0017).

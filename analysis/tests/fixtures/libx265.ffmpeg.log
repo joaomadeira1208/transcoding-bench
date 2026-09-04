@@ -1,0 +1,60 @@
+ffmpeg version n8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 13 (Ubuntu 13.3.0-6ubuntu2~24.04.1)
+  configuration: --prefix=/usr/local --pkg-config-flags=--static --extra-cflags='-march=native' --extra-cxxflags='-march=native' --extra-libs=-lstdc++ --enable-gpl --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvmaf --disable-shared --enable-static --disable-doc --disable-debug
+  libavutil      60. 26.102 / 60. 26.102
+  libavcodec     62. 28.102 / 62. 28.102
+  libavformat    62. 12.102 / 62. 12.102
+  libavdevice    62.  3.102 / 62.  3.102
+  libavfilter    11. 14.102 / 11. 14.102
+  libswscale      9.  5.102 /  9.  5.102
+  libswresample   6.  3.102 /  6.  3.102
+Input #0, matroska,webm, from '/work/masters/bbb_1080p.mkv':
+  Metadata:
+    ENCODER         : Lavf62.12.102
+  Duration: 00:00:05.00, start: 0.000000, bitrate: 21117 kb/s
+  Stream #0:0: Video: ffv1, yuv420p(tv, progressive), 1920x1080, SAR 1:1 DAR 16:9, 24 fps, 24 tbr, 1k tbn
+    Metadata:
+      ENCODER         : Lavc62.28.102 ffv1
+      DURATION        : 00:00:05.000000000
+Stream mapping:
+  Stream #0:0 -> #0:0 (ffv1 (native) -> hevc (libx265))
+x265 [info]: HEVC encoder version 4.2
+x265 [info]: build info [Linux][GCC 13.3.0][64 bit] 8bit
+x265 [info]: using cpu capabilities: NEON Neon_DotProd
+x265 [info]: Main profile, Level-4 (Main tier)
+x265 [info]: Thread pool created using 2 threads
+x265 [info]: Slices                              : 1
+x265 [info]: frame threads / pool features       : 1 / wpp(17 rows)
+set_mempolicy: Operation not permitted
+set_mempolicy: Operation not permitted
+set_mempolicy: Operation not permitted
+set_mempolicy: Operation not permitted
+set_mempolicy: Operation not permitted
+set_mempolicy: Operation not permitted
+x265 [info]: Coding QT: max CU size, min CU size : 64 / 8
+x265 [info]: Residual QT: max TU size, max depth : 32 / 1 inter / 1 intra
+x265 [info]: ME / range / subpel / merge         : hex / 57 / 2 / 3
+x265 [info]: Lookahead / bframes / badapt        : 20 / 4 / 2
+x265 [info]: b-pyramid / weightp / weightb       : 1 / 1 / 0
+x265 [info]: References / ref-limit  cu / depth  : 3 / off / on
+x265 [info]: AQ: mode / str / qg-size / cu-tree  : 2 / 1.0 / 32 / 1
+x265 [info]: Rate Control / qCompress            : CRF-28.0 / 0.60
+x265 [info]: tools: rd=3 psy-rd=2.00 early-skip rskip mode=1 signhide tmvp
+x265 [info]: tools: b-intra strong-intra-smoothing lslices=6 deblock sao
+Output #0, matroska, to '/work/out/output.mkv':
+  Metadata:
+    encoder         : Lavf62.12.102
+  Stream #0:0: Video: hevc, yuv420p(tv, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 24 fps, 1k tbn
+    Metadata:
+      encoder         : Lavc62.28.102 libx265
+      DURATION        : 00:00:05.000000000
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.50    frame=    7 fps=7.0 q=35.2 size=       3KiB time=00:00:00.20 bitrate= 113.7kbits/s speed=0.208x elapsed=0:00:01.00    frame=   18 fps= 12 q=35.0 size=       3KiB time=00:00:00.66 bitrate=  35.5kbits/s speed=0.444x elapsed=0:00:01.50    frame=   30 fps= 15 q=35.2 size=       3KiB time=00:00:01.16 bitrate=  20.3kbits/s speed=0.583x elapsed=0:00:02.00    frame=   40 fps= 16 q=30.8 size=       3KiB time=00:00:01.58 bitrate=  15.0kbits/s speed=0.633x elapsed=0:00:02.50    frame=   47 fps= 16 q=28.5 size=       3KiB time=00:00:01.87 bitrate=  12.6kbits/s speed=0.625x elapsed=0:00:03.00    frame=   57 fps= 16 q=33.0 size=    1024KiB time=00:00:02.29 bitrate=3660.5kbits/s speed=0.654x elapsed=0:00:03.50    frame=   68 fps= 17 q=29.9 size=    1024KiB time=00:00:02.75 bitrate=3050.4kbits/s speed=0.687x elapsed=0:00:04.00    frame=   79 fps= 18 q=35.2 size=    1024KiB time=00:00:03.20 bitrate=2614.6kbits/s speed=0.713x elapsed=0:00:04.50    frame=   89 fps= 18 q=30.1 size=    1024KiB time=00:00:03.62 bitrate=2314.1kbits/s speed=0.725x elapsed=0:00:05.00    frame=   97 fps= 18 q=35.2 size=    2048KiB time=00:00:03.95 bitrate=4238.5kbits/s speed=0.719x elapsed=0:00:05.50    frame=  112 fps= 19 q=30.7 size=    2048KiB time=00:00:04.58 bitrate=3660.5kbits/s speed=0.764x elapsed=0:00:06.00    [out#0/matroska @ 0xc9844a8ed6e0] video:2712KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:2KiB muxing overhead: 0.143717%
+frame=  120 fps= 19 q=35.1 Lsize=    2716KiB time=00:00:04.91 bitrate=4525.0kbits/s speed=0.783x elapsed=0:00:06.27    
+x265 [info]: frame I:      3, Avg QP:29.05  kb/s: 9316.86 
+x265 [info]: frame P:     39, Avg QP:30.41  kb/s: 6846.68 
+x265 [info]: frame B:     78, Avg QP:34.25  kb/s: 3052.80 
+x265 [info]: Weighted P-Frames: Y:0.0% UV:0.0%
+
+encoded 120 frames in 6.27s (19.15 fps), 4442.42 kb/s, Avg QP:32.87

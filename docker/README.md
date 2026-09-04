@@ -15,8 +15,14 @@ runtime.
     docker run --rm transcoding-bench ffmpeg -hide_banner -encoders
 
 Na campanha o build roda **na própria instância**, logo depois do `git clone`, e
-fora do CI (ADR-0013). O que o CI cobre é o `hadolint`; o resto é o build local e
-a camada de aceite manual da Spec 2.
+fora do CI (ADR-0013). O que o CI cobre é o `hadolint`; o build em si e o que a
+imagem entrega são verificados pela camada de aceite do `smoke/`, que a builda no
+Mac e roda as ferramentas de dentro dela:
+
+    .venv-smoke/bin/python -m pytest smoke/ --docker
+
+Um pin desta tabela que mude é o momento de regenerar as capturas que alimentam
+os testes dos parsers do `analysis/` — o README do `smoke/` diz como.
 
 ## Pins
 

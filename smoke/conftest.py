@@ -384,3 +384,53 @@ def consolidate_with_cli(runs_dir: Path, out: Path) -> subprocess.CompletedProce
         text=True,
         check=False,
     )
+
+
+DOCKER_OPTION = "--docker"
+CAPTURE_DIR_OPTION = "--capture-dir"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        DOCKER_OPTION,
+        action="store_true",
+        default=False,
+        help="roda a camada de aceite: builda a imagem e exercita as ferramentas reais",
+    )
+    parser.addoption(
+        CAPTURE_DIR_OPTION,
+        default=None,
+        help="diretório onde depositar as saídas cruas capturadas, para virarem fixtures",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", f"docker: camada de aceite dentro da imagem, só coletada com {DOCKER_OPTION}"
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Desmarca o aceite quando não se pediu por ele.
+
+    Desmarcar, e não pular: um `skip` ainda montaria as fixtures do módulo, e com
+    elas o build da imagem.
+    """
+    if config.getoption(DOCKER_OPTION):
+        return
+    deselected = [item for item in items if item.get_closest_marker("docker")]
+    if not deselected:
+        return
+    config.hook.pytest_deselected(items=deselected)
+    items[:] = [item for item in items if item.get_closest_marker("docker") is None]
+
+
+@pytest.fixture(scope="session")
+def capture_dir(pytestconfig: pytest.Config) -> Path | None:
+    """O diretório de `--capture-dir`, criado; `None` quando não se pediu por ele."""
+    requested = pytestconfig.getoption(CAPTURE_DIR_OPTION)
+    if requested is None:
+        return None
+    destination = Path(requested).resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    return destination

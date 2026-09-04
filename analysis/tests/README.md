@@ -22,8 +22,10 @@ denominador zero virando `NaN` no meio de uma média, e um run falho sumindo da
 tabela em vez de aparecer com o seu `exit_code`. Nenhuma delas estoura; todas
 mudam o que o artigo reporta.
 
-Os parsers dos artefatos de instrumentação são testados contra a factory pelo
-mesmo motivo e com a mesma ressalva: uma chave renomeada no format string do
-`/usr/bin/time` ou um `%CPU` que mudou de coluna no `pidstat` esvaziam uma coluna
-sem derrubar nada. A âncora forte deles é o `smoke/`, que consolida a árvore
-recém-escrita pelo `run_all.sh`.
+Os parsers dos artefatos de instrumentação apontam para as mesmas falhas caladas
+— uma chave renomeada no format string do `/usr/bin/time`, um `%CPU` que mudou de
+coluna no `pidstat` —, e a âncora deles já não é a factory: o caso feliz de cada
+um roda contra a captura de `fixtures/`, que a camada de aceite do `smoke/`
+trouxe das ferramentas de verdade. A factory guarda o que a ferramenta não produz
+sob encomenda. A outra âncora é o `smoke/` consolidando a árvore recém-escrita
+pelo `run_all.sh`.

@@ -80,4 +80,9 @@ seja guarda automática, não revisão de diff.
 
     .venv-smoke/bin/python -m pytest smoke/
 
+O que os shims não podem dizer — que o encoder aceita o preset e os
+`encoder_args` declarados, que o `/usr/bin/time` emite JSON com aquele format
+string — é a camada de aceite do `smoke/` que diz, opt-in e fora do CI
+(`pytest smoke/ --docker`).
+
 `shellcheck` e `shfmt` rodam no pre-commit, que é a casa oficial dos linters.

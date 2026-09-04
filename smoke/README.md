@@ -47,5 +47,51 @@ vazia para a campanha inteira, e o `perf stat` não falha quando o evento não
 existe.
 
 Eles são a única superfície nova que pode envelhecer mal — fake que diverge do
-real —, e a mitigação é o que vem depois: a camada de aceite manual com Docker e
-o smoke AWS, que são onde as ferramentas de verdade falam.
+real —, e a mitigação é o que vem depois: a camada de aceite abaixo e o smoke
+AWS, que são onde as ferramentas de verdade falam.
+
+## A camada de aceite
+
+O degrau seguinte da escada (ADR-0022): a mesma imagem que a Instância builda,
+buildada aqui, e dentro dela o FFmpeg, o `/usr/bin/time`, o `pidstat` e o `perf`
+**de verdade** em volta do argv que o plano gerou, sobre um clip de 5 s.
+
+    .venv-smoke/bin/python -m pytest smoke/ --docker
+
+É **opt-in** e fica desmarcado por padrão: sem o flag, o que está marcado com
+`docker` é desselecionado na coleta e `pytest smoke/` segue sendo o laço de
+segundos que o CI roda, sem Docker, sem FFmpeg e sem credencial. O build da
+imagem leva de 10 a 20 min na primeira vez; o resto são minutos.
+
+O que ele exercita e a camada com shims não alcança: que o encoder aceita o
+preset, o CRF e os `encoder_args` que o `config/experiment.toml` declara para
+ele; que o `/usr/bin/time` emite JSON com aquele format string; que o `pidstat`
+escreve a coluna `%CPU` que o parser procura pelo nome; que a extração de
+bitstream funciona com o muxer que cada um dos três codecs declara; e que os dez
+`pmu_events` são nomes que o `perf stat` reconhece — ele recusa o que não
+conhece.
+
+O argv, o format string e as flags do `pidstat` não são escritos aqui: saem do
+rastro que os shims registraram, na mesma sessão. Transcrevê-los faria a captura
+concordar com o teste enquanto divergia do `run_scenario.sh` que a campanha roda.
+
+O que continua fora de alcance é o **PMU**: o Docker no Mac não o expõe ao guest,
+então todo contador de hardware volta `<not supported>`. Se cada evento retorna
+valor em cada arquitetura é pergunta do smoke AWS, e é o modo de falha mais caro
+do projeto.
+
+O `run_scenario.sh` **não** é invocado: não se está medindo nada, e um harness que
+o chamasse precisaria de um modo degradado sem `perf` — a alavanca que a campanha
+não pode ter. O `acceptance.sh` é esse harness, e chega ao container pelo stdin do
+`bash -s`, sem bind-mount: quais diretórios do Mac a VM do Docker compartilha
+varia de máquina para máquina.
+
+### Regenerar as fixtures
+
+    .venv-smoke/bin/python -m pytest smoke/ --docker \
+        --capture-dir=analysis/tests/fixtures
+
+Copia as saídas cruas capturadas para onde os testes dos parsers do `analysis/`
+as leem. Sem o flag, a captura morre no `tmp_path` e nada de runtime chega perto
+do histórico. É passo manual, e a hora de rodá-lo é quando um pin do
+`docker/Dockerfile` muda.

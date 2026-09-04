@@ -1,0 +1,20 @@
+Linux 6.8.0-117-generic (9a30a14ceeb9) 	09/04/26 	_aarch64_	(2 CPU)
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+02:19:56        0        32  172.00   20.00    0.00    0.00  192.00     1  90703.00      0.00 1327392  446024  22.24  ffmpeg
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+02:19:57        0        32  184.00    1.00    0.00    0.00  185.00     1   1078.00      0.00 1327392  450248  22.45  ffmpeg
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+02:19:58        0        32  188.00    1.00    0.00    0.00  189.00     1    472.00      0.00 1327392  452040  22.54  ffmpeg
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+02:19:59        0        32  188.00    0.00    0.00    0.00  188.00     1    236.00      0.00 1327392  453064  22.59  ffmpeg
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+02:20:00        0        32  187.00    1.00    0.00    0.00  188.00     1   1123.00      0.00 1303556  442240  22.05  ffmpeg
+
+# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
+02:20:01        0        32  185.00    0.00    0.00    0.00  185.00     1     68.00      0.00 1303556  442496  22.06  ffmpeg
+

@@ -37,16 +37,6 @@ def elapsed_s(meta: dict[str, Any]) -> float:
 
 
 @pytest.fixture(scope="session")
-def block(plan) -> dict[str, Any]:
-    return plan["blocks"][0]
-
-
-@pytest.fixture(scope="session")
-def loop(block, run_all) -> Loop:
-    return run_all([block])
-
-
-@pytest.fixture(scope="session")
 def loop_with_a_failed_run(block, run_all) -> Loop:
     """O segundo encode do bloco falha; os outros cinco seguem bem."""
     return run_all([block], SMOKE_FFMPEG_EXIT="1", SMOKE_FFMPEG_NTH="2")

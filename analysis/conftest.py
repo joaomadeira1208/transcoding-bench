@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -56,20 +57,121 @@ _VALID: dict[str, Any] = {
 }
 
 
+# O format string do `run_scenario.sh` do outro lado da fronteira: as chaves são o
+# contrato, e os valores são os que o GNU time emite — segundos com decimal,
+# contadores inteiros.
+_VALID_TIME: dict[str, Any] = {
+    "elapsed_s": 312.45,
+    "user_s": 1180.22,
+    "sys_s": 12.31,
+    "max_rss_kb": 524288,
+    "major_page_faults": 0,
+    "minor_page_faults": 183422,
+    "fs_inputs": 0,
+    "fs_outputs": 81920,
+    "voluntary_ctx_switches": 1204,
+    "involuntary_ctx_switches": 9812,
+    "exit_status": 0,
+}
+
+# Os dez eventos da ADR-0006, com valores que fazem os derivados sair redondos:
+# IPC 1.5, cache miss rate 0.25, branch mispredict rate 0.02.
+_VALID_COUNTERS: dict[str, Any] = {
+    "cycles": 4_000_000_000,
+    "instructions": 6_000_000_000,
+    "cache-references": 200_000_000,
+    "cache-misses": 50_000_000,
+    "branch-instructions": 800_000_000,
+    "branch-misses": 16_000_000,
+    "task-clock": 312450.0,
+    "context-switches": 1204,
+    "cpu-migrations": 12,
+    "page-faults": 183422,
+}
+
+_VALID_CPU_PCT = (98.0, 96.0, 94.0)
+
+
 def make_meta(**overrides: Any) -> dict[str, Any]:
     """Um `meta.json` válido como dict, com overrides por campo de topo."""
-    meta = copy.deepcopy(_VALID)
-    for field, value in overrides.items():
-        if value is _ABSENT:
-            meta.pop(field, None)
-        else:
-            meta[field] = value
-    return meta
+    return _with_overrides(_VALID, overrides)
 
 
 def make_meta_json(**overrides: Any) -> str:
     """O mesmo, já serializado — é sobre os **bytes crus** que o modelo roda."""
     return json.dumps(make_meta(**overrides), indent=2) + "\n"
+
+
+def make_time_json(**overrides: Any) -> str:
+    """Um `time.json`, como o `/usr/bin/time` o emite pelo seu format string."""
+    return json.dumps(_with_overrides(_VALID_TIME, overrides)) + "\n"
+
+
+def make_perf_json(counters: Mapping[str, Any] | None = None, header: str = "") -> str:
+    """Um `perf.json`: um objeto por linha, o contador como string.
+
+    `header` entra como primeira linha porque o cabeçalho do `perf stat -j` varia
+    com a versão e o parser tem de atravessá-lo.
+    """
+    if counters is None:
+        counters = _VALID_COUNTERS
+    lines = [header] if header else []
+    lines += [
+        json.dumps(
+            {
+                "counter-value": value if isinstance(value, str) else f"{value:.6f}",
+                "unit": "",
+                "event": event,
+                "event-runtime": 1000000,
+                "pcnt-running": 100.00,
+            }
+        )
+        for event, value in counters.items()
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def make_pidstat(cpu_pct: Sequence[float] = _VALID_CPU_PCT) -> str:
+    """Uma `pidstat.txt`: o banner, o cabeçalho prefixado por `#` e uma amostra
+    por segundo — texto delimitado por espaço, nunca CSV (ADR-0007)."""
+    lines = [
+        "Linux 6.8.0-31-generic (ip-10-0-0-1) \t08/08/2026 \t_aarch64_\t(4 CPU)",
+        "",
+        "#      Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU"
+        "  minflt/s  majflt/s     VSZ     RSS   %MEM  Command",
+    ]
+    lines += [
+        f" {1786_000_000 + second}          0      4242   92.00    6.00    0.00    0.00"
+        f"  {pct:6.2f}     0    120.00      0.00 2314520  524288   1.50  ffmpeg"
+        for second, pct in enumerate(cpu_pct)
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def make_ffmpeg_log(frames: int = 7200, fps: float = 23.4, bitrate: str = "4521.3") -> str:
+    """Um `ffmpeg.log`: o banner, e as linhas de `-stats` separadas por `\r`.
+
+    A última é a que conta, e é a única que traz `Lsize` em vez de `size`.
+    """
+    progress = "\r".join(
+        (
+            "frame=  240 fps= 24.0 q=28.0 size=    1024KiB time=00:00:10.00 "
+            "bitrate=3900.0kbits/s speed=1.10x",
+            f"frame={frames:5d} fps={fps:5.1f} q=-1.0 Lsize=  184320KiB time=00:05:00.00 "
+            f"bitrate={bitrate}kbits/s speed=0.96x",
+        )
+    )
+    return f"ffmpeg version n7.1 Copyright (c) 2000-2026 the FFmpeg developers\n{progress}\n"
+
+
+def _with_overrides(base: dict[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
+    record = copy.deepcopy(base)
+    for field, value in overrides.items():
+        if value is _ABSENT:
+            record.pop(field, None)
+        else:
+            record[field] = value
+    return record
 
 
 class _Absent:

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from pydantic import ValidationError
-from run_meta import load_meta, render_json_schema
+from run_meta import load_meta, offending_fields, render_json_schema
 
 EXIT_OK = 0
 EXIT_INVALID_META = 1
@@ -22,10 +22,7 @@ EXIT_UNREADABLE = 2
 
 def format_errors(path: Path, error: ValidationError) -> str:
     """Uma linha por campo ofensor, prefixada pelo arquivo que as produziu."""
-    return "\n".join(
-        f"{path}: {'.'.join(str(part) for part in item['loc']) or '<raiz>'}: {item['msg']}"
-        for item in error.errors()
-    )
+    return "\n".join(f"{path}: {field}" for field in offending_fields(error))
 
 
 def main() -> int:

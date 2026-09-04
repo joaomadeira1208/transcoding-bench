@@ -37,6 +37,15 @@ prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
 `list-objects-v2` que o `resume.py` usará) — nunca semântica do S3, e por isso
 sem localstack.
 
+O laço fecha do outro lado: a árvore que o `run_all.sh` acabou de escrever é
+consolidada invocando `analysis/consolidate.py`, e o Parquet que sai é lido aqui.
+É o único lugar em que os parsers dos quatro artefatos encontram texto que não
+foi escrito por eles — daí o `pyarrow` no `requirements-dev.txt`. A ponte que
+essa asserção guarda é a dos eventos de PMU: trocar um evento no
+`config/experiment.toml` sem trocar a coluna do `analysis/` deixaria a métrica
+vazia para a campanha inteira, e o `perf stat` não falha quando o evento não
+existe.
+
 Eles são a única superfície nova que pode envelhecer mal — fake que diverge do
 real —, e a mitigação é o que vem depois: a camada de aceite manual com Docker e
 o smoke AWS, que são onde as ferramentas de verdade falam.

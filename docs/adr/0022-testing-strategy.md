@@ -126,6 +126,8 @@ Rodar a imagem Docker real no Mac foi rejeitado por três razões. `perf stat` n
 
 **Restrição de projeto: o smoke nunca importa; só invoca.** Chama `python orchestrator/<gerador>.py` e `bash encode/run_all.sh` como subprocessos e inspeciona artefatos. Importar código do orquestrador exigiria `sys.path` na marra ou `pip install -e`, que a ADR-0017 rejeitou junto com o `pyproject.toml`. Tratar o orquestrador como CLI caixa-preta é o correto pra um smoke de qualquer forma, e mantém `smoke/requirements-dev.txt` em duas linhas (`pytest`, `pydantic`).
 
+**Emenda: são três linhas, não duas.** O `analysis/consolidate.py` também entra como caixa-preta, sobre a árvore que o `run_all.sh` acabou de escrever, e verificar o que ele produziu exige ler um Parquet — daí `pyarrow` ao lado de `pytest` e `pydantic`. A restrição não muda: continua sendo invocação, nunca import. O que a consolidação no smoke compra é o único lugar em que os parsers dos quatro artefatos encontram texto que não foi escrito por eles, e a ponte entre os eventos de PMU do `config/experiment.toml` e as colunas do `analysis/` — trocar um evento lá sem trocar a coluna aqui deixaria a métrica vazia para a campanha inteira, e o `perf stat` não falha quando o evento não existe.
+
 Esta camada **entra no CI** como terceiro job: sem Docker, sem credencial AWS, sem FFmpeg de verdade, ela respeita literalmente as duas exclusões da ADR-0017. E ganha uma propriedade que nenhuma outra camada tem: com o `ffmpeg` shimado, **o `output.sha256` é controlável**, então o caminho de grupo hash-divergente do `quality_triage.py` — o ramo pelo qual a ADR-0005 existe e que na campanha real quase certamente nunca dispara — passa a ser exercitável sob demanda.
 
 ### Camada AWS — caminho completo, vídeo curto
@@ -180,7 +182,7 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 ## Consequences
 
 - Emenda à allowlist do `.gitignore` (ADR-0017): `requirements-dev.txt`, fixtures `.json` sob `fixtures/`, e o workflow do CI — nenhum dos três estava permitido, apesar de a ADR-0017 depender dos três.
-- `smoke/` entra como diretório de topo, com um terceiro `requirements-dev.txt` (`pytest` + `pydantic`). A ADR-0017 falava em dois.
+- `smoke/` entra como diretório de topo, com um terceiro `requirements-dev.txt` (`pytest`, `pydantic` e — pela emenda acima — `pyarrow`). A ADR-0017 falava em dois.
 - O CI passa a ter três jobs: `pre-commit run --all-files` (agora incluindo `terraform validate` e `hadolint`), pytest por papel Python em venvs separados, e o smoke local. Continua sendo evidência anexada ao PR, não gate autônomo.
 - A ADR-0019 afirmava que "o único leitor programático é o `consolidate.py`"; são três, e dois deles são stdlib-only. Corrigido lá.
 - A fixture-âncora do modelo pydantic só existe depois do primeiro smoke AWS — é sequenciamento de desenvolvimento, não detalhe.

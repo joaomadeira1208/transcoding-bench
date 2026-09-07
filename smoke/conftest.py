@@ -22,6 +22,7 @@ VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 META_CHECK_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
+PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
 
 COMMIT = "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900"
 INSTANCE_ID = "i-0123456789abcdef0"
@@ -112,27 +113,26 @@ class Loop(ShimTrail):
         return [Path(argv[-1]).parent.name for argv in self.argv("ffmpeg") if argv[-1] != "-"]
 
 
-def _load_experiment() -> dict[str, Any]:
-    with EXPERIMENT_TOML.open("rb") as handle:
+def _load_config(path: Path) -> dict[str, Any]:
+    with path.open("rb") as handle:
         return tomllib.load(handle)
 
 
 # A expectativa do argv sai daqui, e não do plano: comparar com o plano pularia o
-# elo que se quer verificar. Constante, e não fixture, porque a matriz de
-# parametrização dos testes sai dela.
-EXPERIMENT = _load_experiment()
+# elo que se quer verificar. Constantes, e não fixtures, porque a matriz de
+# parametrização dos testes sai delas.
+EXPERIMENT = _load_config(EXPERIMENT_TOML)
+PILOT = _load_config(PILOT_TOML)
 
 
-@pytest.fixture(scope="session")
-def plan(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    """O plano canônico, gerado invocando o CLI do orquestrador como caixa-preta."""
-    out_dir = tmp_path_factory.mktemp("scenarios")
+def _generate_plan(config: Path, out_dir: Path) -> dict[str, Any]:
+    """O canônico de uma definição, gerado invocando o CLI do orquestrador."""
     subprocess.run(
         [
             sys.executable,
             str(GENERATE_SCENARIOS),
             "--config",
-            str(EXPERIMENT_TOML),
+            str(config),
             "--out",
             str(out_dir),
         ],
@@ -141,6 +141,18 @@ def plan(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         text=True,
     )
     return json.loads((out_dir / "canonical.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="session")
+def plan(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """O plano canônico da campanha, pelo CLI como caixa-preta."""
+    return _generate_plan(EXPERIMENT_TOML, tmp_path_factory.mktemp("scenarios"))
+
+
+@pytest.fixture(scope="session")
+def pilot_plan(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """O plano canônico do piloto, pelo mesmo CLI e do mesmo jeito."""
+    return _generate_plan(PILOT_TOML, tmp_path_factory.mktemp("pilot-scenarios"))
 
 
 @pytest.fixture(scope="session")
@@ -155,10 +167,24 @@ def shim_bin(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def masters_dir(tmp_path_factory: pytest.TempPathFactory, plan: dict[str, Any]) -> Path:
-    """Um placeholder por Master que o plano nomeia."""
+def masters_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+    plan: dict[str, Any],
+    pilot_plan: dict[str, Any],
+) -> Path:
+    """Um placeholder por Master que a união dos dois planos nomeia.
+
+    A união e não só os da campanha: um `pilot.toml` que amanhã declare um vídeo
+    a mais tem de quebrar o smoke por asserção, não por Master ausente do disco.
+    """
     masters = tmp_path_factory.mktemp("masters")
-    for name in {run["master"] for block in plan["blocks"] for run in block["runs"]}:
+    named = {
+        run["master"]
+        for definition in (plan, pilot_plan)
+        for block in definition["blocks"]
+        for run in block["runs"]
+    }
+    for name in named:
         (masters / name).write_bytes(MASTER_BYTES)
     return masters
 
@@ -258,15 +284,20 @@ def run_all(
     shim_bin: Path,
     masters_dir: Path,
     versions_file: Path,
-    plan: dict[str, Any],
 ):
-    """Roda o `run_all.sh` de verdade sobre um plano com os `blocks` dados.
+    """Roda o `run_all.sh` de verdade sobre os `blocks` dados do `plan` dado.
 
-    O restante do plano é o canônico: a fatia que a Instância recebe tem a mesma
-    forma dele, só com menos blocos.
+    O restante da fatia é o topo do canônico de onde os blocos saíram — campanha
+    ou piloto: a fatia que a Instância recebe tem a forma daquele plano, só com
+    menos blocos, e é essa forma que o laço tem de atravessar.
     """
 
-    def _run_all(blocks: list[dict[str, Any]], *flags: str, **shim_env: str) -> Loop:
+    def _run_all(
+        plan: dict[str, Any],
+        blocks: list[dict[str, Any]],
+        *flags: str,
+        **shim_env: str,
+    ) -> Loop:
         workdir = tmp_path_factory.mktemp("loop")
         env = shim_environment(shim_bin, workdir, shim_env)
         plan_slice = {**plan, "blocks": blocks}
@@ -307,9 +338,9 @@ def block(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="session")
-def loop(block: dict[str, Any], run_all) -> Loop:
+def loop(plan: dict[str, Any], block: dict[str, Any], run_all) -> Loop:
     """A árvore de um bloco: o warm-up mais as cinco Replicações."""
-    return run_all([block])
+    return run_all(plan, [block])
 
 
 @pytest.fixture(scope="session")

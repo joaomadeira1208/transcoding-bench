@@ -18,6 +18,17 @@ se inspeciona são os artefatos. Importar código de outro papel exigiria `sys.p
 na marra ou `pip install -e`, as duas coisas que a ADR-0017 rejeitou — e tratar
 os outros papéis como caixa-preta é o correto para um smoke de qualquer forma.
 
+**Um bloco do piloto atravessa o mesmo caminho.** O `config/pilot.toml` é a
+segunda definição do repositório (ADR-0019), e o plano dele sai do mesmo CLI,
+invocado do mesmo jeito — só o `--config` muda. O primeiro bloco da fatia `c7g`
+desse plano é dirigido pelo mesmo `run_all.sh`, com os mesmos shims, e
+consolidado pelo mesmo `consolidate.py`; o argv que sai dali é conferido contra o
+`pilot.toml`. O que muda entre esse bloco e o da campanha é o plano, e nada mais
+— qualquer ramo "só no piloto" é exatamente o que o piloto não testaria
+(ADR-0022). Os caminhos de falha não se repetem sobre ele: são propriedade dos
+scripts, e o piloto não tem script próprio. Os masters placeholder são nomeados
+pela união dos dois planos.
+
 Os shims moram em `shims/` como `*.sh` e são instalados com o nome do binário que
 substituem num diretório temporário que entra no PATH: a allowlist do
 `.gitignore` (ADR-0017) admite fonte por extensão, e um arquivo chamado `ffmpeg`

@@ -163,6 +163,33 @@ O passo 2 não é opcional e não é redundante com o passo 1. A ADR-0006 regist
 
 Sequenciamento: smoke local verde → aceite manual com Docker → smoke AWS → a fixture-âncora sai do `meta.json` do c7g → campanha. **Emenda:** o "até o smoke AWS existir, roda só contra a factory" vale só para a âncora do **`meta.json` de campanha**; as âncoras dos parsers de instrumentação chegam antes, com o aceite manual.
 
+### Camada piloto — a campanha em escopo menor
+
+**Emenda: entre o smoke AWS e a campanha roda um piloto.** O smoke AWS prova que o caminho roda e que a PMU responde; ele não mede nada, e é por desenho — clip de 30 s, 2 runs. O que só aparece com dados e volume reais fica sem verificação até a hora 40 da campanha: o filtro de warm-up e a dedup sobre blocos inteiros, as três arquiteturas em paralelo, o triage hash-first com grupos reais, o Juiz sobre outputs reais, a tabela com números plausíveis, e quanto tempo e dinheiro a campanha custa de fato. O piloto é isso: **a campanha, em escopo menor**. Roda um piloto.
+
+**Mesmo código, sem modo piloto.** O piloto percorre exatamente o que a campanha percorre: o mesmo Terraform, o mesmo Orquestrador, os mesmos `run_all.sh`/`run_scenario.sh`, o mesmo Pass de qualidade, o mesmo `consolidate.py`, os mesmos timeouts (ADR-0012) e a mesma limpeza seletiva (ADR-0011). As únicas diferenças são a definição que entra — `config/pilot.toml` (ADR-0019) — e o bucket de destino (ADR-0011). Qualquer ramo "só no piloto" é exatamente o que o piloto não testaria.
+
+**Escopo.** 3 codecs × 1 par (1080p → 720p) × 2 vídeos × 3 instâncias, com o mesmo bloco de 6 (warm-up + 5 Replicações): 6 blocos e 36 Execuções por arquitetura, 90 linhas na tabela. Cobre cada encoder com as suas flags, os dois masters 1080p, o downscale e as três arquiteturas, em 2–4 h por instância. O par 2160p → 2160p fica de fora: é o encode mais longo (~1 h por Execução no x265) e não tem lógica própria — o master 4K é coberto pelo manifesto (ADR-0014) e o caminho pelo smoke AWS.
+
+**Gate humano** (ADR-0012). O piloto passou quando, sobre o bucket do piloto e o Parquet que saiu dele:
+
+1. todos os blocos estão completos, todo `exit_code == 0`, e nenhuma Execução chegou perto do timeout de 4 h;
+2. as dez colunas de PMU estão preenchidas em **todas** as linhas das três arquiteturas, sem nulo;
+3. `ffmpeg_frames` é igual à contagem de frames do master em toda linha (ADR-0004: 19 036 no Big Buck Bunny, 17 616 no Tears of Steel);
+4. `cpu_pct_avg` passa de 100 % em toda linha — o encode usa mais de um core;
+5. o triage agrupou 3 outputs por (codec, par, vídeo, rep) e o Juiz produziu VMAF/SSIM para a amostra;
+6. o `consolidate.py` relatou 90 linhas, 18 warm-ups fora e zero artefatos ilegíveis;
+7. o tempo medido por bloco, **extrapolado por pixels de saída** sobre a matriz inteira (o piloto mede um par barato; 2160p tem 4× os pixels de 1080p), cabe em **60 h por arquitetura** — margem sobre o teto de 72 h — e no orçamento da ADR-0012. Se não couber, a decisão (trocar timeout, cortar par, aceitar custo) é tomada antes da campanha, não descoberta na hora 40.
+
+O resultado da checklist, com o SHA que rodou, o nome do bucket e os tempos medidos, é registrado num **relatório commitado** sob `docs/`: é a evidência de que o piloto rodou e passou, e sobrevive ao bucket. O piloto é também o ensaio do procedimento humano — o pesquisador opera o Orquestrador de ponta a ponta uma vez antes de a campanha custar dois dias. Retomada não entra de propósito; só se acontecer.
+
+**Depois de um bug.** Um hotfix de classe 1 da ADR-0021 (muda medição) invalida o que o piloto mediu: piloto de novo. Um de classe 2 (encanamento) repete só o smoke AWS. A campanha roda o **mesmo SHA** que o piloto aprovou, salvo hotfix classe 2 entre os dois, registrado como a ADR-0021 manda.
+
+**O que não muda.** A fixture-âncora do `meta.json` continua saindo do smoke AWS: ela vem antes, é escrita pelo mesmo bash na mesma instância, e o que ela protege é o contrato cross-language, não o volume.
+
+A escada inteira, cada degrau disparado pelo pesquisador: smoke local → aceite manual com Docker → preparação dos masters e aprovação do manifesto (ADR-0014) → validação de fumaça do IAM (ADR-0016) → smoke AWS → **piloto** e aprovação do relatório → campanha.
+
+
 ## Verificação das camadas não-Python
 
 - **Shell:** apenas `shellcheck` + `shfmt` (ADR-0017) mais o smoke local. Sem `bats` — mas não porque o shell fique sem verificação de comportamento: o smoke já stuba `ffmpeg`/`perf`/`pidstat`/`aws` e já loga o argv, então `bats` faria o mesmo trabalho com um runner a mais, e com asserções piores do que as do pytest sobre os mesmos artefatos. A rejeição é de ferramenta redundante, não de escopo.
@@ -187,6 +214,11 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 - **Golden do `scenarios.json` commitado** — rejeitado: exigiria emenda maior na allowlist pra um artefato de runtime, e quebraria em reordenação inofensiva. A lista inline no `.py` congela o que precisa ser congelado.
 - **Mover o pydantic pro `orchestrator/`** — rejeitado: custa a invariante stdlib-only que a ADR-0017 desenhou e que o CI protege.
 - **Smoke local com Docker e vídeo real** — rejeitado: `perf` não roda no Mac e `-march=native` seria o do M-series; obrigaria um modo degradado em `run_scenario.sh`, que na campanha precisa falhar alto; e o ciclo de 10–20 min de build mata o loop de desenvolvimento. **Emenda:** o que as três razões barram é Docker no laço de desenvolvimento e no CI, e PMU no Mac — não a imagem em si. Um passo opt-in que não invoca o `run_scenario.sh` não paga nenhuma delas, e é a camada de aceite acima.
+- **Piloto no mesmo bucket da campanha** — rejeitado: os `scenario_id` do piloto são os mesmos da campanha, então o `resume.py` daria os blocos do piloto por completos e a campanha os pularia em silêncio, e a dedup dos leitores misturaria as duas. Bucket próprio (ADR-0011).
+- **Piloto como recorte do plano da campanha (os N primeiros blocos de cada fatia)** — rejeitado: a ordem é o embaralhamento com a seed, e o recorte pode não cobrir um codec ou um vídeo. Uma definição própria, subconjunto da campanha por teste (ADR-0019), cobre a matriz por construção.
+- **Piloto com a matriz inteira sobre um clip curto** — rejeitado: deixa de ser a campanha (regime estacionário, ADR-0003) e o tempo medido não extrapola.
+- **Incluir o par 2160p → 2160p no piloto para medir o pior caso** — rejeitado: meio dia por arquitetura por um número que a extrapolação por pixels aproxima; o teto de 60 h já carrega a margem.
+- **Dois pilotos (um só de encode, cedo, e um completo depois)** — rejeitado: o smoke AWS já cobre PMU em vídeo real curto, e o que só o piloto pega (estatística, triage, custo) precisa do pipeline inteiro de qualquer forma. Se o piloto falhar, ele roda de novo.
 - **Camada de aceite dentro do job de smoke do CI** — rejeitada: custaria ao CI um build de 10–20 min por PR pelo `-march=native` da CPU errada (ADR-0013), e reintroduziria em `pytest smoke/` a dependência de binário externo que a camada com shims foi desenhada pra não ter.
 - **Fixtures de instrumentação escritas à mão** — foi o que existiu até aqui, e é o que a camada de aceite substitui: o autor do parser inventando a saída da ferramenta é a mesma falha que a âncora do `meta.json` já tinha nomeado.
 - **`bats` pros scripts de shell** — rejeitado por redundância: o smoke local já dirige os `run_*.sh` com shims e já verifica o argv do FFmpeg; `bats` adicionaria um runner sem cobrir nada novo.
@@ -217,3 +249,4 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 - O smoke local não tem dependência de binário externo, então o job de CI não quebra quando a imagem do runner do GitHub muda.
 - Se o smoke revelar um evento PMU indisponível numa arquitetura, a resposta é decisão de desenho experimental (trocar o evento, ou reportar a métrica em duas das três), não de testes. Cai na ADR-0006 no dia em que ocorrer.
 - Nomes de arquivo dos módulos de teste, das factories e dos shims ficam abertos até o desenvolvimento, coerente com a ADR-0017.
+- O piloto custa um bucket a mais (ADR-0011), um `config/pilot.toml` com o seu teste de subconjunto (ADR-0019), 2–4 h de três instâncias, e um relatório commitado. É a primeira vez que se sabe quanto a campanha vai custar.

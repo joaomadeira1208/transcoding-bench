@@ -4,6 +4,8 @@
 
 O bucket S3 é criado pelo Terraform como parte da infra base e **não é destruído com urgência** — o custo de storage é ~$3.40/mês pra ~146 GB (todos os outputs), caindo pra centavos após limpeza dos `.mkv`. Pode ser destruído manualmente ao final do TCC.
 
+**Emenda: são dois buckets, com o mesmo layout.** O piloto (ADR-0022) escreve num bucket **próprio**, criado pelo mesmo Terraform e com a mesma política de retenção. O motivo é o `resume.py`: os `scenario_id` do piloto são os mesmos da campanha, e no mesmo bucket ele daria os blocos do piloto por completos e a campanha os pularia em silêncio; a dedup dos leitores misturaria as duas. O nome do bucket já chega por argumento a todo consumidor, então dois buckets não custam uma linha nos scripts. Os `masters/` do bucket do piloto são **cópia** (`aws s3 sync`, intra-região) dos do bucket da campanha, para que os dois sejam byte-idênticos e a preparação (ADR-0014) rode uma vez só. Um prefixo `pilot/` no mesmo bucket foi rejeitado: quebraria este layout, que todo leitor percorre a partir da raiz.
+
 ## Layout de prefixos do bucket (contrato)
 
 ```

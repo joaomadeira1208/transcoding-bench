@@ -15,6 +15,7 @@ from conftest import (
     make_instrumentation,
     make_video,
     real_config,
+    real_pilot_config,
 )
 from experiment_config import ConfigError, validate_config
 
@@ -75,6 +76,12 @@ EXPECTED_GEOMETRY = {
 }
 
 
+EXPECTED_SEED = 20260808
+
+# O escopo do piloto (ADR-0022): dos nove pares, só o downscale barato.
+PILOT_PAIRS = {("1080p", "720p")}
+
+
 class TestAccepts:
     def test_minimal_config(self, make_raw_config):
         config = validate_config(make_raw_config())
@@ -108,6 +115,7 @@ class TestRealExperimentToml:
     def test_is_valid(self):
         config = real_config()
 
+        assert config.seed == EXPECTED_SEED
         assert config.replications == 5
         assert config.warmup_runs == 1
         assert [c.slug for c in config.codecs] == ["libx264", "libx265", "libsvtav1"]
@@ -148,6 +156,40 @@ class TestRealExperimentToml:
             "libx265": ("medium", 28),
             "libsvtav1": ("8", 35),
         }
+
+
+class TestRealPilotToml:
+    """Âncora do piloto (ADR-0022): o segundo arquivo, sob a mesma validação."""
+
+    def test_is_valid(self):
+        config = real_pilot_config()
+
+        assert config.replications == 5
+        assert config.warmup_runs == 1
+        assert [c.slug for c in config.codecs] == ["libx264", "libx265", "libsvtav1"]
+        assert [v.slug for v in config.videos] == ["bbb", "tos"]
+        assert [i.id for i in config.instances] == ["c7g", "c7i", "c7a"]
+
+    def test_declares_exactly_the_single_pair_of_the_adr(self):
+        # O único registro em que os dois arquivos diferem, e o que faz do piloto
+        # um subconjunto: qualquer par a mais é meio dia de compute a mais.
+        pairs = [(p.input_res, p.output_res) for p in real_pilot_config().pairs]
+
+        assert set(pairs) == PILOT_PAIRS
+        assert len(pairs) == len(PILOT_PAIRS)
+
+    def test_declares_the_geometry_of_every_tier_of_every_video(self):
+        # Apagar os dois tiers que o piloto não usa deixa o arquivo válido e o
+        # registro do vídeo diferente do da campanha.
+        declared = {
+            video.slug: {tier: (g.width, g.height) for tier, g in video.geometry.items()}
+            for video in real_pilot_config().videos
+        }
+
+        assert declared == EXPECTED_GEOMETRY
+
+    def test_carries_the_seed_of_the_campaign(self):
+        assert real_pilot_config().seed == EXPECTED_SEED
 
 
 class TestRejectsUpscale:

@@ -1,0 +1,95 @@
+# O piloto (ADR-0022): a campanha em escopo menor, pelo mesmo validador e pelo
+# mesmo gerador. Todo registro aqui é cópia idêntica do `experiment.toml`.
+
+[experiment]
+seed = 20260808
+replications = 5
+warmup_runs = 1
+
+[encode]
+threads = 0
+gop_size = 48
+pix_fmt = "yuv420p"
+strip_audio = true
+container = "mkv"
+scale_flags = "lanczos"
+
+[instrumentation]
+pmu_events = [
+  "cycles",
+  "instructions",
+  "cache-references",
+  "cache-misses",
+  "branch-instructions",
+  "branch-misses",
+  "task-clock",
+  "context-switches",
+  "cpu-migrations",
+  "page-faults",
+]
+
+[[codec]]
+slug = "libx264"
+codec = "h264"
+encoder = "libx264"
+preset = "medium"
+crf = 23
+encoder_args = ["-sc_threshold", "0"]
+bitstream_muxer = "h264"
+
+[[codec]]
+slug = "libx265"
+codec = "h265"
+encoder = "libx265"
+preset = "medium"
+crf = 28
+encoder_args = ["-x265-params", "scenecut=0"]
+bitstream_muxer = "hevc"
+
+[[codec]]
+slug = "libsvtav1"
+codec = "av1"
+encoder = "libsvtav1"
+preset = "8"
+crf = 35
+encoder_args = ["-svtav1-params", "scd=0"]
+bitstream_muxer = "obu"
+
+[[pair]]
+input_res = "1080p"
+output_res = "720p"
+
+[[video]]
+slug = "bbb"
+title = "Big Buck Bunny"
+
+[video.geometry]
+2160p = { width = 3840, height = 2160 }
+1080p = { width = 1920, height = 1080 }
+720p = { width = 1280, height = 720 }
+480p = { width = 854, height = 480 }
+
+[[video]]
+slug = "tos"
+title = "Tears of Steel"
+
+[video.geometry]
+2160p = { width = 3840, height = 1714 }
+1080p = { width = 1920, height = 856 }
+720p = { width = 1280, height = 572 }
+480p = { width = 854, height = 382 }
+
+[[instance]]
+id = "c7g"
+instance_type = "c7g.xlarge"
+arch = "arm64"
+
+[[instance]]
+id = "c7i"
+instance_type = "c7i.xlarge"
+arch = "x86_64"
+
+[[instance]]
+id = "c7a"
+instance_type = "c7a.xlarge"
+arch = "x86_64"

@@ -12,5 +12,16 @@ parâmetros fixos de encode, os eventos de PMU que instrumentam cada Execução
 tipo divergente ou chave desconhecida fazem a validação falhar alto nomeando o
 registro ofensor.
 
+`pilot.toml` é a definição do piloto (ADR-0022) — a campanha em escopo menor —,
+da mesma forma e lida pelo mesmo validador e pelo mesmo gerador: nenhum campo,
+flag ou modo diz "isto é um piloto". Todo registro que ele declara é **cópia
+idêntica** do homônimo do `experiment.toml`, e o que faz dele um subconjunto é o
+que ele omite — dos nove pares, só `1080p → 720p`. A regra é "idêntico ou
+ausente": é ela que mantém o diff entre os dois arquivos legível, e é por isso
+que os vídeos declaram a geometria dos quatro tiers embora o piloto use dois. A
+seed também é a mesma, para que cada Execução do piloto seja a Execução homônima
+da campanha. Editá-lo é copiar **valores**: os comentários que explicam cada um
+moram no `experiment.toml`, e uma segunda cópia deles envelheceria em silêncio.
+
 A *maquinaria* que age sobre esta spec mora em `orchestrator/` — a separação é
 deliberada (ADR-0017): contrato de dado de um lado, código do outro.

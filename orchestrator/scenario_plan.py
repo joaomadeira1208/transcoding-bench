@@ -89,7 +89,7 @@ def _instances(plan: dict[str, Any]) -> list[str]:
 
 
 def _scenarios(config: ExperimentConfig) -> Iterator[Scenario]:
-    """As 162 células da matriz, arch-major sobre uma única ordem embaralhada.
+    """As células da matriz, arch-major sobre uma única ordem embaralhada.
 
     A sequência é computada **uma vez** e percorrida igual para cada instância:
     a invariante da ADR-0010 fica estrutural, em vez de depender de o shuffle ser
@@ -104,7 +104,7 @@ def _scenarios(config: ExperimentConfig) -> Iterator[Scenario]:
 def _shuffled_combinations(
     config: ExperimentConfig,
 ) -> list[tuple[CodecRecord, PairRecord, VideoRecord]]:
-    """As 54 combinações `codec x par x vídeo`, embaralhadas com a seed do TOML.
+    """As combinações `codec x par x vídeo`, embaralhadas com a seed do TOML.
 
     Gerador próprio, nunca o estado global do módulo `random`: com o global,
     qualquer outra chamada no processo entraria no plano e "mesmo TOML ⇒ mesmos
@@ -118,7 +118,7 @@ def _shuffled_combinations(
 def _combinations(
     config: ExperimentConfig,
 ) -> Iterator[tuple[CodecRecord, PairRecord, VideoRecord]]:
-    """As 54 combinações `codec x par x vídeo`, na ordem de declaração do TOML.
+    """As combinações `codec x par x vídeo`, na ordem de declaração do TOML.
 
     Laços sobre as listas, sem conjunto nem dicionário no caminho: a ordem
     pré-shuffle precisa ser determinística para que a pós-shuffle seja.

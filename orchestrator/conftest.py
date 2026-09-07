@@ -15,11 +15,21 @@ from experiment_config import ExperimentConfig, validate_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
+REAL_PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
 
 
 def real_config() -> ExperimentConfig:
     """A spec real do Experimento, validada — âncora dos testes que a citam."""
-    with REAL_EXPERIMENT_TOML.open("rb") as handle:
+    return _real_config(REAL_EXPERIMENT_TOML)
+
+
+def real_pilot_config() -> ExperimentConfig:
+    """A spec real do piloto (ADR-0022), pelo mesmo validador da campanha."""
+    return _real_config(REAL_PILOT_TOML)
+
+
+def _real_config(path: Path) -> ExperimentConfig:
+    with path.open("rb") as handle:
         return validate_config(tomllib.load(handle))
 
 

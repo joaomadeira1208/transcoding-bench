@@ -23,5 +23,14 @@ seed também é a mesma, para que cada Execução do piloto seja a Execução ho
 da campanha. Editá-lo é copiar **valores**: os comentários que explicam cada um
 moram no `experiment.toml`, e uma segunda cópia deles envelheceria em silêncio.
 
+O subconjunto não é convenção: o CI o garante. A suíte do `orchestrator/`
+confronta cada registro do piloto com o seu homônimo na campanha, campo a campo,
+e confronta também os objetos de run dos dois planos canônicos, exigindo que cada
+um do piloto exista idêntico no da campanha. Para quem edita: mudar um valor num
+dos arquivos sem copiá-lo para o outro quebra o CI nomeando a família, o registro
+e o campo que divergiram. A única liberdade do `pilot.toml` é **omitir** um
+registro inteiro; dentro de um registro que ele declara nada pode faltar,
+inclusive os tiers de geometria que ele não usa.
+
 A *maquinaria* que age sobre esta spec mora em `orchestrator/` — a separação é
 deliberada (ADR-0017): contrato de dado de um lado, código do outro.

@@ -151,6 +151,10 @@ def make_instance(**overrides: Any) -> dict[str, Any]:
     return {**copy.deepcopy(_MINIMAL["instance"][0]), **overrides}
 
 
+def make_experiment(**overrides: Any) -> dict[str, Any]:
+    return {**copy.deepcopy(_MINIMAL["experiment"]), **overrides}
+
+
 def make_encode(**overrides: Any) -> dict[str, Any]:
     return {**copy.deepcopy(_MINIMAL["encode"]), **overrides}
 

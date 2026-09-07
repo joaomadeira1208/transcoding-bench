@@ -24,12 +24,12 @@ Decisões sobre como a pipeline é construída: tooling, orquestração, storage
 |---|---|---|
 | [0009](0009-tooling-and-languages.md) | Tooling e linguagens | Terraform pra infra estática, Python+AWS CLI pra orquestração, shell dentro das instâncias |
 | [0010](0010-orchestration-model.md) | Modelo de orquestração | Instância do Orquestrador (t3.micro); instâncias auto-dirigem; SSH + marcador S3; mesma seed |
-| [0011](0011-storage-and-transport.md) | Storage e transporte | S3 como storage central; layout de prefixos como contrato (inclui `masters/manifest.json`); upload de todos artefatos após cada run; limpeza seletiva pós-Pass |
-| [0012](0012-resilience-and-safeguards.md) | Resiliência e salvaguardas | Timeout por run (4h), timeout total (72h), budget alert ($150), retomada semi-automática; gate humano sobre os masters antes da campanha |
+| [0011](0011-storage-and-transport.md) | Storage e transporte | S3 como storage central; dois buckets (campanha e piloto) com o mesmo layout de prefixos como contrato (inclui `masters/manifest.json`); upload de todos artefatos após cada run; limpeza seletiva pós-Pass |
+| [0012](0012-resilience-and-safeguards.md) | Resiliência e salvaguardas | Timeout por run (4h), timeout total (72h), budget alert ($150), retomada semi-automática; gates humanos antes da campanha (masters, piloto) |
 | [0013](0013-docker-build-strategy.md) | Bootstrap e build do Docker | Git clone em todas as instâncias; Docker build local no encode; ~$0.18 total; garante -march=native correto |
 | [0014](0014-quality-pass-orchestration.md) | Orquestração do Pass de qualidade | Triage no orquestrador, execução no Juiz; masters preparados em instância efêmera, execução própria com gate humano e manifesto; Parquet local |
 | [0015](0015-aws-infrastructure-config.md) | Configuração da infra AWS | us-east-1; subnets públicas; Ubuntu 24.04 LTS; Docker/AWS CLI instalados no bootstrap; volumes dimensionados pelos masters |
-| [0016](0016-iam-and-orchestrator-invocation.md) | IAM e invocação do orquestrador | Instance profiles (sem chave estática); quatro papéis (orchestrator, encode, judge, masters); PassRole escopado; EC2 com condições região+tipo; chave SSH via SSM; orquestrador em tmux |
+| [0016](0016-iam-and-orchestrator-invocation.md) | IAM e invocação do orquestrador | Instance profiles (sem chave estática); quatro papéis (orchestrator, encode, judge, masters) sobre os dois buckets; PassRole escopado; EC2 com condições região+tipo; chave SSH via SSM; orquestrador em tmux |
 
 ## Scaffolding
 
@@ -39,7 +39,7 @@ Decisões sobre a estrutura física do projeto: organização do repo, fronteira
 |---|---|---|
 | [0017](0017-repository-structure.md) | Estrutura do repositório | Organização por papel de execução; config como spec; bootstrap por papel; dois requirements.txt; Python 3.12 |
 | [0018](0018-host-container-boundary.md) | Fronteira host/container | Execução dentro do container; imagem = ambiente, scripts bind-mounted; uma imagem (encoders+libvmaf); IMDS hop limit 2 |
-| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml → scenarios.json aninhado; shuffle com seed sobre as 54 combinações e eixo instância depois (canônico arch-major); Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
+| [0019](0019-scaffolding-data-contracts.md) | Contratos de dados | experiment.toml (e pilot.toml, subconjunto por teste) → scenarios.json aninhado; shuffle com seed sobre as 54 combinações e eixo instância depois (canônico arch-major); Python forma scenario_id (bash ecoa); instância cunha run_id; flag warmup ecoada; completude por bloco + dedup "último vence"; meta.json validado na leitura |
 | [0020](0020-terraform-state-backend.md) | State do Terraform | Backend S3 remoto (bucket fora-de-banda); chave privada no state + re-applies do resume.py justificam durabilidade |
 | [0021](0021-campaign-code-versioning.md) | Versionamento do código da campanha | Repo público; instâncias clonam o SHA do checkout do Orquestrador; hotfix mid-campanha em duas classes (medição invalida, encanamento retoma) |
-| [0022](0022-testing-strategy.md) | Estratégia de testes | Critério = falha silenciosa; módulo único de seam pro `subprocess`; fixtures híbridas com âncora real; smoke em três camadas (shims local com asserção de argv + aceite manual com Docker no Mac + caminho completo na AWS com check de PMU nas 3 archs) |
+| [0022](0022-testing-strategy.md) | Estratégia de testes | Critério = falha silenciosa; módulo único de seam pro `subprocess`; fixtures híbridas com âncora real; smoke em três camadas (shims local com asserção de argv + aceite manual com Docker no Mac + caminho completo na AWS com check de PMU nas 3 archs) + piloto (a campanha em escopo menor, mesmo código, gate com checklist) |

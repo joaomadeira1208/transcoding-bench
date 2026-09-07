@@ -16,6 +16,12 @@ O canônico é ordenado **arch-major**: os 54 blocos de cada arquitetura ficam c
 
 O embaralhamento usa uma **instância própria de gerador aleatório semeada** pela seed do TOML, nunca o estado global do módulo `random`: com o global, qualquer outra chamada no processo entraria no plano e o determinismo byte-a-byte deixaria de valer sem que nada falhasse.
 
+### Emenda: `config/pilot.toml`, a segunda definição
+
+O piloto (ADR-0022) é a campanha em escopo menor, e a sua definição é um segundo arquivo com a **mesma forma**, `config/pilot.toml`, lido pelo mesmo validador e pelo mesmo gerador: o plano do piloto sai pelo mesmo caminho que o da campanha, com blocos de 6, `scenario_id` formada do mesmo jeito e fatias por arquitetura. Não há campo, flag ou modo que diga "isto é um piloto" — só um arquivo diferente na entrada.
+
+Dois arquivos podem divergir em silêncio: alguém muda o CRF do x265 no `experiment.toml`, esquece o `pilot.toml`, e o piloto valida flags que a campanha não vai usar. A guarda é um teste no orquestrador afirmando que **todo Cenário do piloto existe na matriz da campanha com os mesmos parâmetros** — codec, preset, CRF, `encoder_args`, geometria, os fixos de encode e os eventos de PMU. O piloto é subconjunto da campanha por construção, pelo mesmo instinto da asserção de argv do smoke (ADR-0022): o que pode divergir em silêncio ganha teste. Uma definição derivada (o `pilot.toml` gerado a partir do `experiment.toml`) foi rejeitada: seria o gerador derivando o que deve ser dado declarado, e o teste de subconjunto compra a mesma garantia sem código novo no caminho da campanha.
+
 ## `scenarios.json`: aninhado, com run_id cunhado na instância
 
 `scenarios.json` é **aninhado**: blocos de cenário em ordem já embaralhada, cada bloco contendo os 6 runs pré-formados (1 warm-up + 5 reps), com flag `warmup` explícito. A atomicidade do bloco e o descarte do warm-up viram *estrutura do dado*, não convenção posicional que o bash precise respeitar.

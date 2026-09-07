@@ -39,6 +39,10 @@ Os escopos seguem o layout-contrato de prefixos da ADR-0011. O Orquestrador prec
 
 A condição de InstanceType é a salvaguarda de **custo** sob comprometimento (reforça o budget de $150 da ADR-0012): mesmo invadido, o Orquestrador não consegue lançar uma instância cara. Não se usou escopo por tag (resource-level) — ver Considered Options.
 
+### Dois buckets, uma matriz
+
+**Emenda.** O piloto tem bucket próprio (ADR-0011). Toda linha da matriz que diz "bucket" vale para os **dois** ARNs, com os mesmos prefixos: o Terraform conhece os dois e cada statement lista os dois. Nenhum papel novo, nenhuma permissão nova — só o recurso duplicado. Um papel por bucket foi rejeitado: dobraria a matriz por nenhum ganho, já que o mesmo código roda contra os dois.
+
 ## Chave SSH via SSM Parameter Store
 
 A ADR-0010 usa SSH (não SSM Session Manager) como canal Orquestrador→instâncias. A chave **privada** precisa estar na instância do Orquestrador. O Terraform gera o par (`tls_private_key`), registra a pública (`aws_key_pair`) e guarda a privada como **SecureString** no SSM Parameter Store. No bootstrap, o Orquestrador lê via `ssm:GetParameter` + `kms:Decrypt` e grava em `~/.ssh/`. A chave nunca entra no repositório nem fica parada em S3.

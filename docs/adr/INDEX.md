@@ -9,7 +9,7 @@ Decisões sobre o desenho experimental: o que medir, como medir, com quais input
 | [0001](0001-instance-types.md) | Tipos de instância EC2 | Escolha de c7g/c7i/c7a xlarge (4 vCPU) pra isolar arquitetura como variável independente |
 | [0002](0002-codec-encoder-configuration.md) | Configuração dos encoders | libx264/libx265/libsvtav1 com presets, CRF, GOP, threading fixos |
 | [0003](0003-experimental-design.md) | Desenho experimental | Cenário, execução, replicação: 6 runs por cenário (1 warm-up + 5 reportadas), ordem randomizada |
-| [0004](0004-input-preparation.md) | Preparação dos inputs | Masters 4K/1080p/720p via downscale Lanczos FFV1; 9 pares input→output |
+| [0004](0004-input-preparation.md) | Preparação dos inputs | Masters 4K/1080p/720p via downscale Lanczos FFV1; 9 pares input→output; fontes 4K pinadas por URL e sha256 (BBB Sunflower 30 fps, ToS 3840x1714) |
 | [0005](0005-quality-measurement.md) | Medição de qualidade | Qualidade como validação amostral (não variável dependente); hash-first triage; Juiz separado |
 | [0006](0006-performance-metrics-collection.md) | Coleta de métricas de desempenho | time -v, perf stat, pidstat 1 Hz, FFmpeg stderr; IPC/cache/branch como indicadores-chave |
 | [0007](0007-raw-data-schema.md) | Schema do dado bruto | Diretório runs/{run_id}/ com artefatos raw + Parquet consolidado como projeção analítica |

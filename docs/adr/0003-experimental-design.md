@@ -2,7 +2,7 @@
 
 A unidade de análise é o **Cenário** (tupla `codec × input_res × output_res × vídeo × instância`). Cada cenário é executado 6 vezes consecutivas **na mesma instância EC2**; a primeira é descartada (warm-up para cache CPU e estabilização de frequência), as 5 seguintes são as replicações reportadas, permitindo cálculo de média + desvio padrão + intervalo de confiança 95% via t-Student.
 
-Inputs são **vídeos inteiros** (Big Buck Bunny ~9,5 min, Tears of Steel ~12,2 min), não clips. A justificativa é metodológica: medição em regime estacionário (onde diferenças arquiteturais — cache, SIMD path, branch predictor — realmente se manifestam) exige que warm-up vire fração pequena do encode; em clips curtos, warm-up domina.
+Inputs são **vídeos inteiros** (Big Buck Bunny ~10,6 min, Tears of Steel ~12,2 min — durações das fontes pinadas na ADR-0004), não clips. A justificativa é metodológica: medição em regime estacionário (onde diferenças arquiteturais — cache, SIMD path, branch predictor — realmente se manifestam) exige que warm-up vire fração pequena do encode; em clips curtos, warm-up domina.
 
 ## Considered Options
 

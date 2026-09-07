@@ -15,11 +15,13 @@ from pathlib import Path
 import pytest
 from conftest import (
     REAL_EXPERIMENT_TOML,
+    REAL_PILOT_TOML,
     REPO_ROOT,
     make_codec,
     make_instance,
     make_video,
     real_config,
+    real_pilot_config,
 )
 from experiment_config import validate_config
 from scenario_plan import build_canonical_plan, build_instance_slices, serialize_plan
@@ -69,6 +71,24 @@ EXPECTED_PMU_EVENTS = [
     "page-faults",
 ]
 
+# Cardinalidade do piloto (ADR-0022): 3 codecs x 1 par x 2 vídeos x 3 instâncias,
+# com o mesmo bloco de 6.
+PILOT_COMBINATIONS = 6
+PILOT_BLOCKS = 18
+PILOT_RUNS = PILOT_BLOCKS * 6
+PILOT_REPLICATIONS = PILOT_BLOCKS * 5
+
+PILOT_SLICE_BLOCKS = PILOT_COMBINATIONS
+PILOT_SLICE_RUNS = PILOT_SLICE_BLOCKS * 6
+PILOT_SLICE_REPLICATIONS = PILOT_SLICE_BLOCKS * 5
+
+# Transcrição do escopo da ADR-0022, e não uma contagem: 18 / 108 / 90 sobrevive
+# a trocar `1080p → 720p` por `2160p → 2160p`, que muda o piloto de 2 h para meio
+# dia por arquitetura.
+PILOT_PAIRS = {("1080p", "720p")}
+PILOT_CODECS = {"libx264", "libx265", "libsvtav1"}
+PILOT_VIDEOS = {"bbb", "tos"}
+
 SCENARIO_ID = re.compile(
     r"^(?P<encoder>[a-z0-9]+)_(?P<input_res>[0-9]+p)_(?P<output_res>[0-9]+p)"
     r"_(?P<video>[a-z0-9]+)_(?P<instance>[a-z0-9]+)_(?P<suffix>warmup|rep[1-9][0-9]*)$"
@@ -89,6 +109,38 @@ def plan() -> dict:
 @pytest.fixture(scope="module")
 def slices(plan: dict) -> dict[str, dict]:
     return build_instance_slices(plan)
+
+
+@pytest.fixture(scope="module")
+def pilot_plan() -> dict:
+    return build_canonical_plan(real_pilot_config())
+
+
+@pytest.fixture(scope="module")
+def pilot_slices(pilot_plan: dict) -> dict[str, dict]:
+    return build_instance_slices(pilot_plan)
+
+
+# As invariantes que relacionam plano e fatias não falam da matriz, e o piloto é
+# a segunda definição a recebê-las (decisão D6): sem a parametrização elas
+# passariam a valer só para 162 blocos, e o plano do piloto rodaria sem nenhuma.
+@pytest.fixture(
+    scope="module",
+    params=[real_config, real_pilot_config],
+    ids=["campaign", "pilot"],
+)
+def either_config(request):
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def either_plan(either_config) -> dict:
+    return build_canonical_plan(either_config())
+
+
+@pytest.fixture(scope="module")
+def either_slices(either_plan: dict) -> dict[str, dict]:
+    return build_instance_slices(either_plan)
 
 
 def all_runs(plan: dict) -> list[dict]:
@@ -179,6 +231,62 @@ class TestMatrixOfTheSpec:
         geometry = {video.slug: video.geometry for video in real_config().videos}
 
         for block in plan["blocks"]:
+            source = geometry[block["video"]][block["input_res"]]
+            for run in block["runs"]:
+                assert run["output_width"] <= source.width
+                assert run["output_height"] <= source.height
+
+
+class TestPilotCardinality:
+    """O escopo da ADR-0022, transcrito: o que a checklist do gate confere."""
+
+    def test_counts_of_the_adr(self, pilot_plan):
+        runs = all_runs(pilot_plan)
+
+        assert len(pilot_plan["blocks"]) == PILOT_BLOCKS
+        assert len(runs) == PILOT_RUNS
+        assert sum(1 for run in runs if run["warmup"] is False) == PILOT_REPLICATIONS
+
+    def test_counts_of_each_slice(self, pilot_slices):
+        for instance, plan_slice in pilot_slices.items():
+            runs = all_runs(plan_slice)
+
+            assert len(plan_slice["blocks"]) == PILOT_SLICE_BLOCKS, instance
+            assert len(runs) == PILOT_SLICE_RUNS, instance
+            assert sum(1 for run in runs if run["warmup"] is False) == PILOT_SLICE_REPLICATIONS
+
+    def test_no_duplicate_scenario_id(self, pilot_plan):
+        ids = [run["scenario_id"] for run in all_runs(pilot_plan)]
+
+        assert len(set(ids)) == len(ids)
+
+    def test_blocks_cover_exactly_the_axes_of_the_adr(self, pilot_plan):
+        # Um recorte que perdesse um codec ou um vídeo continuaria com 18 blocos.
+        blocks = pilot_plan["blocks"]
+
+        assert {(b["input_res"], b["output_res"]) for b in blocks} == PILOT_PAIRS
+        assert {b["encoder"] for b in blocks} == PILOT_CODECS
+        assert {b["video"] for b in blocks} == PILOT_VIDEOS
+        assert {b["instance"] for b in blocks} == set(EXPECTED_INSTANCES)
+
+    def test_every_cell_of_the_matrix_appears_exactly_once(self, pilot_plan):
+        expected = {
+            (codec, input_res, output_res, video, instance)
+            for codec in PILOT_CODECS
+            for input_res, output_res in PILOT_PAIRS
+            for video in PILOT_VIDEOS
+            for instance in EXPECTED_INSTANCES
+        }
+
+        declared = [scenario_of(block) for block in pilot_plan["blocks"]]
+
+        assert set(declared) == expected
+        assert len(declared) == len(expected)
+
+    def test_no_run_upscales(self, pilot_plan):
+        geometry = {video.slug: video.geometry for video in real_pilot_config().videos}
+
+        for block in pilot_plan["blocks"]:
             source = geometry[block["video"]][block["input_res"]]
             for run in block["runs"]:
                 assert run["output_width"] <= source.width
@@ -340,9 +448,9 @@ class TestRunParameters:
 
 
 class TestDeterminism:
-    def test_generating_twice_produces_identical_bytes(self):
-        first = serialize_plan(build_canonical_plan(real_config()))
-        second = serialize_plan(build_canonical_plan(real_config()))
+    def test_generating_twice_produces_identical_bytes(self, either_config):
+        first = serialize_plan(build_canonical_plan(either_config()))
+        second = serialize_plan(build_canonical_plan(either_config()))
 
         assert first == second
 
@@ -382,23 +490,34 @@ class TestDeterminism:
 
 
 class TestSeededShuffle:
-    def test_the_three_architectures_see_the_same_order_of_combinations(self, plan):
+    # A contagem é transcrita, e não derivada do plano sob teste: um gerador que
+    # emitisse um terço dos blocos satisfaria `len(blocks) // 3`.
+    @pytest.mark.parametrize(
+        ("config", "combinations"),
+        [
+            pytest.param(real_config, EXPECTED_COMBINATIONS, id="campaign"),
+            pytest.param(real_pilot_config, PILOT_COMBINATIONS, id="pilot"),
+        ],
+    )
+    def test_the_three_architectures_see_the_same_order_of_combinations(self, config, combinations):
         # Com a mesma ordem nas três instâncias, efeitos temporais do host
         # atingem os mesmos Cenários e se cancelam na comparação cross-arch
-        # (ADR-0010). É por isso que o shuffle roda sobre as 54 combinações.
+        # (ADR-0010). É por isso que o shuffle roda sobre as combinações, e não
+        # sobre a matriz inteira.
+        plan = build_canonical_plan(config())
         orders = {
             instance: [combination_of(b) for b in blocks_of(plan, instance)]
             for instance in EXPECTED_INSTANCES
         }
 
         assert len(set(map(tuple, orders.values()))) == 1
-        assert len(orders["c7g"]) == EXPECTED_COMBINATIONS
+        assert len(orders["c7g"]) == combinations
 
-    def test_the_canonical_is_arch_major_with_contiguous_slices(self, plan):
+    def test_the_canonical_is_arch_major_with_contiguous_slices(self, either_plan):
         # Arch-major torna a fatia um trecho contíguo, e a ordem relativa se
         # mantém por construção. Um canônico intercalado passaria em todos os
         # outros testes deste arquivo.
-        instances = [block["instance"] for block in plan["blocks"]]
+        instances = [block["instance"] for block in either_plan["blocks"]]
         runs = [instance for instance, _ in itertools.groupby(instances)]
 
         assert runs == ["c7g", "c7i", "c7a"]
@@ -468,10 +587,10 @@ class TestSlices:
     # Invariantes, nunca golden: o que se garante é a *relação* entre canônico e
     # fatias, e uma lista congelada de `scenario_id` não expressa relação nenhuma.
 
-    def test_one_slice_per_instance_keyed_by_the_short_id(self, plan, slices):
+    def test_one_slice_per_instance_keyed_by_the_short_id(self, either_slices):
         # Id curto, nunca o `instance_type`: é a mesma divergência de string
         # (`c7g` vs `c7g.xlarge`) que a ADR-0019 evita ao tirar a seleção do bash.
-        assert set(slices) == set(EXPECTED_INSTANCES)
+        assert set(either_slices) == set(EXPECTED_INSTANCES)
 
     def test_counts_of_each_slice(self, slices):
         for instance, plan_slice in slices.items():
@@ -481,42 +600,42 @@ class TestSlices:
             assert len(runs) == EXPECTED_SLICE_RUNS, instance
             assert sum(1 for run in runs if run["warmup"] is False) == EXPECTED_SLICE_REPLICATIONS
 
-    def test_each_slice_carries_only_blocks_of_its_architecture(self, slices):
+    def test_each_slice_carries_only_blocks_of_its_architecture(self, either_slices):
         # A Instância roda **todo** bloco do arquivo que recebeu: um bloco alheio
         # não é filtrado por ninguém, é executado.
-        for instance, plan_slice in slices.items():
+        for instance, plan_slice in either_slices.items():
             assert {block["instance"] for block in plan_slice["blocks"]} == {instance}
 
-    def test_the_union_of_the_slices_is_the_canonical(self, plan, slices):
+    def test_the_union_of_the_slices_is_the_canonical(self, either_plan, either_slices):
         # Igualdade profunda, não contagem: uma projeção que remontasse os blocos
         # e errasse um campo contaria igual.
-        united = [block for plan_slice in slices.values() for block in plan_slice["blocks"]]
+        united = [block for plan_slice in either_slices.values() for block in plan_slice["blocks"]]
 
-        assert sorted(united, key=block_key) == sorted(plan["blocks"], key=block_key)
+        assert sorted(united, key=block_key) == sorted(either_plan["blocks"], key=block_key)
 
-    def test_the_slices_are_pairwise_disjoint(self, slices):
+    def test_the_slices_are_pairwise_disjoint(self, either_slices):
         # A recíproca: um bloco em duas fatias roda duas vezes e a `scenario_id`
         # duplicada vira dedup silencioso na consolidação.
-        for first, second in itertools.combinations(slices.values(), 2):
+        for first, second in itertools.combinations(either_slices.values(), 2):
             assert scenario_ids(first) & scenario_ids(second) == set()
 
-    def test_the_relative_order_of_the_canonical_is_preserved(self, plan, slices):
+    def test_the_relative_order_of_the_canonical_is_preserved(self, either_plan, either_slices):
         # Se a ordem dentro da fatia divergisse do canônico, as três arquiteturas
         # deixariam de ver a mesma sequência — sem que contagem, união ou
         # disjunção acusassem nada.
-        position = {block_key(block): index for index, block in enumerate(plan["blocks"])}
+        position = {block_key(block): index for index, block in enumerate(either_plan["blocks"])}
 
-        for instance, plan_slice in slices.items():
+        for instance, plan_slice in either_slices.items():
             positions = [position[block_key(block)] for block in plan_slice["blocks"]]
 
             assert positions == sorted(positions), instance
 
-    def test_a_slice_carries_the_top_shape_of_the_canonical(self, plan, slices):
+    def test_a_slice_carries_the_top_shape_of_the_canonical(self, either_plan, either_slices):
         # Quem lê uma fatia não precisa saber que ela é um recorte.
-        for plan_slice in slices.values():
-            assert set(plan_slice) == set(plan)
-            assert plan_slice["schema_version"] == plan["schema_version"]
-            assert plan_slice["seed"] == plan["seed"]
+        for plan_slice in either_slices.values():
+            assert set(plan_slice) == set(either_plan)
+            assert plan_slice["schema_version"] == either_plan["schema_version"]
+            assert plan_slice["seed"] == either_plan["seed"]
 
     def test_the_projection_leaves_the_canonical_untouched(self, plan):
         # Se a projeção mutasse o canônico, o arquivo escrito depois dela seria o
@@ -527,9 +646,9 @@ class TestSlices:
 
         assert serialize_plan(plan) == before
 
-    def test_slicing_twice_produces_identical_bytes(self):
-        first = build_instance_slices(build_canonical_plan(real_config()))
-        second = build_instance_slices(build_canonical_plan(real_config()))
+    def test_slicing_twice_produces_identical_bytes(self, either_config):
+        first = build_instance_slices(build_canonical_plan(either_config()))
+        second = build_instance_slices(build_canonical_plan(either_config()))
 
         assert [serialize_plan(s) for s in first.values()] == [
             serialize_plan(s) for s in second.values()
@@ -537,11 +656,22 @@ class TestSlices:
 
 
 class TestCli:
-    def test_writes_the_canonical_and_one_slice_per_architecture(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("config", "blocks", "slice_blocks"),
+        [
+            pytest.param(
+                REAL_EXPERIMENT_TOML, EXPECTED_BLOCKS, EXPECTED_SLICE_BLOCKS, id="campaign"
+            ),
+            pytest.param(REAL_PILOT_TOML, PILOT_BLOCKS, PILOT_SLICE_BLOCKS, id="pilot"),
+        ],
+    )
+    def test_writes_the_canonical_and_one_slice_per_architecture(
+        self, tmp_path, config, blocks, slice_blocks
+    ):
         # Duas invocações porque o determinismo byte-a-byte prometido ao `diff`
         # vale para os quatro artefatos, não só para o canônico.
-        first = generate_into(tmp_path / "first")
-        second = generate_into(tmp_path / "second")
+        first = generate_into(config, tmp_path / "first")
+        second = generate_into(config, tmp_path / "second")
         expected = {CANONICAL_FILENAME, *(f"{instance}.json" for instance in EXPECTED_INSTANCES)}
 
         assert {path.name for path in first.iterdir()} == expected
@@ -553,18 +683,18 @@ class TestCli:
 
         canonical = json.loads((first / CANONICAL_FILENAME).read_text(encoding="utf-8"))
 
-        assert len(canonical["blocks"]) == EXPECTED_BLOCKS
+        assert len(canonical["blocks"]) == blocks
 
         for instance in EXPECTED_INSTANCES:
             plan_slice = json.loads((first / f"{instance}.json").read_text(encoding="utf-8"))
 
-            assert len(plan_slice["blocks"]) == EXPECTED_SLICE_BLOCKS, instance
+            assert len(plan_slice["blocks"]) == slice_blocks, instance
             assert {block["instance"] for block in plan_slice["blocks"]} == {instance}
 
 
-def generate_into(out: Path) -> Path:
+def generate_into(config: Path, out: Path) -> Path:
     result = subprocess.run(
-        [sys.executable, str(GENERATOR), "--config", str(REAL_EXPERIMENT_TOML), "--out", str(out)],
+        [sys.executable, str(GENERATOR), "--config", str(config), "--out", str(out)],
         capture_output=True,
         text=True,
         check=False,

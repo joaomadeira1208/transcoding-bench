@@ -34,7 +34,15 @@ do arquivo que recebeu, sem predicado de seleção no bash (ADR-0019). O
     .venv/bin/python -m pytest orchestrator/
     .venv/bin/python orchestrator/generate_scenarios.py \
         --config config/experiment.toml --out build/scenarios
+    .venv/bin/python orchestrator/generate_scenarios.py \
+        --config config/pilot.toml --out build/pilot
 
 O diretório de saída é argumento porque o plano é artefato de runtime (ADR-0017):
 ele não entra no repositório, e gerá-lo de novo a partir do mesmo TOML produz
 bytes idênticos.
+
+A segunda invocação é o plano do piloto (ADR-0022), e é a mesma invocação: o
+gerador recebe um `--config` e não sabe qual das duas definições de `config/`
+está lendo. Saem dela os mesmos quatro nomes de artefato — o bucket do piloto tem
+o layout `scenarios/` da campanha (ADR-0011) —, com 18 blocos no canônico e 6 por
+fatia.

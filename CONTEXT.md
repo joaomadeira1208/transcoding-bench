@@ -44,6 +44,11 @@ _Não confundir com_: `scenario_id` (identidade lógica, que pode repetir entre 
 A campanha completa: todos os cenários × todas as replicações.
 _Avoid_: estudo, teste.
 
+**Piloto** (`pilot`):
+O **Experimento** em escopo menor, executado entre o smoke na AWS e a campanha: mesmo código, mesmo bloco de 6, bucket próprio, aprovado por checklist antes de a campanha subir (ADR-0022). Definido em `config/pilot.toml`, da mesma forma do `experiment.toml`, lido pelo mesmo validador e pelo mesmo gerador. Todo registro que declara é cópia idêntica do homônimo da campanha; o que o torna subconjunto é o que omite. O subconjunto é garantido por teste no CI (ADR-0019). Nenhum campo, flag ou modo diz "isto é um piloto".
+_Avoid_: ensaio, pré-campanha, dry run, teste piloto.
+_Não confundir com_: o smoke (que atravessa o caminho com shims e não mede nada) nem com o warm-up (a primeira **Execução** de cada bloco).
+
 **Master** (`master`):
 Vídeo de entrada antes de qualquer transcoding pela pipeline. Existe em três resoluções (4K, 1080p, 720p), todas derivadas do source 4K canônico por downscale Lanczos lossless (FFV1).
 _Avoid_: source (ambíguo), input bruto.
@@ -68,6 +73,7 @@ _Avoid_: worker, runner, nó.
 
 - Um **Experimento** consiste em N **Cenários** × 5 **Replicações** reportadas
 - Um **Cenário** é uma tupla de parâmetros; cada **Execução** materializa um Cenário
+- Um **Piloto** é um Experimento em escopo menor: todo **Cenário** do Piloto é um Cenário do Experimento, com os mesmos parâmetros
 - Cada **Cenário** consome o **Master** que corresponde à sua `input_res`
 - A **Pipeline** orquestra Experimentos: prepara Masters, executa Cenários, coleta métricas, e executa o **Pass de qualidade** no **Juiz** sobre uma amostra dos outputs
 - O **Orquestrador** é o motor da Pipeline: lança as **Instâncias de encode** (uma por arquitetura) e, depois que terminam, o **Juiz**; as Instâncias de encode auto-dirigem os Cenários sem o Orquestrador controlar cada Execução

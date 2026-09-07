@@ -19,12 +19,16 @@ As três instâncias (Orquestrador, encode, Juiz) recebem **IAM roles via instan
 | | `s3:PutObject` | `bucket/runs/*`, `bucket/status/*` |
 | **judge** | `s3:GetObject` | `bucket/runs/*`, `bucket/masters/*`, `bucket/quality/plan.json` |
 | | `s3:PutObject` | `bucket/quality/results/*`, `bucket/status/*` |
+| **masters** (emenda) | `s3:PutObject` | `bucket/masters/*` |
+| | `s3:ListBucket` | bucket, condicionado ao prefixo `masters/` |
 
 Os escopos seguem o layout-contrato de prefixos da ADR-0011. O Orquestrador precisa de S3 r/w/list porque faz o bootstrap dos Masters (ADR-0014), o `quality_triage.py` baixa `meta.json` e `output.sha256` de `runs/`, e o `resume.py` lista `runs/`. O `DeleteObject` existe pra exatamente um caso de uso — a limpeza seletiva pós-Pass (ADR-0014) — e é **escopado a `runs/*`**: deleção é a única operação destrutiva, e o escopo protege `masters/`, `scenarios/` e `quality/` de um path malformado no script de limpeza (mesmo instinto do PassRole escopado). O `PutObject` do Orquestrador segue bucket-wide deliberadamente: ele escreve em três prefixos (`masters/`, `scenarios/`, `quality/`) e escopar daria três statements por ganho marginal. **Não** precisa de permissão de Budgets — o budget alert (ADR-0012) é criado pelo Terraform e dispara email; o Orquestrador não o consulta.
 
+**Emenda: um quarto papel, `masters`.** A preparação dos masters roda numa instância efêmera própria (ADR-0014), e ela recebe papel próprio em vez de herdar o do Orquestrador: só escreve em `masters/`, e dar a uma instância de 1–2 h o `DeleteObject` de `runs/` e o `RunInstances` do Orquestrador seria blast radius sem função. O `PutObject` bucket-wide do Orquestrador continua como está — ele segue escrevendo `scenarios/` e `quality/`, e o argumento de "escopar daria statements por ganho marginal" não muda por um prefixo a menos. A condição de `InstanceType` abaixo já inclui `c7g.xlarge`, que é o tipo da instância de preparação; nenhum tipo novo entra na lista.
+
 ### PassRole
 
-`run-instances --iam-instance-profile` exige que a role `orchestrator` tenha `iam:PassRole` sobre a role passada. Escopado às ARNs de `encode` e `judge` (não `*`) pra limitar o blast radius se a instância do Orquestrador — que tem IP público (ADR-0015) — for comprometida. O Terraform já conhece as ARNs que cria, então o escopo custa nada.
+`run-instances --iam-instance-profile` exige que a role `orchestrator` tenha `iam:PassRole` sobre a role passada. Escopado às ARNs de `encode`, `judge` e `masters` (não `*`) pra limitar o blast radius se a instância do Orquestrador — que tem IP público (ADR-0015) — for comprometida. O Terraform já conhece as ARNs que cria, então o escopo custa nada.
 
 ### Escopo do EC2 — condições de região e tipo
 

@@ -37,21 +37,23 @@ def elapsed_s(meta: dict[str, Any]) -> float:
 
 
 @pytest.fixture(scope="session")
-def loop_with_a_failed_run(block, run_all) -> Loop:
+def loop_with_a_failed_run(plan, block, run_all) -> Loop:
     """O segundo encode do bloco falha; os outros cinco seguem bem."""
-    return run_all([block], SMOKE_FFMPEG_EXIT="1", SMOKE_FFMPEG_NTH="2")
+    return run_all(plan, [block], SMOKE_FFMPEG_EXIT="1", SMOKE_FFMPEG_NTH="2")
 
 
 @pytest.fixture(scope="session")
-def loop_with_a_hung_run(block, run_all) -> Loop:
+def loop_with_a_hung_run(plan, block, run_all) -> Loop:
     """O primeiro encode do bloco trava, e o timeout por Execução vale 2 s."""
-    return run_all([block], "--run-timeout", "2", SMOKE_FFMPEG_HANG=HANG_S, SMOKE_FFMPEG_NTH="1")
+    return run_all(
+        plan, [block], "--run-timeout", "2", SMOKE_FFMPEG_HANG=HANG_S, SMOKE_FFMPEG_NTH="1"
+    )
 
 
 @pytest.fixture(scope="session")
 def loop_over_the_cap(plan, run_all) -> Loop:
     """Dois blocos e um teto de 1 s: o primeiro bloco sozinho já o estoura."""
-    return run_all(plan["blocks"][:2], "--total-timeout", "1")
+    return run_all(plan, plan["blocks"][:2], "--total-timeout", "1")
 
 
 class TestBlock:

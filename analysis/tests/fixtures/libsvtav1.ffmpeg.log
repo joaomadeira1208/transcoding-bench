@@ -1,0 +1,50 @@
+ffmpeg version n8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 13 (Ubuntu 13.3.0-6ubuntu2~24.04.1)
+  configuration: --prefix=/usr/local --pkg-config-flags=--static --extra-cflags='-march=native' --extra-cxxflags='-march=native' --extra-libs=-lstdc++ --enable-gpl --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvmaf --disable-shared --enable-static --disable-doc --disable-debug
+  libavutil      60. 26.102 / 60. 26.102
+  libavcodec     62. 28.102 / 62. 28.102
+  libavformat    62. 12.102 / 62. 12.102
+  libavdevice    62.  3.102 / 62.  3.102
+  libavfilter    11. 14.102 / 11. 14.102
+  libswscale      9.  5.102 /  9.  5.102
+  libswresample   6.  3.102 /  6.  3.102
+Input #0, matroska,webm, from '/work/masters/bbb_1080p.mkv':
+  Metadata:
+    ENCODER         : Lavf62.12.102
+  Duration: 00:00:05.00, start: 0.000000, bitrate: 21117 kb/s
+  Stream #0:0: Video: ffv1, yuv420p(tv, progressive), 1920x1080, SAR 1:1 DAR 16:9, 24 fps, 24 tbr, 1k tbn
+    Metadata:
+      ENCODER         : Lavc62.28.102 ffv1
+      DURATION        : 00:00:05.000000000
+Stream mapping:
+  Stream #0:0 -> #0:0 (ffv1 (native) -> av1 (libsvtav1))
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v4.1.0
+Svt[info]: SVT [build]  :	GCC 13.3.0	 64 bit
+Svt[info]: LIB Build date: Sep  4 2026 01:45:20
+Svt[info]: -------------------------------------------
+Svt[info]: Level of Parallelism: 2
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to neon_dotprod]
+Svt[info]: [asm level selected : up to neon_dotprod]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 1920 / 1080 / 24 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 8 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 48 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 35.00 
+Svt[info]: SVT [config]: AQ mode / Variance Boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 				: 0 / 0
+Svt[info]: SVT [config]: QP scale compress strength 					: 0
+Svt[info]: -------------------------------------------
+Svt[warn]: Failed to set thread priority: Invalid argument
+Output #0, matroska, to '/work/out/output.mkv':
+  Metadata:
+    encoder         : Lavf62.12.102
+  Stream #0:0: Video: av1 (AV01 / 0x31305641), yuv420p(tv, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 24 fps, 1k tbn
+    Metadata:
+      encoder         : Lavc62.28.102 libsvtav1
+      DURATION        : 00:00:05.000000000
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.50    frame=   12 fps= 12 q=35.0 size=       1KiB time=00:00:00.45 bitrate=   9.6kbits/s speed=0.458x elapsed=0:00:01.00    frame=   30 fps= 20 q=35.0 size=       1KiB time=00:00:01.20 bitrate=   3.7kbits/s speed=0.805x elapsed=0:00:01.50    frame=   49 fps= 24 q=14.0 size=       1KiB time=00:00:02.00 bitrate=   2.2kbits/s speed=0.998x elapsed=0:00:02.00    frame=   77 fps= 31 q=28.0 size=    1024KiB time=00:00:03.16 bitrate=2649.0kbits/s speed=1.26x elapsed=0:00:02.50    frame=  105 fps= 35 q=25.0 size=    2304KiB time=00:00:04.33 bitrate=4355.6kbits/s speed=1.44x elapsed=0:00:03.00    [out#0/matroska @ 0xb858728eb6e0] video:3037KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.040961%
+frame=  120 fps= 39 q=35.0 Lsize=    3039KiB time=00:00:04.95 bitrate=5020.3kbits/s speed=1.62x elapsed=0:00:03.05    

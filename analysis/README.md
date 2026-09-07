@@ -88,6 +88,8 @@ byte-reproduzível entre versões do `pyarrow`, que gravam metadado próprio. A
 mesma árvore produz as mesmas linhas, na mesma ordem — por `scenario_id`, chave
 única depois do dedup —, com as mesmas colunas e os mesmos tipos.
 
-Os parsers são testados contra a factory do `conftest.py`. A âncora real é o
-`smoke/`, que consolida a árvore que o `run_all.sh` acabou de escrever; a captura
-crua das ferramentas de verdade chega com a camada de aceite manual (ADR-0022).
+O caso feliz de cada parser roda contra a **captura real** em `tests/fixtures/`,
+que a camada de aceite do `smoke/` trouxe de dentro da imagem; a factory do
+`conftest.py` fica com as variações que a ferramenta não produz sob encomenda. A
+outra âncora é o `smoke/` consolidando a árvore que o `run_all.sh` acabou de
+escrever (ADR-0022).

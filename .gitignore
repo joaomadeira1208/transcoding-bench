@@ -20,9 +20,13 @@
 # `.yml` não entra por extensão.
 !.github/workflows/*.yml
 
-# Exceção ao "nenhum .json entra", escopada a diretórios chamados fixtures/: o
-# meta.json de runtime e o scenarios.json continuam fora.
+# Exceção escopada a diretórios chamados fixtures/: o meta.json de runtime e o
+# scenarios.json continuam fora. Enumerada por extensão, e não como
+# `!**/fixtures/*`, porque a captura da camada de aceite tem o output.mkv ao lado
+# das saídas de texto (ADR-0017/0022).
 !**/fixtures/*.json
+!**/fixtures/*.txt
+!**/fixtures/*.log
 
 .venv*/
 venv/

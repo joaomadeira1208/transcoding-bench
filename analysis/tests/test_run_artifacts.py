@@ -3,11 +3,28 @@
 # format string do `/usr/bin/time`, um `<not supported>` do `perf` virando zero em
 # vez de ausente, a coluna `%CPU` mudando de posição no `pidstat`, e o `-stats` do
 # FFmpeg lido na linha intermediária em vez da final.
+#
+# O caso feliz de cada parser roda contra a **captura real** que a camada de
+# aceite manual trouxe de dentro da imagem (ADR-0022): uma factory dessas quatro
+# saídas é o autor do parser adivinhando o que a ferramenta emite. A factory fica
+# com o que só ela sabe fazer — as variações que a ferramenta não produz sob
+# encomenda.
 
 from __future__ import annotations
 
+import json
+
 import pytest
-from conftest import ABSENT, make_ffmpeg_log, make_perf_json, make_pidstat, make_time_json
+from conftest import (
+    ABSENT,
+    CLIP_FRAMES,
+    ENCODERS,
+    make_ffmpeg_log,
+    make_perf_json,
+    make_pidstat,
+    make_time_json,
+    read_capture,
+)
 from run_artifacts import (
     ArtifactError,
     parse_ffmpeg_log,
@@ -15,24 +32,65 @@ from run_artifacts import (
     parse_pidstat,
     parse_time,
 )
+from run_table import PMU_EVENTS
+
+
+@pytest.mark.parametrize("encoder", ENCODERS)
+class TestTheRealTools:
+    def test_the_format_string_and_the_model_agree_on_every_field(self, encoder):
+        # O modelo é estrito e proíbe extra, então **atravessar** já é a asserção:
+        # uma chave a mais ou a menos no format string do bash estoura aqui.
+        time = parse_time(read_capture(encoder, "time.json"))
+
+        assert time.exit_status == 0
+        assert time.elapsed_s > 0
+        assert time.max_rss_kb > 0
+
+    def test_every_counter_of_the_perf_stat_comes_out_numeric_or_absent(self, encoder):
+        counters = parse_perf(read_capture(encoder, "perf.json"))
+
+        # A ponte entre o `-e` que o `run_scenario.sh` passou e as colunas que a
+        # tabela declara: trocar um evento de um lado só deixaria a métrica vazia
+        # para a campanha inteira, e o `perf stat` não reclama disso.
+        assert set(counters) == set(PMU_EVENTS)
+        assert all(value is None or value > 0 for value in counters.values())
+
+    def test_the_absent_counters_are_exactly_the_unsupported_ones(self, encoder):
+        # A captura vem sem PMU (o Docker no Mac não a expõe ao guest), então ela
+        # traz o `<not supported>` que o `perf` de verdade escreve. Quando ela for
+        # regenerada onde há PMU os dois lados ficam vazios, e é por isso que a
+        # rejeição determinística continua na factory abaixo.
+        raw = read_capture(encoder, "perf.json")
+        counters = parse_perf(raw)
+
+        assert {event for event, value in counters.items() if value is None} == {
+            json.loads(line)["event"] for line in raw.splitlines() if "<not supported>" in line
+        }
+
+    def test_the_cpu_series_has_one_entry_per_sample(self, encoder):
+        # O `pidstat -h` de verdade **repete o cabeçalho antes de cada amostra**,
+        # coisa que a factory nunca fez: um parser que pulasse só o primeiro
+        # contaria cabeçalho como medição.
+        raw = read_capture(encoder, "pidstat.txt")
+        samples = [line for line in raw.splitlines() if line.endswith("ffmpeg")]
+
+        series = parse_pidstat(raw)
+
+        assert len(series) == len(samples)
+        assert all(sample > 0 for sample in series)
+
+    def test_the_last_stats_line_counts_every_frame_of_the_clip(self, encoder):
+        # O `-stats` reescreve a mesma linha com `\r`, e no FFmpeg de verdade a
+        # última ainda vem depois do resumo de muxing: ler qualquer outra
+        # reportaria como total do encode o que ele tinha feito no meio.
+        stats = parse_ffmpeg_log(read_capture(encoder, "ffmpeg.log"))
+
+        assert stats.frames == CLIP_FRAMES
+        assert stats.fps > 0
+        assert stats.bitrate_kbps > 0
 
 
 class TestTime:
-    def test_the_eleven_fields_of_the_format_string(self):
-        time = parse_time(make_time_json())
-
-        assert time.elapsed_s == 312.45
-        assert time.user_s == 1180.22
-        assert time.sys_s == 12.31
-        assert time.max_rss_kb == 524288
-        assert time.major_page_faults == 0
-        assert time.minor_page_faults == 183422
-        assert time.fs_inputs == 0
-        assert time.fs_outputs == 81920
-        assert time.voluntary_ctx_switches == 1204
-        assert time.involuntary_ctx_switches == 9812
-        assert time.exit_status == 0
-
     def test_integer_seconds_are_accepted(self):
         # O `%e` de um encode instantâneo sai como `0`, e um modelo que exigisse
         # decimal derrubaria o run em vez de medi-lo.
@@ -60,13 +118,6 @@ class TestTime:
 
 
 class TestPerf:
-    def test_every_counter_comes_out_numeric(self):
-        counters = parse_perf(make_perf_json())
-
-        assert counters["cycles"] == 4_000_000_000.0
-        assert counters["instructions"] == 6_000_000_000.0
-        assert counters["page-faults"] == 183422.0
-
     def test_a_header_line_is_skipped(self):
         # O cabeçalho do `perf stat -j` varia com a versão, e é por isso que o
         # `run_scenario.sh` confere o arquivo textualmente.
@@ -93,6 +144,8 @@ class TestPerf:
 
 class TestPidstat:
     def test_the_cpu_series_comes_out_in_order(self):
+        # A série é a linha do tempo do encode: reordená-la não estoura, e some
+        # na média que a tabela guarda.
         assert parse_pidstat(make_pidstat()) == [98.0, 96.0, 94.0]
 
     def test_the_column_is_found_by_name_not_by_position(self):
@@ -115,15 +168,6 @@ class TestPidstat:
 
 
 class TestFfmpegLog:
-    def test_the_last_stats_line_wins(self):
-        # O `-stats` reescreve a mesma linha com `\r`: ler a primeira reportaria
-        # os 240 frames do começo como o total do encode.
-        stats = parse_ffmpeg_log(make_ffmpeg_log())
-
-        assert stats.frames == 7200
-        assert stats.fps == 23.4
-        assert stats.bitrate_kbps == 4521.3
-
     def test_a_bitrate_the_ffmpeg_did_not_compute_comes_out_absent(self):
         stats = parse_ffmpeg_log(make_ffmpeg_log(bitrate="N/A"))
 

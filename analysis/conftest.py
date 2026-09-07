@@ -14,6 +14,23 @@ ROLE_ROOT = Path(__file__).resolve().parent
 
 META_SCHEMA_PATH = ROLE_ROOT / "meta.schema.json"
 
+CAPTURES = ROLE_ROOT / "tests" / "fixtures"
+
+# Um encoder por captura: os três atravessam o mesmo `/usr/bin/time` e o mesmo
+# `pidstat`, mas o `ffmpeg.log` do SVT-AV1 traz o stderr que só ele escreve.
+ENCODERS = ("libx264", "libx265", "libsvtav1")
+
+# 5 s a 24 fps: o clip que a camada de aceite gera dentro da imagem. Regenerar as
+# capturas com outra duração muda o total que o `-stats` reporta.
+CLIP_FRAMES = 120
+
+
+def read_capture(encoder: str, artifact: str) -> str:
+    """A saída crua que a ferramenta de verdade escreveu, capturada pela camada de
+    aceite manual (ADR-0022). Âncora do que a factory abaixo só imita."""
+    return (CAPTURES / f"{encoder}.{artifact}").read_text(encoding="utf-8")
+
+
 # Âncora fraca de propósito: escrita em Python, pelo mesmo raciocínio que
 # escreveu o modelo, ela valida Python contra Python. A âncora do contrato
 # cross-language é um `meta.json` que o bash produziu, e vem do smoke.

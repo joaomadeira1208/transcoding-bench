@@ -55,6 +55,8 @@ Híbrido, porque as duas formas têm trabalhos diferentes:
 
 A factory tem um vício fatal justamente no `meta.json`: é escrita em Python, pelo mesmo raciocínio que escreveu o modelo pydantic, então valida o Python contra o Python. O `meta.json` é contrato **cross-language** — bash escreve, Python lê (ADR-0019) — e a única coisa que pega drift é um arquivo que o bash de verdade produziu.
 
+**Emenda: os parsers de instrumentação ganham âncora própria, e antes.** O vício da factory não é exclusivo do `meta.json` — o `time.json`, o `perf.json`, a `pidstat.txt` e o `ffmpeg.log` também são texto que nasce fora do Python, e uma factory deles é o autor do parser adivinhando o que a ferramenta emite. A captura vem da camada de aceite manual, que não precisa de AWS: os casos felizes desses quatro parsers passam a rodar contra o texto real, e a factory fica com o que só ela sabe fazer — a chave renomeada, o evento `<not supported>`, o `%CPU` deslocado de coluna.
+
 A factory é **duplicada** entre `orchestrator/` e `analysis/`: são venvs separados sem módulo compartilhável (ADR-0017), e um pacote de teste comum entre papéis é exatamente o que os dois `requirements-dev.txt` existem pra impedir. A política que acompanha: **fixture/factory compartilhada dentro de um papel, tudo bem; helper de asserção compartilhado, não.** A ADR-0019 escolheu de propósito duplicar a regra do dedup nos dois leitores em vez de compartilhar código; um `assert_dedup(...)` comum reintroduziria o acoplamento pela porta dos fundos e perderia a verificação independente que a duplicação comprava.
 
 ## Forma das asserções
@@ -104,7 +106,9 @@ A escolha do ponto de entrada não é detalhe de implementação. Em modo estrit
 
 Teste que ancora isso: um `meta.json` com `"warmup": "false"` tem que ser **rejeitado**, não coagido — e o mesmo caso roda contra o validador stdlib do orquestrador, garantindo que os dois leitores concordam sobre o que é um arquivo válido.
 
-## Smoke em duas camadas
+## Smoke em camadas
+
+**Emenda: são três degraus, não dois.** Entre o smoke local com shims e o smoke AWS entra a camada de aceite manual descrita adiante — o degrau em que as ferramentas de verdade falam pela primeira vez.
 
 ### Camada local — shell com shims, sem Docker, sem AWS
 
@@ -130,6 +134,22 @@ Rodar a imagem Docker real no Mac foi rejeitado por três razões. `perf stat` n
 
 Esta camada **entra no CI** como terceiro job: sem Docker, sem credencial AWS, sem FFmpeg de verdade, ela respeita literalmente as duas exclusões da ADR-0017. E ganha uma propriedade que nenhuma outra camada tem: com o `ffmpeg` shimado, **o `output.sha256` é controlável**, então o caminho de grupo hash-divergente do `quality_triage.py` — o ramo pelo qual a ADR-0005 existe e que na campanha real quase certamente nunca dispara — passa a ser exercitável sob demanda.
 
+### Camada de aceite manual — a imagem no Mac, ferramentas reais, fora do CI
+
+**Emenda.** A camada acima é inteiramente sobre **shims**, e shim sempre concorda: ela cobre toda a fiação e **nada** sobre as ferramentas reais. Do jeito que estava sequenciado, a primeira evidência de que o FFmpeg aceita o argv, de que o `/usr/bin/time` emite o formato esperado e de que o parser do `pidstat` bate com o `pidstat` de verdade só chegaria no smoke AWS — com instância ligada e faturando.
+
+A resposta não é uniforme entre as suposições sobre ferramentas reais. Só uma delas — **os dez eventos de PMU retornarem valor em cada arquitetura** — exige AWS; as demais são verificáveis no Mac sem PMU nenhuma. As três razões pelas quais o Docker local foi rejeitado valem só para essa última.
+
+Entra então um passo **opt-in, fora do CI**, morando em `smoke/` (o diretório do papel "o que o Mac roda") e **desmarcado por padrão**, de modo que `pytest smoke/` siga sendo o laço de segundos e o job de CI siga sem Docker, sem FFmpeg de verdade e sem credencial. Ele builda a imagem, e dentro dela roda o **FFmpeg real** com o argv exato que o plano gera sobre um clip de ~5 s, com `/usr/bin/time` e `pidstat` reais em volta — mesmo format string, mesmas flags —, e exercita a extração de bitstream nos **três** codecs com o muxer que cada registro de codec declara. Em minutos no Mac se descobre que um encoder rejeitou uma flag, em vez de descobrir com a `c7g.xlarge` ligada.
+
+O argv, o format string e as flags do `pidstat` **não são transcritos** no passo de aceite: saem do rastro que os shims registraram na camada de baixo, na mesma sessão. Transcrevê-los faria a captura concordar com o teste enquanto divergia do `run_scenario.sh` que a campanha roda — que é exatamente a falha que o aceite existe pra pegar.
+
+O `perf` entra na cadeia, e não pelo motivo que se esperaria. O PMU não é exposto ao guest do Docker no Mac, então nenhum contador de hardware volta com valor — mas `perf stat` **recusa um nome de evento que não conhece**, e é isso que torna a lista de `pmu_events` do `config/experiment.toml` verificável localmente. Se cada evento *retorna valor* naquela arquitetura continua sendo pergunta do smoke AWS, e continua sendo o modo de falha mais caro do projeto.
+
+Não se está medindo nada aqui: o `run_scenario.sh` não é invocado, não há modo degradado a inventar, e o `-march=native` ser o do M-series é irrelevante para saber se o `libsvtav1` aceita um parâmetro.
+
+E o passo **captura as saídas cruas como fixtures commitadas**, que passam a alimentar os testes dos parsers do `analysis/` no lugar da factory. É a mesma justificativa pela qual o `meta.json` real é âncora, um degrau abaixo: um parser testado contra texto que o próprio autor digitou valida o Python contra o Python. A emenda de allowlist que isso exige está na ADR-0017.
+
 ### Camada AWS — caminho completo, vídeo curto
 
 Amplia a validação de fumaça da ADR-0016 (que já era pré-requisito operacional) e da ADR-0021 (que já mandou incluir o caminho do clone):
@@ -141,7 +161,7 @@ Amplia a validação de fumaça da ADR-0016 (que já era pré-requisito operacio
 
 O passo 2 não é opcional e não é redundante com o passo 1. A ADR-0006 registra que os IDs de evento PMU diferem entre Neoverse-V1 e Sapphire Rapids/EPYC; se um evento não estiver disponível numa arquitetura, **`perf stat` não falha** — reporta o evento como não suportado e segue. O resultado seria uma coluna de IPC/cache/branch vazia para uma arquitetura inteira, descoberta no `consolidate.py` depois da campanha terminar. É falha silenciosa, arquitetura-específica, e nenhum teste unitário ou smoke local pode alcançá-la.
 
-Sequenciamento: smoke local verde → smoke AWS → a fixture-âncora sai do `meta.json` do c7g → campanha. Até o smoke AWS existir, o teste do modelo pydantic roda só contra a factory.
+Sequenciamento: smoke local verde → aceite manual com Docker → smoke AWS → a fixture-âncora sai do `meta.json` do c7g → campanha. **Emenda:** o "até o smoke AWS existir, roda só contra a factory" vale só para a âncora do **`meta.json` de campanha**; as âncoras dos parsers de instrumentação chegam antes, com o aceite manual.
 
 ## Verificação das camadas não-Python
 
@@ -166,7 +186,9 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 - **`hypothesis` (property-based)** — rejeitado: dependência e curva de aprendizado pra um espaço de entrada pequeno e enumerável.
 - **Golden do `scenarios.json` commitado** — rejeitado: exigiria emenda maior na allowlist pra um artefato de runtime, e quebraria em reordenação inofensiva. A lista inline no `.py` congela o que precisa ser congelado.
 - **Mover o pydantic pro `orchestrator/`** — rejeitado: custa a invariante stdlib-only que a ADR-0017 desenhou e que o CI protege.
-- **Smoke local com Docker e vídeo real** — rejeitado: `perf` não roda no Mac e `-march=native` seria o do M-series; obrigaria um modo degradado em `run_scenario.sh`, que na campanha precisa falhar alto; e o ciclo de 10–20 min de build mata o loop de desenvolvimento.
+- **Smoke local com Docker e vídeo real** — rejeitado: `perf` não roda no Mac e `-march=native` seria o do M-series; obrigaria um modo degradado em `run_scenario.sh`, que na campanha precisa falhar alto; e o ciclo de 10–20 min de build mata o loop de desenvolvimento. **Emenda:** o que as três razões barram é Docker no laço de desenvolvimento e no CI, e PMU no Mac — não a imagem em si. Um passo opt-in que não invoca o `run_scenario.sh` não paga nenhuma delas, e é a camada de aceite acima.
+- **Camada de aceite dentro do job de smoke do CI** — rejeitada: custaria ao CI um build de 10–20 min por PR pelo `-march=native` da CPU errada (ADR-0013), e reintroduziria em `pytest smoke/` a dependência de binário externo que a camada com shims foi desenhada pra não ter.
+- **Fixtures de instrumentação escritas à mão** — foi o que existiu até aqui, e é o que a camada de aceite substitui: o autor do parser inventando a saída da ferramenta é a mesma falha que a âncora do `meta.json` já tinha nomeado.
 - **`bats` pros scripts de shell** — rejeitado por redundância: o smoke local já dirige os `run_*.sh` com shims e já verifica o argv do FFmpeg; `bats` adicionaria um runner sem cobrir nada novo.
 - **Validação do `meta.json` por presença de campo apenas** — rejeitado: `"warmup": "false"` é uma string truthy e passa por qualquer checagem de presença, reproduzindo exatamente o desastre que a validação existe pra impedir. Como quem escreve o arquivo é bash montando JSON à mão, erro de tipo é o modo de falha *mais* provável, não o menos.
 - **Pydantic em modo default (lax)** — rejeitado: coage `"false"` → `False`, contradizendo o "falha alto se o tipo divergir" da ADR-0019 e fazendo os dois leitores discordarem sobre o que é um `meta.json` válido.
@@ -186,7 +208,9 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 - O CI passa a ter três jobs: `pre-commit run --all-files` (agora incluindo `terraform validate` e `hadolint`), pytest por papel Python em venvs separados, e o smoke local. Continua sendo evidência anexada ao PR, não gate autônomo.
 - A ADR-0019 afirmava que "o único leitor programático é o `consolidate.py`"; são três, e dois deles são stdlib-only. Corrigido lá.
 - A fixture-âncora do modelo pydantic só existe depois do primeiro smoke AWS — é sequenciamento de desenvolvimento, não detalhe.
-- Os shims são a única superfície de manutenção nova que pode envelhecer mal (fake que diverge do real). A mitigação é o smoke AWS ser a fonte de verdade; se a estratégia precisar encolher algum dia, é por aí que se começa — nunca pela verificação de PMU.
+- Os shims são a única superfície de manutenção nova que pode envelhecer mal (fake que diverge do real). A mitigação passa a ser a camada de aceite manual primeiro — que é onde o fake e o real se encontram sem custo de AWS — e o smoke AWS depois; se a estratégia precisar encolher algum dia, é por aí que se começa — nunca pela verificação de PMU.
+- A camada de aceite é manual, então nada a roda sozinha: ela envelhece em silêncio, e o sintoma é o primeiro `pytest smoke/ --docker` depois de meses quebrar. É aceito de propósito — o alternativo é o build no CI —, e o momento em que ela precisa estar verde é antes de qualquer instância subir.
+- As fixtures dos quatro artefatos de instrumentação deixam de ser inventadas: passam a ser captura de ferramenta real, ao custo da emenda de allowlist da ADR-0017 e de as regenerar quando um pin do `docker/Dockerfile` mudar.
 - O shim do `ffmpeg` acumula três papéis (produzir artefatos falsos, controlar o `output.sha256`, logar o argv), o que o torna a peça mais carregada do `smoke/`. É deliberado: os três dependem do mesmo ponto de interceptação.
 - O smoke local não tem dependência de binário externo, então o job de CI não quebra quando a imagem do runner do GitHub muda.
 - Se o smoke revelar um evento PMU indisponível numa arquitetura, a resposta é decisão de desenho experimental (trocar o evento, ou reportar a métrica em duas das três), não de testes. Cai na ADR-0006 no dia em que ocorrer.

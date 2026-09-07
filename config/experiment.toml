@@ -17,8 +17,9 @@ warmup_runs = 1
 # Auto-detect: fixar um valor esconderia a assimetria estrutural ARM/x86, que é o
 # que se quer medir.
 threads = 0
-# 2 s @ 24 fps. O corte por mudança de cena é desativado por `encoder_args`, cuja
-# flag difere entre os encoders.
+# Em frames, e fixo: subir para 60 "para manter 2 s" no vídeo a 30 fps quebraria o
+# GOP idêntico entre Cenários (ADR-0002). O corte por mudança de cena é desativado
+# por `encoder_args`, cuja flag difere entre os encoders.
 gop_size = 48
 pix_fmt = "yuv420p"
 strip_audio = true
@@ -115,7 +116,7 @@ input_res = "720p"
 output_res = "480p"
 
 # Os rótulos são **nominais** (ADR-0023): Big Buck Bunny é 16:9 e Tears of Steel é
-# ~2.39:1, então "1080p" não é 1920x1080 para os dois. Declarar largura × altura
+# ~2.24:1, então "1080p" não é 1920x1080 para os dois. Declarar largura × altura
 # torna "nunca upscale" uma propriedade verificável sobre pixels.
 [[video]]
 slug = "bbb"
@@ -127,17 +128,17 @@ title = "Big Buck Bunny"
 720p = { width = 1280, height = 720 }
 480p = { width = 854, height = 480 }
 
-# O tier 2160p é o master DCI 4K nativo; os demais seguem a largura nominal do
-# ladder preservando o AR.
+# O tier 2160p é o master 4K oficial (3840 de largura, ADR-0023); os demais seguem
+# a largura nominal do ladder preservando o AR.
 [[video]]
 slug = "tos"
 title = "Tears of Steel"
 
 [video.geometry]
-2160p = { width = 4096, height = 1714 }
-1080p = { width = 1920, height = 804 }
-720p = { width = 1280, height = 536 }
-480p = { width = 854, height = 358 }
+2160p = { width = 3840, height = 1714 }
+1080p = { width = 1920, height = 856 }
+720p = { width = 1280, height = 572 }
+480p = { width = 854, height = 382 }
 
 # Instâncias (ADR-0001). `id` e `instance_type` são declarados lado a lado porque
 # nenhum pode ser derivado do outro por manipulação de string.

@@ -10,6 +10,12 @@ Três encoders CPU-only com configuração fixa e determinística em todas as ex
 
 Configurações comuns a todos: `-threads 0` (auto-detect, deixando assimetria estrutural ARM/x86 emergir), `-g 48` com scene-change keyframes desabilitado (`sc_threshold=0` / `scenecut=0` / `scd=0`) para GOP determinístico, `-pix_fmt yuv420p` explícito, `-an` (áudio strippado), saída em `.mkv`.
 
+### Emenda: o GOP é fixo em frames, e em segundos varia por vídeo
+
+`-g 48` foi justificado como "2 s @ 24 fps" (a linha das opções consideradas abaixo descreve só o Tears of Steel). A versão 4K do Big Buck Bunny só existe a 30 e 60 fps (ADR-0004). Fica a de **30 fps**: é a mais próxima dos 24 fps assumidos, e a de 60 dobraria os frames e o tempo de cada encode, faria o GOP de 48 valer 0,8 s (fora da prática ABR) e tornaria o Big Buck Bunny um workload sistematicamente mais pesado que o Tears of Steel sem que o rótulo dissesse isso.
+
+O invariante que esta ADR protege é o GOP **em frames**, idêntico entre codecs e arquiteturas para um dado Cenário — e ele continua 48. Em segundos, é 2,0 s no Tears of Steel e 1,6 s no Big Buck Bunny, ambos dentro da prática ABR (1–2 s). Um `-g` por vídeo foi rejeitado: adicionaria um parâmetro variável à configuração fixa por um ganho cosmético, e o vídeo já é fator controlado, com geometria (ADR-0023) e bitrate de master (ADR-0004) próprios.
+
 ## Considered Options
 
 - **Encoders por hardware (NVENC, QuickSync, VideoToolbox, AMF)** — rejeitado: não comparáveis entre arquiteturas (Graviton não tem equivalente). Tirariam CPU da mesa, que é o objeto de estudo.

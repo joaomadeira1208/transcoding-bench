@@ -5,7 +5,7 @@ Os tiers `2160p/1080p/720p/480p` da ADR-0004 são **nomes**, não dimensões. Bi
 A regra que gera a tabela é:
 
 - o tier **2160p é o master 4K nativo** de cada vídeo, como a ADR-0004 já o define (versão canônica baixada);
-- os tiers derivados seguem a **largura nominal do ladder** (1920, 1280, 854) **preservando o aspect ratio nativo**, com a altura arredondada para o par mais próximo — `yuv420p` (ADR-0002) exige as duas dimensões pares.
+- os tiers derivados seguem a **largura nominal do ladder** (1920, 1280, 854) **preservando o aspect ratio nativo**, com a altura arredondada para o par mais próximo — `yuv420p` (ADR-0002) exige as duas dimensões pares (empate entre dois pares: ver a emenda abaixo).
 
 | Tier | Big Buck Bunny (16:9) | Tears of Steel (~2.39:1) |
 |---|---|---|
@@ -15,6 +15,23 @@ A regra que gera a tabela é:
 | 480p | 854x480 | 854x358 |
 
 Casar a **largura**, e não a altura, é o que pipelines ABR de produção fazem com conteúdo scope: a rendition "1080p" de um filme 2.39:1 é 1920x804. É também a única regra que sobrevive ao tier de topo — casar a altura nominal daria 5162x2160 para Tears of Steel, que é upscale do master nativo.
+
+### Emenda: o master 4K do Tears of Steel tem 3840 de largura
+
+A tabela acima assumiu 4096x1714 como nativo, que é a geometria do DCP. Ao baixar as fontes (ADR-0004), o único arquivo 4096 que a Blender publica é o próprio DCP — 14 GB, JPEG 2000 em MXF, espaço de cor XYZ —, e transformá-lo em master exigiria decodificar J2K e converter cor, um passo de preparo e uma decisão de cor que nenhuma ADR desenhou. A versão canônica **encodada**, que é o que a ADR-0004 define como master 4K, é `tearsofsteel_4k.mov`: H.264, **3840x1714**, feita pela própria Blender cortando 128 pixels de cada lado do 4096, sem reescalar. O aspecto passa a ~2.24:1.
+
+A regra desta ADR não muda; a tabela é recomputada a partir do nativo real. Onde a altura cai exatamente entre dois pares (1920 × 1714/3840 = 857), fica o **menor**: é o lado do "nunca upscale".
+
+| Tier | Big Buck Bunny (16:9) | Tears of Steel (~2.24:1) |
+|---|---|---|
+| 2160p | 3840x2160 | 3840x1714 |
+| 1080p | 1920x1080 | 1920x856 |
+| 720p | 1280x720 | 1280x572 |
+| 480p | 854x480 | 854x382 |
+
+Manter 1920x804 e os demais da tabela antiga sobre um master de 3840x1714 seria escalar com aspectos diferentes na largura e na altura — distorção geométrica, que nenhum pipeline ABR faz.
+
+O que esta emenda supera no texto original, que fica como registro: a tabela e o "4096x1714 nativo, DCI 4K" do topo; o "1,54 MP" das consequências (é 1,64 MP, contra 2,07 MP do Big Buck Bunny — os tiers continuam não sendo iso-pixel entre vídeos); os números derivados de 2.39:1 nas opções consideradas ("5162x2160" vira 4839x2160 e o argumento continua de pé; "2582x1080" vira 2420x1080); e a opção "padronizar a largura também no tier 2160p", cujo custo — derivar o master 4K do Tears of Steel por downscale — deixou de existir, porque o master oficial já tem 3840 de largura. O que a opção queria, uniformidade de largura no tier de topo, veio de graça.
 
 Com a geometria explícita, o "nunca upscale" da ADR-0004 vira propriedade verificável sobre pixels (`output.width <= input.width` e idem para a altura, por vídeo), asserida na validação da spec antes de qualquer coisa ser gerada. Comparar os rótulos não diria nada: `1080p -> 720p` parece downscale sob qualquer geometria, inclusive uma errada.
 

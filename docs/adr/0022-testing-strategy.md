@@ -206,6 +206,8 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 - Emenda à allowlist do `.gitignore` (ADR-0017): `requirements-dev.txt`, fixtures `.json` sob `fixtures/`, e o workflow do CI — nenhum dos três estava permitido, apesar de a ADR-0017 depender dos três.
 - `smoke/` entra como diretório de topo, com um terceiro `requirements-dev.txt` (`pytest`, `pydantic` e — pela emenda acima — `pyarrow`). A ADR-0017 falava em dois.
 - O CI passa a ter três jobs: `pre-commit run --all-files` (agora incluindo `terraform validate` e `hadolint`), pytest por papel Python em venvs separados, e o smoke local. Continua sendo evidência anexada ao PR, não gate autônomo.
+
+  **Emenda: são quatro jobs, não três.** "Pytest por papel" contava como um; o workflow materializa um job por papel Python — `orchestrator/` e `analysis/`, cada um em venv próprio instalando só o seu `requirements-dev.txt` — porque é o isolamento por job que faz um `import` sem dependência declarada quebrar no CI em vez de passar porque o outro papel tinha o pacote. Os quatro: `pre-commit`, pytest do `orchestrator/`, pytest do `analysis/` e o smoke local.
 - A ADR-0019 afirmava que "o único leitor programático é o `consolidate.py`"; são três, e dois deles são stdlib-only. Corrigido lá.
 - A fixture-âncora do modelo pydantic só existe depois do primeiro smoke AWS — é sequenciamento de desenvolvimento, não detalhe.
 - Os shims são a única superfície de manutenção nova que pode envelhecer mal (fake que diverge do real). A mitigação passa a ser a camada de aceite manual primeiro — que é onde o fake e o real se encontram sem custo de AWS — e o smoke AWS depois; se a estratégia precisar encolher algum dia, é por aí que se começa — nunca pela verificação de PMU.

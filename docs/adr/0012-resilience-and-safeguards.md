@@ -20,6 +20,10 @@ Terraform configura um AWS Budget com teto de **$150**. Se o custo acumulado ult
 
 Estimativa de custo normal do experimento: ~$70 de compute + ~$4 de S3 + instância do Orquestrador + Juiz ≈ ~$85. Teto de $150 dá margem pra um re-run completo.
 
+## Gate humano antes da campanha
+
+**Emenda.** As três camadas acima protegem a campanha em andamento. Antes de ela começar há um gate que nenhuma camada substitui: a preparação dos masters (ADR-0014) é uma execução própria, e a campanha só é disparada depois que o pesquisador confere o `masters/manifest.json` (ADR-0011) contra as ADRs 0004 e 0023 e aprova. É o mesmo instinto da retomada semi-automática abaixo e do gate de hotfix da ADR-0021: o que custa dois dias de compute se estiver errado passa por um humano uma vez.
+
 ## Retomada semi-automática
 
 Quando algo falha (instância morre, cenários falham), a retomada é **semi-automática**:

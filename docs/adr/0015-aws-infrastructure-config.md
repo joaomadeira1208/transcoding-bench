@@ -12,6 +12,13 @@
 
 **Ubuntu 24.04 LTS.** Escolhido por estabilidade e previsibilidade em workloads de benchmarking. Amazon Linux 2023 tem reports documentados de regressões de performance em instâncias compute-optimized (issues #1005, #819, #1029 no GitHub do amazonlinux). Pra um projeto que mede performance, o OS precisa ser o mais estável possível. Ubuntu 24.04 tem frame pointers habilitados por default (útil pra profiling) e é mais usado em comunidades de benchmarking/HPC. Docker, git, perf e sysstat (pidstat) são instalados no bootstrap. AWS CLI precisa ser instalado manualmente (não vem pré-instalado como no AL2023).
 
+## Volumes
+
+**Emenda.** Os masters impõem tamanho de disco em dois lugares, e o dimensionamento exato é decisão da spec de infraestrutura:
+
+- a **instância de preparação** (ADR-0014) precisa caber os dois sources (7,4 GB), os seis masters — os quatro FFV1 somam 50–70 GB — e folga de trabalho: ~100 GB de gp3, num volume que morre com a instância;
+- cada **instância de encode** baixa os seis masters no bootstrap (~80 GB) e ainda escreve os `output.mkv` de cada Execução antes de subi-los; o volume padrão do Ubuntu não os comporta.
+
 ## Considered Options
 
 - **sa-east-1 (São Paulo)** — rejeitado: 20–30% mais cara; latência não importa pra batch.

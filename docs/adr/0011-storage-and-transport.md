@@ -8,7 +8,7 @@ O bucket S3 é criado pelo Terraform como parte da infra base e **não é destru
 
 ```
 s3://<bucket>/
-  masters/          # 6 masters (bootstrap no Orquestrador, ADR-0014)
+  masters/          # 6 masters + manifest.json (preparação, ADR-0014)
   scenarios/        # scenarios.json canônico + fatias por arch (ex.: canonical.json, c7g.json)
   runs/{run_id}/    # raw dirs das Execuções (ADR-0007), warm-ups inclusos
   status/           # marcadores de término ({instance_type}_done, judge_done)
@@ -16,6 +16,8 @@ s3://<bucket>/
     plan.json       # quality_plan.json gerado pelo triage (ADR-0014)
     results/        # resultados VMAF/SSIM do Juiz
 ```
+
+**Emenda: `masters/manifest.json` é objeto de contrato.** A preparação dos masters (ADR-0014) escreve, ao lado dos seis `.mkv`, um manifesto com nome, tamanho, sha256 e as propriedades observadas pelo `ffprobe` de cada um, mais as versões da imagem que os produziu. Ele tem dois leitores: o pesquisador, que o confere antes de aprovar a campanha (gate da ADR-0012), e o bootstrap de cada instância de encode, que valida o sha256 do master baixado contra ele antes do primeiro Cenário. Nome e caminho fixos porque quem lê recebe o path por argumento, como todo o resto deste layout.
 
 Os prefixos são **contrato**, não convenção: a matriz IAM (ADR-0016) escopa permissões por prefixo, e cada bootstrap recebe o path exato do que consome — a instância nunca decide path, coerente com "a seleção mora no lado inteligente" (ADR-0019). Dado de runtime (`scenarios.json`, `quality_plan.json`) viaja **sempre via S3 pro work dir** (ADR-0018), nunca por SCP — um mecanismo, dois consumidores (encode e Juiz).
 
@@ -26,7 +28,7 @@ Cada `run_scenario.sh`, ao terminar uma Execução, faz:
 aws s3 cp runs/{run_id}/ s3://bucket/runs/{run_id}/ --recursive
 ```
 
-Isso inclui: `meta.json`, `time.json`, `perf.json`, `pidstat.csv`, `ffmpeg.log`, `output.mkv`, `output.sha256`.
+Isso inclui: `meta.json`, `time.json`, `perf.json`, `pidstat.txt` (era `pidstat.csv`; emenda da ADR-0007), `ffmpeg.log`, `output.mkv`, `output.sha256`.
 
 Upload acontece **entre runs** (não durante o encode), portanto não contamina métricas de performance.
 

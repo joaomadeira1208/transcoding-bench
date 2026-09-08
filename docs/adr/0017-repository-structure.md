@@ -23,7 +23,8 @@ analysis/      # Python local (pandas/pyarrow): consolidate.py + schema do meta.
 smoke/         # Smoke local (ADR-0022), só do Mac + CI: pytest dirigindo os run_*.sh
                #   com shims de ffmpeg/perf/pidstat/aws. Nunca importa; só invoca.
                #   + requirements-dev.txt próprio (pytest + pydantic)
-infra/         # Terraform, só do Mac. Arquivos planos por preocupação. Backend S3 remoto (ADR-0020).
+infra/         # Terraform, só do Mac. Um diretório por root (ADR-0020), arquivos planos
+               #   por preocupação dentro dele. Backend S3 remoto e parcial (ADR-0020).
 docs/          # adr/ + CONTEXT.md
 ```
 
@@ -64,6 +65,8 @@ O repo é clonado em instâncias com IP público (ADR-0016), então nada sensív
    **Emenda: a exceção das fixtures vai além do `.json`.** A camada de aceite manual da ADR-0022 captura as saídas cruas do `/usr/bin/time`, do `perf`, do `pidstat` e do FFmpeg, e são elas que passam a alimentar os testes dos parsers do `analysis/` — a mesma justificativa pela qual o `meta.json` real é âncora, um degrau abaixo: parser testado contra texto que o próprio autor digitou valida o Python contra o Python. `.txt` e `.log` entram ao lado do `.json`, e continua tudo escopado a diretórios literalmente chamados `fixtures/`.
 
    A exceção segue **enumerada por extensão**, e não escrita como `!**/fixtures/*`. Não é conservadorismo: a captura da camada de aceite tem o `output.mkv` ao lado das saídas de texto, e o curinga poria um vídeo no histórico do repositório que as instâncias clonam. O custo conhecido do default correto continua valendo — uma fixture de tipo novo não entra sem que alguém a permita —, e é o lado certo em que errar.
+
+   **Emenda: a allowlist admite o `.terraform.lock.hcl` sob `infra/`.** É o quarto caso do custo descrito acima — `.hcl` não está na allowlist por extensão, e sem a exceção o lock file de cada root do Terraform simplesmente não entraria. Ele é o **pin do provider** que a ADR-0020 pede na sua última consequência, com os hashes das plataformas em que o repo é verificado (o Mac do pesquisador e o runner do CI): fora do histórico, o `terraform init` que o hook `terraform_validate` roda resolveria uma versão de provider por PR, e a reprodutibilidade que a ADR-0020 exige seria a de nenhum `apply`. Não é artefato de runtime — esse é o `.terraform/`, ignorado por nome, ao lado do `*.tfstate` e do `*.tfvars`, que nunca estiveram na allowlist. A exceção é escopada a `infra/`, o único lugar onde há Terraform.
 2. **`gitleaks` no `pre-commit`.** Varre o conteúdo staged e bloqueia segredo embutido dentro de um arquivo *permitido* (ex.: chave colada num `.sh` durante debug) — o vetor que a camada 1 não pega. Incluída porque o `pre-commit` já existe pros linters, então o custo marginal é ≈ zero.
 
 Por design quase nada sensível nasce dentro do repo: chave SSH via SSM → `~/.ssh` (ADR-0016), state remoto (ADR-0020), sem credencial estática (instance profiles). As camadas são rede de segurança, não a defesa primária. Bônus opcional server-side: push protection do GitHub (não burlável por `--no-verify`).
@@ -74,7 +77,7 @@ Por design quase nada sensível nasce dentro do repo: chave SSH via SSM → `~/.
 - **Por linguagem** (`python/`, `bash/`, `terraform/`) — rejeitado: esconde quem roda o quê; uma instância de encode teria que vasculhar `python/` e `bash/` pra montar seu papel. Por papel, o papel é o diretório.
 - **Flat (tudo na raiz)** — rejeitado: 4 papéis + spec + infra + análise na raiz vira ruído; perde a fronteira de propriedade.
 - **`pyproject.toml` com extras** — rejeitado: sem pacote a distribuir e sem código compartilhado, adicionaria build backend e `pip install -e .[extra]` no bootstrap sem ganho. Config de linter mora em `ruff.toml` no topo.
-- **Segredos/artefatos versionados** — rejeitado por construção: `scenarios.json`, `quality_plan.json`, o `meta.json` de runtime e `*.pem` são runtime/segredo e ficam fora pela allowlist (seção acima); o state do Terraform é remoto (ADR-0020). As únicas exceções são as fixtures de contrato sob `fixtures/` (ADR-0022) — o `meta.json` capturado e as saídas cruas das ferramentas de medição —, artefatos de teste commitados de propósito, não dado de campanha.
+- **Segredos/artefatos versionados** — rejeitado por construção: `scenarios.json`, `quality_plan.json`, o `meta.json` de runtime e `*.pem` são runtime/segredo e ficam fora pela allowlist (seção acima); o state do Terraform é remoto (ADR-0020). As exceções são as fixtures de contrato sob `fixtures/` (ADR-0022) — o `meta.json` capturado e as saídas cruas das ferramentas de medição — e o `.terraform.lock.hcl` sob `infra/` (emenda acima): artefatos commitados de propósito, de teste e de pin, não dado de campanha nem segredo.
 
 ## Consequences
 

@@ -22,12 +22,16 @@ ordem é fixa: `apply` do storage antes do compute, `destroy` na ordem inversa.
 
 ## Toolchain
 
-O binário `terraform` tem que ser **1.15.8**, a versão que o CI pina em
-`.github/workflows/ci.yml` e que o `required_version` de cada root exige. Pelo
-asdf:
+O binário `terraform` tem que ser exatamente a versão que o CI pina em
+`.github/workflows/ci.yml` e que o `required_version` de cada root exige — as
+duas são a mesma, e é lá que ela mora. Pelo asdf, com ela no lugar de `<versão>`:
 
     asdf plugin add terraform
-    asdf install terraform 1.15.8
+    asdf install terraform <versão>
+    asdf set --home terraform <versão>
+
+Sem o `asdf set`, o shim existe mas não resolve, e o `pre-commit` falha nos dois
+hooks de Terraform — o binário instalado não basta, é preciso selecioná-lo.
 
 O `.terraform.lock.hcl` de cada root é commitado, com os hashes de
 `darwin_arm64`, `linux_amd64` e `linux_arm64` — o pin do provider que a ADR-0020
@@ -49,8 +53,10 @@ voltar um state corrompido:
         BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 
 Esse nome **não está no repositório**, que é público: o bloco de backend é
-parcial (fixa região, chave e `use_lockfile`) e o nome chega por
-`-backend-config` a cada `init`.
+parcial (fixa região, chave, `encrypt` e `use_lockfile`) e o nome chega por
+`-backend-config` a cada `init`. O `encrypt` e o versionamento acima são o que a
+ADR-0020 pede do state: ele guarda a chave SSH privada em plaintext, então tem
+que estar encriptado at rest e tem que dar para voltar uma versão.
 
 ## Variáveis
 

@@ -16,6 +16,10 @@ _TOP_LEVEL_KEYS = frozenset(
 )
 
 
+_SHA256_DIGITS = 64
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
 class ConfigError(Exception):
     """Spec inválida. A mensagem sempre nomeia o registro ofensor."""
 
@@ -61,10 +65,23 @@ class PairRecord:
 
 
 @dataclass(frozen=True)
+class SourceRecord:
+    """O arquivo publicado de onde o master 4K sai, pinado (ADR-0004)."""
+
+    url: str
+    file: str
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
 class VideoRecord:
     slug: str
     title: str
+    frame_rate: str
+    frames: int
     geometry: Mapping[str, Geometry]
+    source: SourceRecord
 
 
 @dataclass(frozen=True)
@@ -207,11 +224,14 @@ def _pair(record: Mapping[str, Any], index: int) -> PairRecord:
 
 def _video(record: Mapping[str, Any], index: int) -> VideoRecord:
     where = _where("video", index, record.get("slug"))
-    _reject_unknown(record, {"slug", "title", "geometry"}, where)
+    _reject_unknown(record, {"slug", "title", "frame_rate", "frames", "geometry", "source"}, where)
     return VideoRecord(
         slug=_str(record, "slug", where),
         title=_str(record, "title", where),
+        frame_rate=_str(record, "frame_rate", where),
+        frames=_int(record, "frames", where, minimum=1),
         geometry=_geometry(record, where),
+        source=_source(record, where),
     )
 
 
@@ -222,6 +242,21 @@ def _instance(record: Mapping[str, Any], index: int) -> InstanceRecord:
         id=_str(record, "id", where),
         instance_type=_str(record, "instance_type", where),
         arch=_str(record, "arch", where),
+    )
+
+
+def _source(record: Mapping[str, Any], where: str) -> SourceRecord:
+    table = _require(record, "source", where)
+    source_where = f"{where}: source"
+    if not isinstance(table, Mapping):
+        raise ConfigError(f"{source_where} must be a table with 'url', 'file', 'size' and 'sha256'")
+
+    _reject_unknown(table, {"url", "file", "size", "sha256"}, source_where)
+    return SourceRecord(
+        url=_str(table, "url", source_where),
+        file=_str(table, "file", source_where),
+        size=_int(table, "size", source_where, minimum=1),
+        sha256=_sha256(table, "sha256", source_where),
     )
 
 
@@ -350,6 +385,16 @@ def _even(record: Mapping[str, Any], key: str, where: str) -> int:
     value = _int(record, key, where, minimum=1)
     if value % 2:
         raise ConfigError(f"{where}: '{key}' must be even for yuv420p, got {value}")
+    return value
+
+
+def _sha256(record: Mapping[str, Any], key: str, where: str) -> str:
+    """Digest hexadecimal completo: um truncado só falha depois do download."""
+    value = _str(record, key, where)
+    if len(value) != _SHA256_DIGITS or set(value) - _HEX_DIGITS:
+        raise ConfigError(
+            f"{where}: '{key}' must be {_SHA256_DIGITS} lowercase hexadecimal digits, got '{value}'"
+        )
     return value
 
 

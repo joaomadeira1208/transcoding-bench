@@ -65,9 +65,20 @@ _MINIMAL: dict[str, Any] = {
         {
             "slug": "bbb",
             "title": "Big Buck Bunny",
+            "frame_rate": "30/1",
+            "frames": 19036,
             "geometry": {
                 "1080p": {"width": 1920, "height": 1080},
                 "720p": {"width": 1280, "height": 720},
+            },
+            "source": {
+                "url": (
+                    "https://download.blender.org/demo/movies/BBB/"
+                    "bbb_sunflower_2160p_30fps_normal.mp4.zip"
+                ),
+                "file": "bbb_sunflower_2160p_30fps_normal.mp4",
+                "size": 633016449,
+                "sha256": "37f0ff251a606c2dcfa26c19fe6bf843234b4e7a8889cfab50bc26f644e55520",
             },
         }
     ],
@@ -145,6 +156,10 @@ def make_codec(**overrides: Any) -> dict[str, Any]:
 
 def make_video(**overrides: Any) -> dict[str, Any]:
     return {**copy.deepcopy(_MINIMAL["video"][0]), **overrides}
+
+
+def make_source(**overrides: Any) -> dict[str, Any]:
+    return {**copy.deepcopy(_MINIMAL["video"][0]["source"]), **overrides}
 
 
 def make_instance(**overrides: Any) -> dict[str, Any]:

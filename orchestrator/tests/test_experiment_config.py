@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from conftest import (
     ABSENT,
@@ -13,11 +15,12 @@ from conftest import (
     make_geometry,
     make_instance,
     make_instrumentation,
+    make_source,
     make_video,
     real_config,
     real_pilot_config,
 )
-from experiment_config import ConfigError, validate_config
+from experiment_config import ConfigError, ExperimentConfig, validate_config
 
 # Transcrição deliberada da spec (ADR-0004), não uma contagem: 162/972/810 e
 # `len(pairs) == 9` são invariantes sob **substituição** de par, então trocar
@@ -75,11 +78,54 @@ EXPECTED_GEOMETRY = {
     },
 }
 
+# Transcrição da tabela da emenda da ADR-0004: o arquivo publicado que a
+# preparação dos Masters baixa, e o que ela confere depois do `unzip`. Nada aqui
+# é derivável do `slug`, e um dígito trocado só apareceria depois do download.
+EXPECTED_SOURCES = {
+    "bbb": {
+        "file": "bbb_sunflower_2160p_30fps_normal.mp4",
+        "url": (
+            "https://download.blender.org/demo/movies/BBB/bbb_sunflower_2160p_30fps_normal.mp4.zip"
+        ),
+        "size": 633016449,
+        "sha256": "37f0ff251a606c2dcfa26c19fe6bf843234b4e7a8889cfab50bc26f644e55520",
+    },
+    "tos": {
+        "file": "tearsofsteel_4k.mov",
+        "url": "https://download.blender.org/demo/movies/ToS/tearsofsteel_4k.mov.zip",
+        "size": 6737592810,
+        "sha256": "89b7fd21c7729b7d5071af993939997f847b5af06613a3388ba158dae9e52ab3",
+    },
+}
+
+# Da mesma tabela: o `ffprobe` da imagem de medição (ADR-0018) sobre os dois
+# arquivos acima.
+EXPECTED_FRAME_RATE_AND_COUNT = {
+    "bbb": ("30/1", 19036),
+    "tos": ("24/1", 17616),
+}
+
 
 EXPECTED_SEED = 20260808
 
 # O escopo do piloto (ADR-0022): dos nove pares, só o downscale barato.
 PILOT_PAIRS = {("1080p", "720p")}
+
+
+def declared_sources(config: ExperimentConfig) -> dict[str, dict[str, Any]]:
+    return {
+        video.slug: {
+            "file": video.source.file,
+            "url": video.source.url,
+            "size": video.source.size,
+            "sha256": video.source.sha256,
+        }
+        for video in config.videos
+    }
+
+
+def declared_frame_rate_and_count(config: ExperimentConfig) -> dict[str, tuple[str, int]]:
+    return {video.slug: (video.frame_rate, video.frames) for video in config.videos}
 
 
 class TestAccepts:
@@ -148,6 +194,12 @@ class TestRealExperimentToml:
         # Lista, não conjunto: a ordem é requisito, não coincidência.
         assert list(real_config().instrumentation.pmu_events) == EXPECTED_PMU_EVENTS
 
+    def test_pins_the_source_file_of_every_video(self):
+        assert declared_sources(real_config()) == EXPECTED_SOURCES
+
+    def test_declares_the_frame_rate_and_the_frame_count_of_every_video(self):
+        assert declared_frame_rate_and_count(real_config()) == EXPECTED_FRAME_RATE_AND_COUNT
+
     def test_ties_preset_and_crf_to_each_codec(self):
         codecs = {c.slug: (c.preset, c.crf) for c in real_config().codecs}
 
@@ -187,6 +239,12 @@ class TestRealPilotToml:
         }
 
         assert declared == EXPECTED_GEOMETRY
+
+    def test_pins_the_same_sources_as_the_campaign(self):
+        assert declared_sources(real_pilot_config()) == EXPECTED_SOURCES
+
+    def test_declares_the_same_frame_rate_and_frame_count_as_the_campaign(self):
+        assert declared_frame_rate_and_count(real_pilot_config()) == EXPECTED_FRAME_RATE_AND_COUNT
 
     def test_carries_the_seed_of_the_campaign(self):
         assert real_pilot_config().seed == EXPECTED_SEED
@@ -292,6 +350,132 @@ class TestRejectsBadGeometry:
         message = str(excinfo.value)
         assert "bbb" in message
         assert "720p" in message
+
+
+class TestRejectsBadSource:
+    """O que a preparação e a validação dos Masters leem do registro (ADR-0004)."""
+
+    def test_missing_source_table(self, make_raw_config):
+        video = make_video()
+        del video["source"]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[video]))
+
+        message = str(excinfo.value)
+        assert "video[0]" in message
+        assert "bbb" in message
+        assert "source" in message
+
+    def test_source_that_is_not_a_table(self, make_raw_config):
+        raw = make_raw_config(video=[make_video(source="bbb_sunflower_2160p_30fps_normal.mp4")])
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        assert "bbb" in str(excinfo.value)
+        assert "source" in str(excinfo.value)
+
+    @pytest.mark.parametrize("field", ["url", "file", "size", "sha256"])
+    def test_source_missing_field(self, make_raw_config, field):
+        source = make_source()
+        del source[field]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[make_video(source=source)]))
+
+        message = str(excinfo.value)
+        assert "bbb" in message
+        assert field in message
+
+    def test_unknown_key_in_the_source_table(self, make_raw_config):
+        raw = make_raw_config(video=[make_video(source=make_source(md5="d41d8cd98f00b204e980"))])
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "bbb" in message
+        assert "md5" in message
+
+    def test_sha256_of_the_wrong_length(self, make_raw_config):
+        truncated = make_source()["sha256"][:-1]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(
+                make_raw_config(video=[make_video(source=make_source(sha256=truncated))])
+            )
+
+        message = str(excinfo.value)
+        assert "bbb" in message
+        assert "sha256" in message
+
+    def test_sha256_that_is_not_hexadecimal(self, make_raw_config):
+        not_hex = "z" + make_source()["sha256"][1:]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[make_video(source=make_source(sha256=not_hex))]))
+
+        message = str(excinfo.value)
+        assert "bbb" in message
+        assert "sha256" in message
+
+    def test_non_positive_size(self, make_raw_config):
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[make_video(source=make_source(size=0))]))
+
+        message = str(excinfo.value)
+        assert "bbb" in message
+        assert "size" in message
+
+    def test_size_that_is_a_string(self, make_raw_config):
+        raw = make_raw_config(video=[make_video(source=make_source(size="633016449"))])
+
+        with pytest.raises(ConfigError, match="size"):
+            validate_config(raw)
+
+    def test_empty_url(self, make_raw_config):
+        with pytest.raises(ConfigError, match="url"):
+            validate_config(make_raw_config(video=[make_video(source=make_source(url=""))]))
+
+    def test_empty_file(self, make_raw_config):
+        with pytest.raises(ConfigError, match="file"):
+            validate_config(make_raw_config(video=[make_video(source=make_source(file=""))]))
+
+
+class TestRejectsBadFrameRateAndCount:
+    @pytest.mark.parametrize("field", ["frame_rate", "frames"])
+    def test_video_missing_field(self, make_raw_config, field):
+        video = make_video()
+        del video[field]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[video]))
+
+        message = str(excinfo.value)
+        assert "video[0]" in message
+        assert field in message
+
+    def test_frame_rate_that_is_a_number(self, make_raw_config):
+        with pytest.raises(ConfigError, match="frame_rate"):
+            validate_config(make_raw_config(video=[make_video(frame_rate=30.0)]))
+
+    @pytest.mark.parametrize("value", ["30", "banana", "30/", "/1", "30/1.5", "-30/1", "30/0"])
+    def test_frame_rate_that_is_not_a_rational(self, make_raw_config, value):
+        with pytest.raises(ConfigError, match="frame_rate"):
+            validate_config(make_raw_config(video=[make_video(frame_rate=value)]))
+
+    def test_frames_that_is_a_string(self, make_raw_config):
+        with pytest.raises(ConfigError, match="frames"):
+            validate_config(make_raw_config(video=[make_video(frames="19036")]))
+
+    def test_non_positive_frames(self, make_raw_config):
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[make_video(frames=0)]))
+
+        message = str(excinfo.value)
+        assert "bbb" in message
+        assert "frames" in message
 
 
 class TestRejectsDuplicates:
@@ -475,6 +659,14 @@ class TestRejectsIncompleteRecords:
 
         assert "codec[0]" in str(excinfo.value)
         assert "tune" in str(excinfo.value)
+
+    def test_unknown_key_in_a_video_record(self, make_raw_config):
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[make_video(fps=30)]))
+
+        message = str(excinfo.value)
+        assert "video[0]" in message
+        assert "fps" in message
 
     def test_unknown_table_at_the_top_level(self, make_raw_config):
         with pytest.raises(ConfigError, match="quality"):

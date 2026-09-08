@@ -121,6 +121,8 @@ output_res = "480p"
 [[video]]
 slug = "bbb"
 title = "Big Buck Bunny"
+frame_rate = "30/1"
+frames = 19036
 
 [video.geometry]
 2160p = { width = 3840, height = 2160 }
@@ -128,17 +130,31 @@ title = "Big Buck Bunny"
 720p = { width = 1280, height = 720 }
 480p = { width = 854, height = 480 }
 
+[video.source]
+url = "https://download.blender.org/demo/movies/BBB/bbb_sunflower_2160p_30fps_normal.mp4.zip"
+file = "bbb_sunflower_2160p_30fps_normal.mp4"
+size = 633016449
+sha256 = "37f0ff251a606c2dcfa26c19fe6bf843234b4e7a8889cfab50bc26f644e55520"
+
 # O tier 2160p é o master 4K oficial (3840 de largura, ADR-0023); os demais seguem
 # a largura nominal do ladder preservando o AR.
 [[video]]
 slug = "tos"
 title = "Tears of Steel"
+frame_rate = "24/1"
+frames = 17616
 
 [video.geometry]
 2160p = { width = 3840, height = 1714 }
 1080p = { width = 1920, height = 856 }
 720p = { width = 1280, height = 572 }
 480p = { width = 854, height = 382 }
+
+[video.source]
+url = "https://download.blender.org/demo/movies/ToS/tearsofsteel_4k.mov.zip"
+file = "tearsofsteel_4k.mov"
+size = 6737592810
+sha256 = "89b7fd21c7729b7d5071af993939997f847b5af06613a3388ba158dae9e52ab3"
 
 # Instâncias (ADR-0001). `id` e `instance_type` são declarados lado a lado porque
 # nenhum pode ser derivado do outro por manipulação de string.

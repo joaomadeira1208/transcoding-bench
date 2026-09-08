@@ -51,7 +51,7 @@ _Não confundir com_: o smoke (que atravessa o caminho com shims e não mede nad
 
 **Master** (`master`):
 Vídeo de entrada antes de qualquer transcoding pela pipeline. Existe em três resoluções (4K, 1080p, 720p), todas derivadas do source 4K canônico por downscale Lanczos lossless (FFV1).
-_Avoid_: source (ambíguo), input bruto.
+_Avoid_: source como sinônimo de Master (ambíguo), input bruto.
 
 **Pass de qualidade** (`quality_pass`):
 Etapa pós-encode em que se calculam métricas de qualidade (SSIM/VMAF) sobre uma **amostra estratificada** dos outputs. Sua finalidade é **validar a premissa** de que arquiteturas distintas produzem qualidade equivalente sob params fixos (encoder, preset, CRF, thread count), **não** tratar qualidade como variável dependente do experimento. Executado em instância separada das de encode (**Juiz**) pra eliminar variância arquitetural na própria computação da métrica.
@@ -89,6 +89,6 @@ _Avoid_: worker, runner, nó.
 
 - **"pipeline"** era usado no artigo em três sentidos (experimental, transcoding de produção, comando FFmpeg) — resolvido: no projeto, **Pipeline** refere-se exclusivamente ao arcabouço experimental.
 - **"workload"** aparecia indistinto entre "execução individual" e "campanha completa" — resolvido: usamos **Execução** e **Experimento** respectivamente.
-- **"source"** era usado pra denotar tanto o arquivo de origem 4K canônico quanto o input de uma execução — resolvido: usamos **Master** pro input de qualquer execução (incluindo 1080p e 720p, derivados); o source 4K canônico não tem termo próprio porque não aparece em código (é só artefato de bootstrap).
+- **"source"** era usado pra denotar tanto o arquivo de origem 4K canônico quanto o input de uma execução — resolvido: usamos **Master** pro input de qualquer execução (incluindo 1080p e 720p, derivados); o arquivo de origem 4K canônico não tem termo próprio no glossário, e `source` é reservado a ele: é o nome da sub-tabela que cada `[[video]]` do `experiment.toml` declara com a URL, o arquivo, o tamanho e o sha256 que a preparação dos Masters baixa e confere (ADR-0004). Nunca como sinônimo de Master.
 - **"instância de controle" / "controle"** era usado nos ADRs como sinônimo de "orquestrador" — resolvido: o termo canônico é **Orquestrador** (o programa), e a máquina onde ele roda é "a instância do Orquestrador". Não se usa "Controle" como termo próprio.
 - **"qualidade do vídeo gerado"** apareceu no artigo como variável dependente ao lado de tempo/CPU/custo — resolvido: com encoder e CRF fixos, qualidade é esperada invariante entre arquiteturas; entra como **validação amostral da premissa** via **Pass de qualidade** rodando no **Juiz**, não como variável dependente. ADR a criar quando os parâmetros de amostragem estiverem fechados.

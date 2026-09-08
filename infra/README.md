@@ -1,0 +1,98 @@
+# infra/
+
+Terraform, rodado **só do Mac do pesquisador** (ADR-0017). Um diretório por
+root, arquivos planos por preocupação dentro de cada um. O `apply` e o `destroy`
+são do pesquisador: o CI verifica formato e validade dos `.tf` (`terraform_fmt`
+e `terraform_validate` no pre-commit) e nada mais — nenhum job tem credencial
+AWS.
+
+## Os dois roots
+
+| Root | Cria | Tempo de vida |
+|---|---|---|
+| `storage/` | os dois buckets do experimento (campanha e piloto) | destruído **manualmente, no fim do TCC** (ADR-0011) |
+| `compute/` | rede, IAM, key pair, parâmetro SSM, orçamento e a instância do Orquestrador | destruído **no fim da campanha** |
+
+São dois porque os tempos de vida são dois (ADR-0020): os buckets são o ground
+truth do experimento e precisam sobreviver ao `destroy` que encerra a campanha.
+O `compute/` lê os nomes dos buckets pelo remote state do `storage/`, então a
+ordem é fixa: `apply` do storage antes do compute, `destroy` na ordem inversa.
+
+`compute/` ainda não existe — chega no ticket seguinte.
+
+## Toolchain
+
+O binário `terraform` tem que ser **1.15.8**, a versão que o CI pina em
+`.github/workflows/ci.yml` e que o `required_version` de cada root exige. Pelo
+asdf:
+
+    asdf plugin add terraform
+    asdf install terraform 1.15.8
+
+O `.terraform.lock.hcl` de cada root é commitado, com os hashes de
+`darwin_arm64`, `linux_amd64` e `linux_arm64` — o pin do provider que a ADR-0020
+pede. Ele entra no repositório por uma exceção nomeada da allowlist do
+`.gitignore` (ADR-0017); `.terraform/`, `*.tfstate` e `*.tfvars` continuam fora.
+
+## Antes do primeiro `init`: o bucket de state
+
+O state fica em S3 remoto, e o bucket dele é criado **fora de banda** — uma vez,
+na mão, fora do ciclo `apply`/`destroy` de qualquer root (ADR-0020). O nome é
+seu (nome de bucket é global); em `us-east-1`, com versionamento para poder
+voltar um state corrompido:
+
+    aws s3api create-bucket --bucket <state-bucket> --region us-east-1
+    aws s3api put-bucket-versioning --bucket <state-bucket> \
+        --versioning-configuration Status=Enabled
+    aws s3api put-public-access-block --bucket <state-bucket> \
+        --public-access-block-configuration \
+        BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+Esse nome **não está no repositório**, que é público: o bloco de backend é
+parcial (fixa região, chave e `use_lockfile`) e o nome chega por
+`-backend-config` a cada `init`.
+
+## Variáveis
+
+`storage/` tem uma:
+
+| Variável | Default | O que é |
+|---|---|---|
+| `bucket_prefix` | `transcoding-bench` | primeiro segmento do nome dos dois buckets |
+
+Os nomes saem de `<bucket_prefix>-<account_id>-campaign` e
+`<bucket_prefix>-<account_id>-pilot`, com o account id vindo do
+`aws_caller_identity` — o default serve como está, e só precisa mudar se colidir
+com um bucket seu.
+
+## `storage/`: apply
+
+    terraform -chdir=infra/storage init -backend-config="bucket=<state-bucket>"
+    terraform -chdir=infra/storage plan
+    terraform -chdir=infra/storage apply
+
+Os outputs são os dois nomes e os dois ARNs (`campaign_bucket_name`,
+`campaign_bucket_arn`, `pilot_bucket_name`, `pilot_bucket_arn`). É por eles que
+o `compute/` e, depois, os argumentos `--bucket` dos scripts descobrem para onde
+escrever.
+
+Os buckets nascem **vazios**: nenhum objeto do layout de prefixos da ADR-0011 é
+criado pelo Terraform, os prefixos aparecem no primeiro upload. Não têm
+versionamento (a dedup do experimento é lógica, por `scenario_id`) e não têm
+`force_destroy`.
+
+## `destroy`
+
+Cada root tem o seu, e os tempos de vida não são o mesmo momento:
+
+    # fim da campanha
+    terraform -chdir=infra/compute destroy
+
+    # fim do TCC, depois de o dado já ter saído dos buckets
+    terraform -chdir=infra/storage destroy
+
+O `destroy` do `storage/` **falha** enquanto os buckets tiverem objetos — não
+há `force_destroy`, e isso é deliberado: o comando que apagaria o ground truth
+do experimento tem que esbarrar em alguma coisa. Esvaziá-los é um `aws s3 rm
+--recursive` explícito, feito depois de conferir que o Parquet consolidado e o
+que mais for para o artigo já estão fora.

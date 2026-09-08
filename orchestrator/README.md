@@ -46,3 +46,31 @@ gerador recebe um `--config` e não sabe qual das duas definições de `config/`
 está lendo. Saem dela os mesmos quatro nomes de artefato — o bucket do piloto tem
 o layout `scenarios/` da campanha (ADR-0011) —, com 18 blocos no canônico e 6 por
 fatia.
+
+O `external.py` é a única casa de `subprocess.run` do papel (ADR-0022): uma
+função por comando, cobrindo os três processos externos do Orquestrador — a AWS
+CLI, o SSH (ADR-0010) e o git (ADR-0021). Terraform não entra: ele é ferramenta
+do Mac (ADR-0009) e o Orquestrador nunca o invoca. O módulo é partido em duas
+metades de natureza oposta. O argv e a chamada ao processo ficam **sem teste**,
+por decisão — asserir a lista de argv transcreve a implementação e quebra em
+refatoração inofensiva. A leitura da saída mora no `command_output.py`, é função
+pura e é onde os testes batem: id da instância do `run-instances`; estado e IP
+público do `describe-instances`; chaves e tamanhos do `list-objects-v2`,
+inclusive a saída vazia que a CLI v2 imprime quando o prefixo não casa com nada;
+o valor do `get-parameter`; o status do `cloud-init`.
+
+A regra que o seam impõe a quem o usa é **"função pura recebe dado já buscado"**:
+uma lista de `S3Object`, nunca um prefixo a listar. O `instance_wait.py` é a
+mesma regra aplicada ao tempo — "pronta" é um predicado sobre o estado parseado
+(`running` **com** IP público) e "bootstrap concluído" é o status do `cloud-init`
+parseado; o laço só chama o probe que recebeu, consulta o relógio e dorme, com
+timeout por argumento e relógio injetável, e é isso que o torna exercível sem AWS
+e sem `sleep`. O probe do bootstrap roda `cloud-init status` **sem** `--wait`: é
+o timeout do laço que precisa valer, e o estado `running`, o que distingue "ainda
+subindo" de "falhou", só existe sem ele.
+
+O `ssh_exec` é bloqueante, recebe o comando remoto como argv e o entrega ao shell
+da instância já citado por `shlex.join`, que é o que faz um JSON no argv
+sobreviver (ADR-0018). A chave é a que o bootstrap da instância do Orquestrador
+grava em `~/.ssh` a partir do SSM (ADR-0016): o caminho é constante do módulo e
+argumento default, e tem de casar com o nome que aquele bootstrap escreve.

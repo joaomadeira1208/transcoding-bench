@@ -18,8 +18,6 @@ truth do experimento e precisam sobreviver ao `destroy` que encerra a campanha.
 O `compute/` lê os nomes dos buckets pelo remote state do `storage/`, então a
 ordem é fixa: `apply` do storage antes do compute, `destroy` na ordem inversa.
 
-`compute/` ainda não existe — chega no ticket seguinte.
-
 ## Toolchain
 
 O binário `terraform` tem que ser exatamente a versão que o CI pina em
@@ -71,6 +69,38 @@ Os nomes saem de `<bucket_prefix>-<account_id>-campaign` e
 `aws_caller_identity` — o default serve como está, e só precisa mudar se colidir
 com um bucket seu.
 
+`compute/` tem sete. As três sem default têm que chegar em todo `plan` e todo
+`apply`, por `TF_VAR_*` ou por um `terraform.tfvars` local (que a allowlist do
+`.gitignore` mantém fora do repositório):
+
+| Variável | Default | O que é |
+|---|---|---|
+| `state_bucket` | — | o bucket de state; o mesmo nome que o `-backend-config` do `init` recebe |
+| `researcher_ssh_cidr` | — | de onde a porta 22 do Orquestrador aceita conexão; o seu IP público em `/32` |
+| `budget_notification_email` | — | quem recebe os dois alertas do orçamento (ADR-0012) |
+| `allowed_instance_types` | `["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "t3.micro"]` | os tipos que o Orquestrador pode lançar (ADR-0016); o tipo do Juiz entra aqui quando a spec do Pass o fixar |
+| `orchestrator_ami_id` | `ami-025d99823a4caad37` | Ubuntu 24.04 LTS amd64 do Orquestrador |
+| `encode_amd64_ami_id` | `ami-025d99823a4caad37` | Ubuntu 24.04 LTS amd64 das efêmeras c7i e c7a |
+| `encode_arm64_ami_id` | `ami-0246d714afcc1d494` | Ubuntu 24.04 LTS arm64 da efêmera c7g e da preparação dos Masters |
+
+O `state_bucket` aparece duas vezes porque o backend parcial e o
+`terraform_remote_state` do `storage/` são configurados por caminhos diferentes:
+o primeiro pelo `-backend-config` do `init`, o segundo por variável.
+
+O `researcher_ssh_cidr` recusa `0.0.0.0/0` — a porta 22 restrita é o que a
+ADR-0015 pede da única camada de rede que as instâncias têm. O IP de casa muda;
+quando mudar, é reaplicar a variável.
+
+As três AMIs são **ids literais**, resolvidos uma vez do parâmetro público da
+Canonical em 2026-09-08 e datados na descrição de cada variável. Resolvê-las a
+cada `apply` foi rejeitado (ADR-0020, D3 da spec): um `apply` de retomada
+trocaria o kernel das instâncias de encode no meio da campanha. Para resolver
+uma versão nova, quando for hora de trocar de propósito:
+
+    aws ssm get-parameters --region us-east-1 \
+        --names /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id \
+        --query 'Parameters[0].Value' --output text
+
 ## `storage/`: apply
 
     terraform -chdir=infra/storage init -backend-config="bucket=<state-bucket>"
@@ -86,6 +116,30 @@ Os buckets nascem **vazios**: nenhum objeto do layout de prefixos da ADR-0011 é
 criado pelo Terraform, os prefixos aparecem no primeiro upload. Não têm
 versionamento (a dedup do experimento é lógica, por `scenario_id`) e não têm
 `force_destroy`.
+
+## `compute/`: apply
+
+Depois do `storage/`, e nunca antes — o `compute/` lê os nomes e os ARNs dos
+buckets pelo remote state dele:
+
+    terraform -chdir=infra/compute init -backend-config="bucket=<state-bucket>"
+    terraform -chdir=infra/compute plan
+    terraform -chdir=infra/compute apply
+
+Sobem a VPC com uma subnet pública, o internet gateway, a route table, o
+gateway endpoint de S3, os dois security groups, as quatro roles com instance
+profile, o key pair com a privada no SSM e o orçamento. A AZ da subnet não é
+escolhida na mão: um data source de ofertas por tipo devolve as zonas de cada
+tipo da allowlist, e a subnet fica na primeira zona, em ordem, que oferece
+**todos** eles.
+
+Os outputs são o que o user-data das instâncias injeta: `subnet_id`, os dois
+security groups, os quatro instance profiles, `key_pair_name`, as três AMIs, os
+dois buckets e `ssh_private_key_parameter_name`.
+
+A chave SSH privada **não sai em output**: ela é um SecureString no SSM, lido
+pelo Orquestrador no bootstrap e pelo pesquisador quando precisar entrar na
+instância.
 
 ## `destroy`
 

@@ -11,7 +11,7 @@ AWS.
 | Root | Cria | Tempo de vida |
 |---|---|---|
 | `storage/` | os dois buckets do experimento (campanha e piloto) | destruído **manualmente, no fim do TCC** (ADR-0011) |
-| `compute/` | rede, IAM, key pair, parâmetro SSM, orçamento e a instância do Orquestrador | destruído **no fim da campanha** |
+| `compute/` | rede, IAM, key pair, parâmetro SSM e orçamento | destruído **no fim da campanha** |
 
 São dois porque os tempos de vida são dois (ADR-0020): os buckets são o ground
 truth do experimento e precisam sobreviver ao `destroy` que encerra a campanha.
@@ -93,7 +93,7 @@ quando mudar, é reaplicar a variável.
 
 As três AMIs são **ids literais**, resolvidos uma vez do parâmetro público da
 Canonical em 2026-09-08 e datados na descrição de cada variável. Resolvê-las a
-cada `apply` foi rejeitado (ADR-0020, D3 da spec): um `apply` de retomada
+cada `apply` foi rejeitado (ADR-0015, D3 da spec): um `apply` de retomada
 trocaria o kernel das instâncias de encode no meio da campanha. Para resolver
 uma versão nova, quando for hora de trocar de propósito:
 

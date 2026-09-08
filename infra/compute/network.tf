@@ -75,13 +75,13 @@ resource "aws_vpc_endpoint" "s3" {
 
 resource "aws_security_group" "orchestrator" {
   name        = "${local.name_prefix}-orchestrator"
-  description = "Orchestrator: SSH from the researcher CIDR."
+  description = "SSH apenas do CIDR do pesquisador."
   vpc_id      = aws_vpc.experiment.id
 }
 
 resource "aws_security_group" "ephemeral" {
   name        = "${local.name_prefix}-ephemeral"
-  description = "Ephemeral instances: SSH from the orchestrator security group only."
+  description = "SSH apenas do security group do Orquestrador."
   vpc_id      = aws_vpc.experiment.id
 }
 

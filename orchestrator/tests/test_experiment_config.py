@@ -399,8 +399,6 @@ class TestRejectsBadSource:
         assert "md5" in message
 
     def test_sha256_of_the_wrong_length(self, make_raw_config):
-        # Copiar o digest da tabela da ADR e perder um caractere na quebra de
-        # linha produz um valor que só falha depois de baixar 6 GB.
         truncated = make_source()["sha256"][:-1]
 
         with pytest.raises(ConfigError) as excinfo:
@@ -462,6 +460,11 @@ class TestRejectsBadFrameRateAndCount:
         with pytest.raises(ConfigError, match="frame_rate"):
             validate_config(make_raw_config(video=[make_video(frame_rate=30.0)]))
 
+    @pytest.mark.parametrize("value", ["30", "banana", "30/", "/1", "30/1.5", "-30/1", "30/0"])
+    def test_frame_rate_that_is_not_a_rational(self, make_raw_config, value):
+        with pytest.raises(ConfigError, match="frame_rate"):
+            validate_config(make_raw_config(video=[make_video(frame_rate=value)]))
+
     def test_frames_that_is_a_string(self, make_raw_config):
         with pytest.raises(ConfigError, match="frames"):
             validate_config(make_raw_config(video=[make_video(frames="19036")]))
@@ -473,14 +476,6 @@ class TestRejectsBadFrameRateAndCount:
         message = str(excinfo.value)
         assert "bbb" in message
         assert "frames" in message
-
-    def test_unknown_key_in_a_video_record(self, make_raw_config):
-        with pytest.raises(ConfigError) as excinfo:
-            validate_config(make_raw_config(video=[make_video(fps=30)]))
-
-        message = str(excinfo.value)
-        assert "video[0]" in message
-        assert "fps" in message
 
 
 class TestRejectsDuplicates:
@@ -664,6 +659,14 @@ class TestRejectsIncompleteRecords:
 
         assert "codec[0]" in str(excinfo.value)
         assert "tune" in str(excinfo.value)
+
+    def test_unknown_key_in_a_video_record(self, make_raw_config):
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(video=[make_video(fps=30)]))
+
+        message = str(excinfo.value)
+        assert "video[0]" in message
+        assert "fps" in message
 
     def test_unknown_table_at_the_top_level(self, make_raw_config):
         with pytest.raises(ConfigError, match="quality"):

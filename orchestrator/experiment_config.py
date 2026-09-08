@@ -228,7 +228,7 @@ def _video(record: Mapping[str, Any], index: int) -> VideoRecord:
     return VideoRecord(
         slug=_str(record, "slug", where),
         title=_str(record, "title", where),
-        frame_rate=_str(record, "frame_rate", where),
+        frame_rate=_rational(record, "frame_rate", where),
         frames=_int(record, "frames", where, minimum=1),
         geometry=_geometry(record, where),
         source=_source(record, where),
@@ -394,6 +394,17 @@ def _sha256(record: Mapping[str, Any], key: str, where: str) -> str:
     if len(value) != _SHA256_DIGITS or set(value) - _HEX_DIGITS:
         raise ConfigError(
             f"{where}: '{key}' must be {_SHA256_DIGITS} lowercase hexadecimal digits, got '{value}'"
+        )
+    return value
+
+
+def _rational(record: Mapping[str, Any], key: str, where: str) -> str:
+    value = _str(record, key, where)
+    numerator, slash, denominator = value.partition("/")
+    digits = numerator.isdigit() and denominator.isdigit()
+    if not slash or not digits or int(numerator) <= 0 or int(denominator) <= 0:
+        raise ConfigError(
+            f"{where}: '{key}' must be a rational 'num/den' of positive integers, got '{value}'"
         )
     return value
 

@@ -118,10 +118,6 @@ output_res = "480p"
 # Os rótulos são **nominais** (ADR-0023): Big Buck Bunny é 16:9 e Tears of Steel é
 # ~2.24:1, então "1080p" não é 1920x1080 para os dois. Declarar largura × altura
 # torna "nunca upscale" uma propriedade verificável sobre pixels.
-#
-# `frame_rate`, `frames` e `source` são o que a preparação dos Masters copia
-# (ADR-0004): `size` e `sha256` são os do arquivo **descomprimido**, não os do
-# `.zip` que a URL entrega, porque é depois do `unzip` que o bootstrap confere.
 [[video]]
 slug = "bbb"
 title = "Big Buck Bunny"

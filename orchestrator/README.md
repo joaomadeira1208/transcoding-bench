@@ -36,6 +36,8 @@ do arquivo que recebeu, sem predicado de seleção no bash (ADR-0019). O
         --config config/experiment.toml --out build/scenarios
     .venv/bin/python orchestrator/generate_scenarios.py \
         --config config/pilot.toml --out build/pilot
+    .venv/bin/python orchestrator/generate_masters_plan.py \
+        --config config/experiment.toml
 
 O diretório de saída é argumento porque o plano é artefato de runtime (ADR-0017):
 ele não entra no repositório, e gerá-lo de novo a partir do mesmo TOML produz
@@ -46,6 +48,23 @@ gerador recebe um `--config` e não sabe qual das duas definições de `config/`
 está lendo. Saem dela os mesmos quatro nomes de artefato — o bucket do piloto tem
 o layout `scenarios/` da campanha (ADR-0011) —, com 18 blocos no canônico e 6 por
 fatia.
+
+O plano dos Masters é o mesmo desenho, num terceiro par: `masters_plan.py` é a
+função pura que projeta a configuração validada — por vídeo, a fonte pinada, o
+Master 4K e, por tier derivado, o nome, a geometria e as propriedades que o
+`ffprobe` da preparação tem de encontrar (codec, `pix_fmt`, frame rate e
+frames) —, e `generate_masters_plan.py` é o CLI. Os nomes saem da mesma função
+que o plano de Cenários usa em `master`: o que a preparação materializa e o que a
+Execução abre não podem divergir. Sobre o `experiment.toml` são seis Masters, os
+seis que o plano de Cenários cita.
+
+O plano vai para o stdout por default, e o `--out` é conveniência: quem o consome
+é o argv do SSH que o `prepare-masters` monta (ADR-0018). Os tiers derivados são
+os que aparecem como `input_res` de algum par — o 480p é só saída e nunca vira
+Master (ADR-0023) —, e o 4K entra sempre, porque é ele que se remuxa. Por isso o
+plano do piloto, cujo único par é `1080p → 720p`, tem quatro Masters e não seis:
+o bucket do piloto recebe os seis da campanha por cópia (o `s3 sync` do
+`prepare-masters`), não por uma preparação própria.
 
 O `external.py` é a única casa de `subprocess.run` do papel (ADR-0022): uma
 função por comando, cobrindo os três processos externos do Orquestrador — a AWS

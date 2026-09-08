@@ -7,11 +7,4 @@ terraform {
       version = "6.63.0"
     }
   }
-
-  backend "s3" {
-    region       = "us-east-1"
-    key          = "storage/terraform.tfstate"
-    encrypt      = true
-    use_lockfile = true
-  }
 }

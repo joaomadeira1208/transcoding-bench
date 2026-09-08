@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from command_output import DescribedInstance
 from experiment_config import ExperimentConfig, validate_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -188,3 +189,98 @@ class _Absent:
 # `None`: "ausente" e "nula" são modos de falha distintos.
 _ABSENT = _Absent()
 ABSENT: Any = _ABSENT
+
+
+# Payloads da AWS CLI v2 escritos à mão, no formato documentado, até o primeiro
+# preflight capturar os reais (ADR-0022).
+
+
+def make_launched_instance(instance_id: str = "i-0123456789abcdef0") -> dict[str, Any]:
+    return {
+        "AmiLaunchIndex": 0,
+        "ImageId": "ami-0abcdef1234567890",
+        "InstanceId": instance_id,
+        "InstanceType": "c7g.xlarge",
+        "KeyName": "transcoding-bench",
+        "LaunchTime": "2026-09-07T12:00:00+00:00",
+        "PrivateIpAddress": "10.0.1.42",
+        "State": {"Code": 0, "Name": "pending"},
+        "SubnetId": "subnet-0a1b2c3d4e5f60718",
+    }
+
+
+def make_run_instances_payload(*instances: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "Groups": [],
+            "Instances": list(instances),
+            "OwnerId": "123456789012",
+            "ReservationId": "r-0a1b2c3d4e5f60718",
+        }
+    )
+
+
+def make_described_instance(
+    instance_id: str = "i-0123456789abcdef0",
+    state: str = "running",
+    public_ip: str | None = "54.210.1.2",
+) -> dict[str, Any]:
+    instance = {
+        "ImageId": "ami-0abcdef1234567890",
+        "InstanceId": instance_id,
+        "InstanceType": "c7g.xlarge",
+        "KeyName": "transcoding-bench",
+        "LaunchTime": "2026-09-07T12:00:00+00:00",
+        "PrivateIpAddress": "10.0.1.42",
+        "State": {"Code": 16, "Name": state},
+        "StateTransitionReason": "",
+        "SubnetId": "subnet-0a1b2c3d4e5f60718",
+    }
+    if public_ip is not None:
+        instance["PublicIpAddress"] = public_ip
+    return instance
+
+
+def make_describe_payload(*reservations: list[dict[str, Any]]) -> str:
+    return json.dumps(
+        {
+            "Reservations": [
+                {
+                    "Groups": [],
+                    "Instances": instances,
+                    "OwnerId": "123456789012",
+                    "ReservationId": "r-0a1b2c3d4e5f60718",
+                }
+                for instances in reservations
+            ]
+        }
+    )
+
+
+def make_s3_object(key: str, size: int = 4096) -> dict[str, Any]:
+    return {
+        "Key": key,
+        "LastModified": "2026-09-07T12:00:00+00:00",
+        "ETag": '"9f0c4a2e6b414d5f8a372f1c8de0b7a4"',
+        "Size": size,
+        "StorageClass": "STANDARD",
+    }
+
+
+def make_list_objects_payload(*contents: dict[str, Any], **overrides: Any) -> str:
+    payload: dict[str, Any] = {
+        "Contents": list(contents),
+        "IsTruncated": False,
+        "KeyCount": len(contents),
+        "MaxKeys": 1000,
+        "Name": "transcoding-bench-runs",
+        "Prefix": "runs/",
+    }
+    return json.dumps(payload | overrides)
+
+
+def make_instance_state(
+    state: str = "running", public_ip: str | None = "54.210.1.2"
+) -> DescribedInstance:
+    """O estado já parseado, que é o que o predicado de prontidão recebe."""
+    return DescribedInstance(instance_id="i-0123456789abcdef0", state=state, public_ip=public_ip)

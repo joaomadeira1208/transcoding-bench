@@ -69,8 +69,23 @@ e sem `sleep`. O probe do bootstrap roda `cloud-init status` **sem** `--wait`: �
 o timeout do laço que precisa valer, e o estado `running`, o que distingue "ainda
 subindo" de "falhou", só existe sem ele.
 
+Nesse probe o código de saída é **estado, não falha**: o `cloud-init status` sai
+1 em `error` e 2 em `degraded`, de modo que um adaptador que exigisse exit 0
+transformaria a instância que falhou o bootstrap num erro de comando genérico e
+deixaria o `BootstrapError` do laço inalcançável. E o `ssh` sai 255 quando é ele
+que não conseguiu conectar, o que é o caso normal nos primeiros segundos depois
+de a instância virar `running`: o `sshd` sobe depois do estado. O probe traduz
+esse 255 em `None`, e o laço trata `None` como espera — simétrico ao
+`describe-instances` sem reservas do laço de prontidão, e a razão de o timeout do
+bootstrap dizer se o último estado foi um status do `cloud-init` ou silêncio no
+SSH.
+
 O `ssh_exec` é bloqueante, recebe o comando remoto como argv e o entrega ao shell
 da instância já citado por `shlex.join`, que é o que faz um JSON no argv
-sobreviver (ADR-0018). A chave é a que o bootstrap da instância do Orquestrador
+sobreviver (ADR-0018). Ele leva `ConnectTimeout` e keep-alive de servidor porque
+um `ssh` contra um security group que dropa pacotes pendura indefinidamente, e
+enquanto ele pendura o argumento `timeout` do laço de espera é mentira; o probe
+do `cloud-init` acrescenta a isso um teto de tempo na própria chamada, por estar
+dentro do laço. A chave é a que o bootstrap da instância do Orquestrador
 grava em `~/.ssh` a partir do SSM (ADR-0016): o caminho é constante do módulo e
 argumento default, e tem de casar com o nome que aquele bootstrap escreve.

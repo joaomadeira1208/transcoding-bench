@@ -1,4 +1,4 @@
-"""Espera por uma instância: predicado puro mais laço fino (ADR-0022, D23)."""
+"""Espera por uma instância: predicado puro mais laço fino (ADR-0022)."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def wait_for_instance_ready(
 
 
 def wait_for_bootstrap(
-    probe: Callable[[], CloudInitStatus],
+    probe: Callable[[], CloudInitStatus | None],
     *,
     instance_id: str,
     timeout: float,
@@ -59,7 +59,9 @@ def wait_for_bootstrap(
     """Consulta o `cloud-init` até o bootstrap concluir.
 
     Erro é conclusão, não paciência: insistir até o timeout num `cloud-init` que
-    já falhou é meia hora de instância faturando pela mesma resposta.
+    já falhou é meia hora de instância faturando pela mesma resposta. `None` é a
+    instância que ainda não atende SSH — o `sshd` sobe depois de ela virar
+    `running`, e para quem espera isso é o mesmo que rodando.
     """
     deadline = clock() + timeout
     while True:
@@ -69,5 +71,8 @@ def wait_for_bootstrap(
         if status is CloudInitStatus.ERROR:
             raise BootstrapError(f"{instance_id}: cloud-init terminou em erro")
         if clock() >= deadline:
-            raise WaitTimeout(f"{instance_id}: cloud-init não concluiu em {timeout:g}s")
+            last = status.value if status else "sem resposta no SSH"
+            raise WaitTimeout(
+                f"{instance_id}: cloud-init não concluiu em {timeout:g}s, último estado foi {last}"
+            )
         sleep(poll_interval)

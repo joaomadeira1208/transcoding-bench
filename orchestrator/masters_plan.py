@@ -21,8 +21,6 @@ SCHEMA_VERSION = "1"
 
 MASTER_EXTENSION = ".mkv"
 
-# O tier que a ADR-0004 define como versão canônica publicada: entra em Matroska
-# com `-c copy`, e por isso é Master mesmo quando nenhum par o usa como input.
 REMUXED_TIER = "2160p"
 
 REMUXED_CODEC = "h264"
@@ -30,7 +28,6 @@ DERIVED_CODEC = "ffv1"
 
 
 def master_name(video: str, tier: str) -> str:
-    """`{video}_{tier}.mkv` — basename, sem prefixo de bucket."""
     return f"{video}_{tier}{MASTER_EXTENSION}"
 
 

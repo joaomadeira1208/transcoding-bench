@@ -14,6 +14,7 @@ As três instâncias (Orquestrador, encode, Juiz) recebem **IAM roles via instan
 | | `iam:PassRole` | ARNs das roles `encode` e `judge` |
 | | `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` | bucket do experimento |
 | | `s3:DeleteObject` | `bucket/runs/*` (limpeza seletiva pós-Pass, ADR-0014) |
+| | `ec2:CreateTags` | `*`, condicionado a `ec2:CreateAction = RunInstances` (emenda abaixo) |
 | | `ssm:GetParameter`, `kms:Decrypt` | parâmetro da chave SSH |
 | **encode** | `s3:GetObject` | `bucket/masters/*`, `bucket/scenarios/*` |
 | | `s3:PutObject` | `bucket/runs/*`, `bucket/status/*` |
@@ -25,6 +26,12 @@ As três instâncias (Orquestrador, encode, Juiz) recebem **IAM roles via instan
 Os escopos seguem o layout-contrato de prefixos da ADR-0011. O Orquestrador precisa de S3 r/w/list porque faz o bootstrap dos Masters (ADR-0014), o `quality_triage.py` baixa `meta.json` e `output.sha256` de `runs/`, e o `resume.py` lista `runs/`. O `DeleteObject` existe pra exatamente um caso de uso — a limpeza seletiva pós-Pass (ADR-0014) — e é **escopado a `runs/*`**: deleção é a única operação destrutiva, e o escopo protege `masters/`, `scenarios/` e `quality/` de um path malformado no script de limpeza (mesmo instinto do PassRole escopado). O `PutObject` do Orquestrador segue bucket-wide deliberadamente: ele escreve em três prefixos (`masters/`, `scenarios/`, `quality/`) e escopar daria três statements por ganho marginal. **Não** precisa de permissão de Budgets — o budget alert (ADR-0012) é criado pelo Terraform e dispara email; o Orquestrador não o consulta.
 
 **Emenda: um quarto papel, `masters`.** A preparação dos masters roda numa instância efêmera própria (ADR-0014), e ela recebe papel próprio em vez de herdar o do Orquestrador: só escreve em `masters/`, e dar a uma instância de 1–2 h o `DeleteObject` de `runs/` e o `RunInstances` do Orquestrador seria blast radius sem função. O `PutObject` bucket-wide do Orquestrador continua como está — ele segue escrevendo `scenarios/` e `quality/`, e o argumento de "escopar daria statements por ganho marginal" não muda por um prefixo a menos. A condição de `InstanceType` abaixo já inclui `c7g.xlarge`, que é o tipo da instância de preparação; nenhum tipo novo entra na lista.
+
+**Emenda: `ec2:CreateTags` na criação, e só nela.** A matriz acima não listava a ação, e a spec #40 (D24) manda taggear toda instância efêmera com `role` e `commit`. `run-instances --tag-specifications` não é tagueamento posterior: a EC2 autoriza `ec2:CreateTags` **dentro** da mesma chamada, e sem a ação o lançamento inteiro é recusado com `UnauthorizedOperation` — nenhuma instância sobe. A ação entra com `Resource: "*"`, a condição de região das demais, e `ec2:CreateAction = RunInstances`, que a prende ao caminho do lançamento: taggear uma instância já existente da conta continua negado.
+
+Isto **não reverte** a opção rejeitada "EC2 escopado por tag (resource-level, tag-on-launch)" abaixo. O que aquela rejeição recusou foi a tag como **chave de autorização** — condições de `ec2:ResourceTag`/`aws:RequestTag` que a policy tem de casar por tipo de recurso, com o acoplamento de runtime e o `AccessDenied` opaco que ela nomeia. O que o D24 traz de volta é a tag como **atributo**: atribuição de custo e identificação de instância órfã. Nenhuma condição desta policy lê o valor de uma tag; `ec2:CreateAction` é sobre qual chamada está criando o recurso, não sobre o que a tag diz. A rejeição segue de pé, com os mesmos gatilhos de reconsideração.
+
+A ADR previu este modo de falha — "`--tag-specifications` tem que casar exatamente com a policy" e "`AccessDenied` opaco durante a janela de 2 dias" — e ele se materializou pela omissão da ação, não pela adoção do escopo por tag. A correção é conceder a ação, e ela é exatamente o tipo de erro que a validação de fumaça abaixo existe pra pegar.
 
 ### PassRole
 
@@ -70,7 +77,7 @@ O escopo dessa validação foi **ampliado pela ADR-0022** (e já vinha sendo, pe
 
 ## Consequences
 
-- O Terraform cria: 3 roles + instance profiles, a policy `orchestrator` com as condições de EC2, o key pair, e o parâmetro SSM SecureString da chave privada.
+- O Terraform cria: 4 roles + instance profiles (a emenda do `masters`), a policy `orchestrator` com as condições de EC2 — região, `InstanceType` e `CreateAction` —, o key pair, e o parâmetro SSM SecureString da chave privada.
 - A role `orchestrator` acumula três papéis de credencial: lançar/terminar instâncias (EC2), mover artefatos (S3), e ler a chave SSH (SSM/KMS).
 - O **hop limit do IMDS no encode** foi resolvido na ADR-0018: a Execução roda dentro do container, então o `aws s3 cp` também — logo o `run-instances` do encode usa **hop limit 2** (`HttpPutResponseHopLimit=2`).
 - A validação de fumaça é pré-requisito operacional antes de disparar a campanha.

@@ -70,6 +70,27 @@ data "aws_iam_policy_document" "orchestrator" {
   }
 
   statement {
+    sid       = "TagInstancesOnLaunch"
+    actions   = ["ec2:CreateTags"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [local.region]
+    }
+
+    # Sem `ec2:CreateAction`, a permissão passa a taggear qualquer instância já
+    # existente da conta; com ela, só o `--tag-specifications` do próprio
+    # `RunInstances` é autorizado.
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["RunInstances"]
+    }
+  }
+
+  statement {
     sid       = "DescribeInstances"
     actions   = ["ec2:DescribeInstances", "ec2:DescribeInstanceStatus"]
     resources = ["*"]

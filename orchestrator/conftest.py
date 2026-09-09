@@ -239,6 +239,7 @@ def make_described_instance(
     instance_id: str = "i-0123456789abcdef0",
     state: str = "running",
     public_ip: str | None = "54.210.1.2",
+    private_ip: str | None = "10.0.1.42",
 ) -> dict[str, Any]:
     instance = {
         "ImageId": "ami-0abcdef1234567890",
@@ -246,13 +247,14 @@ def make_described_instance(
         "InstanceType": "c7g.xlarge",
         "KeyName": "transcoding-bench",
         "LaunchTime": "2026-09-07T12:00:00+00:00",
-        "PrivateIpAddress": "10.0.1.42",
         "State": {"Code": 16, "Name": state},
         "StateTransitionReason": "",
         "SubnetId": "subnet-0a1b2c3d4e5f60718",
     }
     if public_ip is not None:
         instance["PublicIpAddress"] = public_ip
+    if private_ip is not None:
+        instance["PrivateIpAddress"] = private_ip
     return instance
 
 
@@ -295,7 +297,14 @@ def make_list_objects_payload(*contents: dict[str, Any], **overrides: Any) -> st
 
 
 def make_instance_state(
-    state: str = "running", public_ip: str | None = "54.210.1.2"
+    state: str = "running",
+    public_ip: str | None = "54.210.1.2",
+    private_ip: str | None = "10.0.1.42",
 ) -> DescribedInstance:
     """O estado já parseado, que é o que o predicado de prontidão recebe."""
-    return DescribedInstance(instance_id="i-0123456789abcdef0", state=state, public_ip=public_ip)
+    return DescribedInstance(
+        instance_id="i-0123456789abcdef0",
+        state=state,
+        public_ip=public_ip,
+        private_ip=private_ip,
+    )

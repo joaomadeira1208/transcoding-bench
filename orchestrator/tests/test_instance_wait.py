@@ -47,17 +47,24 @@ class Probe:
 
 
 class TestIsInstanceReady:
-    def test_running_with_a_public_ip(self):
-        assert is_instance_ready(make_instance_state("running", "54.210.1.2")) is True
+    def test_running_with_a_private_ip(self):
+        assert is_instance_ready(make_instance_state("running", private_ip="10.0.1.42")) is True
+
+    def test_running_without_a_private_ip(self):
+        # É pelo IP privado que o SSH abre: a regra de ingress das efêmeras
+        # referencia o security group do Orquestrador (ADR-0015) e só casa
+        # tráfego que chega por dentro da VPC. Com o público no lugar dele o
+        # predicado diria "pronta" para uma instância inalcançável.
+        assert is_instance_ready(make_instance_state("running", private_ip=None)) is False
 
     def test_running_without_a_public_ip(self):
-        assert is_instance_ready(make_instance_state("running", None)) is False
+        assert is_instance_ready(make_instance_state("running", public_ip=None)) is True
 
     def test_pending(self):
-        assert is_instance_ready(make_instance_state("pending", None)) is False
+        assert is_instance_ready(make_instance_state("pending", None, None)) is False
 
     def test_terminated(self):
-        assert is_instance_ready(make_instance_state("terminated", None)) is False
+        assert is_instance_ready(make_instance_state("terminated", None, None)) is False
 
     def test_absent(self):
         assert is_instance_ready(None) is False
@@ -67,8 +74,8 @@ class TestWaitForInstanceReady:
     def test_returns_the_state_that_satisfied_the_wait(self):
         clock = FakeClock()
         probe = Probe(
-            make_instance_state("pending", None),
-            make_instance_state("running", None),
+            make_instance_state("pending", None, None),
+            make_instance_state("running", None, None),
             make_instance_state(),
         )
 
@@ -81,7 +88,7 @@ class TestWaitForInstanceReady:
             sleep=clock.sleep,
         )
 
-        assert ready.public_ip == "54.210.1.2"
+        assert ready.private_ip == "10.0.1.42"
         assert probe.calls == 3
         assert clock.slept == [15, 15]
 
@@ -117,7 +124,7 @@ class TestWaitForInstanceReady:
 
     def test_timeout_names_the_instance_and_what_was_expected(self):
         clock = FakeClock()
-        probe = Probe(make_instance_state("pending", None))
+        probe = Probe(make_instance_state("pending", None, None))
 
         with pytest.raises(WaitTimeout) as error:
             wait_for_instance_ready(
@@ -136,7 +143,7 @@ class TestWaitForInstanceReady:
 
     def test_timeout_stops_at_the_deadline(self):
         clock = FakeClock()
-        probe = Probe(make_instance_state("pending", None))
+        probe = Probe(make_instance_state("pending", None, None))
 
         with pytest.raises(WaitTimeout):
             wait_for_instance_ready(

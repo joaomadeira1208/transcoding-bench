@@ -19,6 +19,7 @@ class DescribedInstance:
     instance_id: str
     state: str
     public_ip: str | None
+    private_ip: str | None
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,7 @@ def _described_instance(instance: Any) -> DescribedInstance:
         instance_id=_field(described, "InstanceId", str),
         state=_field(_field(described, "State", dict), "Name", str),
         public_ip=_optional_field(described, "PublicIpAddress", str),
+        private_ip=_optional_field(described, "PrivateIpAddress", str),
     )
 
 

@@ -72,6 +72,7 @@ class TestDescribeInstances:
         assert instance.instance_id == "i-0123456789abcdef0"
         assert instance.state == "pending"
         assert instance.public_ip is None
+        assert instance.private_ip == "10.0.1.42"
 
     def test_running_without_public_ip(self):
         payload = make_describe_payload([make_described_instance(state="running", public_ip=None)])
@@ -81,15 +82,28 @@ class TestDescribeInstances:
         assert instance.state == "running"
         assert instance.public_ip is None
 
-    def test_running_with_public_ip(self):
+    def test_running_carries_both_addresses(self):
         payload = make_describe_payload(
-            [make_described_instance(state="running", public_ip="54.210.1.2")]
+            [
+                make_described_instance(
+                    state="running", public_ip="54.210.1.2", private_ip="10.0.1.42"
+                )
+            ]
         )
 
         (instance,) = parse_describe_instances(payload)
 
         assert instance.state == "running"
         assert instance.public_ip == "54.210.1.2"
+        assert instance.private_ip == "10.0.1.42"
+
+    def test_running_without_private_ip(self):
+        payload = make_describe_payload([make_described_instance(state="running", private_ip=None)])
+
+        (instance,) = parse_describe_instances(payload)
+
+        assert instance.state == "running"
+        assert instance.private_ip is None
 
     def test_terminated(self):
         payload = make_describe_payload(
@@ -122,6 +136,13 @@ class TestDescribeInstances:
         instance["PublicIpAddress"] = ["54.210.1.2"]
 
         with pytest.raises(OutputError, match="PublicIpAddress"):
+            parse_describe_instances(make_describe_payload([instance]))
+
+    def test_rejects_a_private_ip_that_is_not_a_string(self):
+        instance = make_described_instance()
+        instance["PrivateIpAddress"] = ["10.0.1.42"]
+
+        with pytest.raises(OutputError, match="PrivateIpAddress"):
             parse_describe_instances(make_describe_payload([instance]))
 
     def test_rejects_an_instance_without_state(self):

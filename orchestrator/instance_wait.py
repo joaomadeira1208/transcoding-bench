@@ -19,8 +19,8 @@ class BootstrapError(Exception):
 
 
 def is_instance_ready(instance: DescribedInstance | None) -> bool:
-    """`running` **e** com IP público — sem endereço não há SSH a abrir."""
-    return instance is not None and instance.state == "running" and instance.public_ip is not None
+    """`running` **e** com IP privado — é por ele que o SSH abre (ADR-0015)."""
+    return instance is not None and instance.state == "running" and instance.private_ip is not None
 
 
 def wait_for_instance_ready(
@@ -41,7 +41,7 @@ def wait_for_instance_ready(
         if clock() >= deadline:
             last = instance.state if instance else "ausente do describe-instances"
             raise WaitTimeout(
-                f"{instance_id}: esperava estado running com IP público em {timeout:g}s, "
+                f"{instance_id}: esperava estado running com IP privado em {timeout:g}s, "
                 f"último estado foi {last}"
             )
         sleep(poll_interval)

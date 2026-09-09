@@ -66,6 +66,37 @@ plano do piloto, cujo único par é `1080p → 720p`, tem quatro Masters e não 
 o bucket do piloto recebe os seis da campanha por cópia (o `s3 sync` do
 `prepare-masters`), não por uma preparação própria.
 
+O manifesto é o outro lado desse par: `masters/manifest.json` é o que a
+preparação escreve com `jq` depois de subir os seis Masters, e é o que o gate
+humano da ADR-0012 confere antes de a campanha começar. A forma tem quatro
+chaves. `schema_version` é eixo próprio, `"1"`, e não acompanha o do plano;
+`versions` é o arquivo de versões da imagem copiado verbatim, como no
+`meta.json`; `sources` é uma tabela por vídeo com `url`, `file`, `size` e
+`sha256` observados no download; e `masters` é a lista, cada Master com onze
+campos — os nove do plano (`name`, `video`, `tier`, `width`, `height`,
+`codec_name`, `pix_fmt`, `frame_rate`, `frames`) mais o `size` e o `sha256` do
+objeto que subiu. São três leitores: o bootstrap do encode (bash com `jq`, que
+tira dali o nome e o sha256 de cada objeto a baixar), o checker abaixo e o
+pesquisador no gate.
+
+O `manifest_check.py` é o núcleo puro desse gate, e o `validate_manifest.py`, o
+CLI:
+
+    .venv/bin/python orchestrator/validate_manifest.py \
+        masters/manifest.json --config config/experiment.toml
+
+O checker recebe o manifesto já parseado e a configuração validada e devolve
+todas as divergências de uma vez, cada uma nomeando o Master e o campo — parar na
+primeira faria o pesquisador descobrir seis defeitos em seis rodadas. Confere
+forma e tipos (tipo exato, sha256 de 64 dígitos hexadecimais minúsculos, tamanhos
+positivos) e a semântica contra o plano dos Masters: os seis nomes, exatamente, e
+por Master a geometria do seu tier naquele vídeo, a cadência, os frames, o codec
+e o `pix_fmt`, mais as fontes contra as que o TOML declara. O `--config` é o da
+campanha mesmo para o manifesto que veio do bucket do piloto: lá os seis Masters
+chegam por cópia, e conferi-lo contra o `pilot.toml` acusaria os dois que o
+piloto não usa. Silêncio e status 0 é o veredito de aceite; 1 é manifesto
+recusado, e 2, arquivo ilegível ou configuração inválida.
+
 O `external.py` é a única casa de `subprocess.run` do papel (ADR-0022): uma
 função por comando, cobrindo os três processos externos do Orquestrador — a AWS
 CLI, o SSH (ADR-0010) e o git (ADR-0021). Terraform não entra: ele é ferramenta

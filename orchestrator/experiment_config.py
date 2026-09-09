@@ -16,7 +16,7 @@ _TOP_LEVEL_KEYS = frozenset(
 )
 
 
-_SHA256_DIGITS = 64
+SHA256_DIGITS = 64
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 
@@ -388,12 +388,17 @@ def _even(record: Mapping[str, Any], key: str, where: str) -> int:
     return value
 
 
+def is_sha256(value: str) -> bool:
+    """A forma que o `sha256sum` emite, e a única que ele compara de volta."""
+    return len(value) == SHA256_DIGITS and not set(value) - _HEX_DIGITS
+
+
 def _sha256(record: Mapping[str, Any], key: str, where: str) -> str:
     """Digest hexadecimal completo: um truncado só falha depois do download."""
     value = _str(record, key, where)
-    if len(value) != _SHA256_DIGITS or set(value) - _HEX_DIGITS:
+    if not is_sha256(value):
         raise ConfigError(
-            f"{where}: '{key}' must be {_SHA256_DIGITS} lowercase hexadecimal digits, got '{value}'"
+            f"{where}: '{key}' must be {SHA256_DIGITS} lowercase hexadecimal digits, got '{value}'"
         )
     return value
 

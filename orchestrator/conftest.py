@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import tomllib
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 from command_output import DescribedInstance
 from experiment_config import ExperimentConfig, validate_config
+from masters_plan import build_masters_plan, iter_masters
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
@@ -144,6 +146,44 @@ def make_meta(**overrides: Any) -> dict[str, Any]:
 def make_meta_json(**overrides: Any) -> str:
     """O mesmo, já serializado — o checador recebe os bytes que o bash escreveu."""
     return json.dumps(make_meta(**overrides), indent=2) + "\n"
+
+
+# O manifesto da preparação, derivado do `experiment.toml` real pelo mesmo plano
+# que o script de preparação recebe: uma factory escrita à mão envelheceria em
+# silêncio a cada mudança da spec, e o checador passaria a ser conferido contra
+# ela em vez de contra a spec.
+
+_OBSERVED_MASTER_SIZE = 1073741824
+
+
+def make_manifest(**overrides: Any) -> dict[str, Any]:
+    """Um `masters/manifest.json` válido como dict, com overrides por chave de topo."""
+    plan = build_masters_plan(real_config())
+    manifest = {
+        "schema_version": "1",
+        "versions": copy.deepcopy(_VALID_META["versions"]),
+        "sources": {video["video"]: dict(video["source"]) for video in plan["videos"]},
+        "masters": [_observed(master) for master in iter_masters(plan)],
+    }
+    return manifest | overrides
+
+
+def manifest_master(manifest: dict[str, Any], name: str) -> dict[str, Any]:
+    """O Master de um nome dentro do manifesto, para o teste o deformar no lugar."""
+    matches = [master for master in manifest["masters"] if master["name"] == name]
+
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def _observed(master: dict[str, Any]) -> dict[str, Any]:
+    """O que o `ffprobe` da preparação viu: o Master planejado mais tamanho e digest."""
+    return {
+        "name": master["name"],
+        "size": _OBSERVED_MASTER_SIZE,
+        "sha256": hashlib.sha256(master["name"].encode()).hexdigest(),
+        **{field: value for field, value in master.items() if field != "name"},
+    }
 
 
 def make_geometry(**tiers: tuple[int, int]) -> dict[str, dict[str, int]]:

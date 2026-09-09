@@ -6,7 +6,7 @@ o abre, e com as propriedades que o `ffprobe` da preparação tem de encontrar n
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from experiment_config import (
@@ -39,6 +39,13 @@ def build_masters_plan(config: ExperimentConfig) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "videos": [_video(video, tiers, pix_fmt) for video in config.videos],
     }
+
+
+def iter_masters(plan: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
+    """Os Masters do plano — por vídeo, o 4K e os seus derivados."""
+    for video in plan["videos"]:
+        yield video["master"]
+        yield from video["derived"]
 
 
 def _derived_tiers(pairs: Sequence[PairRecord]) -> tuple[str, ...]:

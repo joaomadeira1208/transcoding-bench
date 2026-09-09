@@ -5,10 +5,9 @@ resource "aws_budgets_budget" "account" {
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
-  # `include_credit` e `include_refund` são `true` no default do provider, e a
-  # conta tem crédito promocional ativo: sem este bloco o teto mede custo
-  # líquido e fica mudo enquanto o crédito durar — justamente o smoke e o
-  # piloto. Os $150 da ADR-0012 foram derivados de uso bruto.
+  # Apagar o bloco devolve `include_credit` e `include_refund` ao `true` do
+  # default, e o teto passa a medir custo líquido: com o crédito promocional da
+  # conta ativo, o alerta fica mudo durante o smoke e o piloto (ADR-0012).
   cost_types {
     include_credit             = false
     include_refund             = false

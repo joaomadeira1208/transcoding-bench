@@ -20,6 +20,10 @@ Terraform configura um AWS Budget com teto de **$150**. Se o custo acumulado ult
 
 Estimativa de custo normal do experimento: ~$70 de compute + ~$4 de S3 + instância do Orquestrador + Juiz ≈ ~$85. Teto de $150 dá margem pra um re-run completo.
 
+**Emenda: o teto mede custo bruto.** A estimativa acima é de consumo — o que o experimento gasta —, e é sobre ela que os $150 foram calibrados. O default do AWS Budgets mede outra coisa: `include_credit` e `include_refund` vêm `true`, e o teto passa a valer sobre o custo **líquido**, já descontado o crédito. A conta tem crédito promocional ativo, então com o default o alerta ficaria mudo exatamente durante o smoke e o piloto, que são as duas janelas em que ele serviria pra alguma coisa — e voltaria a falar só quando o crédito acabasse, com o consumo real já bem acima do teto.
+
+Por isso o `aws_budgets_budget` declara o bloco `cost_types` por inteiro, com `include_credit = false` e `include_refund = false`. É o teto medindo o que a estimativa mediu. O efeito colateral aceito é que o valor do alerta não é a fatura: se o crédito cobrir tudo, o email chega e nada é cobrado. Trocar em favor do líquido é decidir que o alerta serve pra prever a fatura em vez de vigiar o consumo — o que este ADR não quer, porque o dano que ele existe pra evitar (uma instância esquecida por 46 h) é consumo, e o crédito é finito.
+
 ## Gate humano antes da campanha
 
 **Emenda.** As três camadas acima protegem a campanha em andamento. Antes de ela começar há um gate que nenhuma camada substitui: a preparação dos masters (ADR-0014) é uma execução própria, e a campanha só é disparada depois que o pesquisador confere o `masters/manifest.json` (ADR-0011) contra as ADRs 0004 e 0023 e aprova. É o mesmo instinto da retomada semi-automática abaixo e do gate de hotfix da ADR-0021: o que custa dois dias de compute se estiver errado passa por um humano uma vez.

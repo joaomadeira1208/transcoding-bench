@@ -1,6 +1,34 @@
-# O SHA do HEAD do branch padrão, que é o que a instância clona no boot: o
-# `Accept` pede o media type que devolve os 40 caracteres crus, sem JSON a
-# decodificar.
+locals {
+  repository     = "joaomadeira1208/transcoding-bench"
+  default_branch = "master"
+
+  orchestrator_work_dir = "/home/ubuntu/work"
+
+  orchestrator_infra = jsonencode({
+    subnet_id = aws_subnet.public.id
+    security_groups = {
+      orchestrator = aws_security_group.orchestrator.id
+      ephemeral    = aws_security_group.ephemeral.id
+    }
+    instance_profiles = {
+      for role, profile in aws_iam_instance_profile.instance : role => profile.name
+    }
+    key_pair_name = aws_key_pair.orchestrator.key_name
+    amis = {
+      orchestrator = var.orchestrator_ami_id
+      encode_amd64 = var.encode_amd64_ami_id
+      encode_arm64 = var.encode_arm64_ami_id
+    }
+    buckets = {
+      campaign = data.terraform_remote_state.storage.outputs.campaign_bucket_name
+      pilot    = data.terraform_remote_state.storage.outputs.pilot_bucket_name
+    }
+    ssh_private_key_parameter_name = aws_ssm_parameter.orchestrator_ssh_key.name
+  })
+}
+
+# O `Accept` pede o media type que devolve os 40 caracteres do SHA crus, sem
+# JSON a decodificar.
 data "http" "default_branch_head" {
   url = "https://api.github.com/repos/${local.repository}/commits/${local.default_branch}"
 
@@ -45,10 +73,8 @@ resource "aws_instance" "orchestrator" {
   # e o cloud-init em erro.
   depends_on = [aws_iam_role_policy.orchestrator]
 
-  # Depois do boot, quem troca a versão do código é o pesquisador, por `checkout`
-  # no clone da instância (ADR-0021). Sem o `ignore_changes`, o primeiro `apply`
-  # depois de um push no master recria a instância: no meio da campanha isso mata
-  # o `tmux` do Orquestrador e deixa as efêmeras órfãs.
+  # Sem isto, o primeiro `apply` depois de um push no master recria a instância, e
+  # no meio da campanha o `tmux` do Orquestrador morre com ela.
   lifecycle {
     ignore_changes = [user_data]
   }

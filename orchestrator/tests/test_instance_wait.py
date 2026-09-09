@@ -51,10 +51,8 @@ class TestIsInstanceReady:
         assert is_instance_ready(make_instance_state("running", private_ip="10.0.1.42")) is True
 
     def test_running_without_a_private_ip(self):
-        # É pelo IP privado que o SSH abre: a regra de ingress das efêmeras
-        # referencia o security group do Orquestrador (ADR-0015) e só casa
-        # tráfego que chega por dentro da VPC. Com o público no lugar dele o
-        # predicado diria "pronta" para uma instância inalcançável.
+        # Voltar a exigir o público diria "pronta" para uma instância que o SSH
+        # não alcança: o security group das efêmeras só casa o IP privado.
         assert is_instance_ready(make_instance_state("running", private_ip=None)) is False
 
     def test_running_without_a_public_ip(self):

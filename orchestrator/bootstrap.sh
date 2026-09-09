@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
-# Bootstrap do Orquestrador (ADR-0013/0016), chamado pelo user-data como o
-# usuário `ubuntu`: o que precisa de root pede `sudo` linha a linha, e o venv, a
-# chave e o work dir nascem do dono da máquina, que é quem dá SSH nela.
+# Roda como o usuário `ubuntu`, não como root: o que precisa de root pede `sudo`
+# linha a linha.
 
 set -euxo pipefail
 
@@ -58,8 +57,6 @@ unzip -q -o "$AWS_INSTALLER_ZIP" -d "$(dirname "$AWS_INSTALLER_DIR")"
 sudo "$AWS_INSTALLER_DIR/install" --update
 rm -rf "$AWS_INSTALLER_DIR" "$AWS_INSTALLER_ZIP"
 
-# Nunca o `requirements-dev.txt`: a instância roda o Orquestrador, não os testes
-# dele (ADR-0017).
 "$PYTHON" -m venv "$repo_dir/.venv"
 "$repo_dir/.venv/bin/pip" install --upgrade pip
 "$repo_dir/.venv/bin/pip" install -r "$repo_dir/orchestrator/requirements.txt"

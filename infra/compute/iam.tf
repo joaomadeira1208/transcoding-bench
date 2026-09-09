@@ -49,8 +49,8 @@ resource "aws_iam_role_policy" "masters" {
 
 data "aws_iam_policy_document" "orchestrator" {
   statement {
-    sid       = "RunAndTerminateInstances"
-    actions   = ["ec2:RunInstances", "ec2:TerminateInstances"]
+    sid       = "RunInstances"
+    actions   = ["ec2:RunInstances"]
     resources = ["*"]
 
     condition {
@@ -66,6 +66,26 @@ data "aws_iam_policy_document" "orchestrator" {
       test     = "StringEqualsIfExists"
       variable = "ec2:InstanceType"
       values   = var.allowed_instance_types
+    }
+  }
+
+  statement {
+    sid       = "TerminateEphemeralInstances"
+    actions   = ["ec2:TerminateInstances"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [local.region]
+    }
+
+    # Acrescentar `orchestrator` aos valores põe a instância que roda o comando
+    # dentro do alcance dele (ADR-0016).
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/role"
+      values   = local.ephemeral_roles
     }
   }
 
@@ -105,7 +125,7 @@ data "aws_iam_policy_document" "orchestrator" {
   statement {
     sid       = "PassInstanceRoles"
     actions   = ["iam:PassRole"]
-    resources = [for role in ["encode", "judge", "masters"] : aws_iam_role.instance[role].arn]
+    resources = [for role in local.ephemeral_roles : aws_iam_role.instance[role].arn]
   }
 
   statement {

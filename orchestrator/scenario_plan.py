@@ -15,12 +15,9 @@ from experiment_config import (
     PairRecord,
     VideoRecord,
 )
+from masters_plan import master_name
 
 SCHEMA_VERSION = "1"
-
-# Nenhum ADR fixou o nome dos Masters, então ele nasce aqui: quem os gerar tem de
-# materializá-los exatamente assim, ou a instância busca um objeto que não existe.
-MASTER_EXTENSION = ".mkv"
 
 WARMUP_SUFFIX = "warmup"
 
@@ -148,7 +145,7 @@ def _run(config: ExperimentConfig, scenario: Scenario, suffix: str) -> dict[str,
         "warmup": suffix == WARMUP_SUFFIX,
         "seed": config.seed,
         **_identity(scenario),
-        "master": f"{scenario.video.slug}_{scenario.pair.input_res}{MASTER_EXTENSION}",
+        "master": master_name(scenario.video.slug, scenario.pair.input_res),
         "output_width": output.width,
         "output_height": output.height,
         "preset": codec.preset,

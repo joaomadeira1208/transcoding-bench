@@ -18,7 +18,6 @@ from manifest_check import check_manifest
 
 EXIT_OK = 0
 EXIT_INVALID_MANIFEST = 1
-# Não se sabe nada sobre o manifesto, então dizer "inválido" seria mentir.
 EXIT_UNREADABLE = 2
 
 

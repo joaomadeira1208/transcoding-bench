@@ -13,8 +13,6 @@ from typing import Any
 from experiment_config import SHA256_DIGITS, ExperimentConfig, is_sha256
 from masters_plan import build_masters_plan, iter_masters
 
-# Um manifesto de forma antiga sobrevive no bucket entre duas preparações, e
-# detectá-lo é o serviço deste campo — como no `meta.json` (ADR-0019).
 KNOWN_SCHEMA_VERSIONS = frozenset({"1"})
 
 _PROBED_FIELDS = (
@@ -55,7 +53,6 @@ def _check_schema_version(manifest: Mapping[str, Any]) -> Iterator[str]:
 
 
 def _check_versions(manifest: Mapping[str, Any]) -> Iterator[str]:
-    """Tabela de strings, e nada além: a spec não declara versão de ferramenta."""
     if "versions" not in manifest:
         yield "versions: missing required key"
         return

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-#
-# Roda como o usuário `ubuntu`, não como root: o que precisa de root pede `sudo`
-# linha a linha.
 
 set -euxo pipefail
 

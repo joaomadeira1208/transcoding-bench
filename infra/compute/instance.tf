@@ -67,14 +67,13 @@ resource "aws_instance" "orchestrator" {
     role = "orchestrator"
   }
 
-  # A dependência é do bootstrap, não do lançamento: o instance profile já basta
-  # para a instância subir, e sem isto ela pode chegar ao `ssm get-parameter`
-  # antes de a policy existir — o primeiro `apply` termina com a instância de pé
-  # e o cloud-init em erro.
-  depends_on = [aws_iam_role_policy.orchestrator]
+  # A dependência é do bootstrap, não do lançamento: o instance profile e a subnet
+  # já bastam para a instância subir, e sem isto ela pode chegar ao
+  # `ssm get-parameter` antes de a policy existir, ou ao `apt-get` antes de a rota
+  # default existir — o primeiro `apply` termina com a instância de pé e o
+  # cloud-init em erro.
+  depends_on = [aws_iam_role_policy.orchestrator, aws_route_table_association.public]
 
-  # Sem isto, o primeiro `apply` depois de um push no master recria a instância, e
-  # no meio da campanha o `tmux` do Orquestrador morre com ela.
   lifecycle {
     ignore_changes = [user_data]
   }

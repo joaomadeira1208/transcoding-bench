@@ -11,7 +11,7 @@ AWS.
 | Root | Cria | Tempo de vida |
 |---|---|---|
 | `storage/` | os dois buckets do experimento (campanha e piloto) | destruído **manualmente, no fim do TCC** (ADR-0011) |
-| `compute/` | rede, IAM, key pair, parâmetro SSM e orçamento | destruído **no fim da campanha** |
+| `compute/` | rede, IAM, key pair, parâmetro SSM, orçamento e a instância do Orquestrador | destruído **no fim da campanha** |
 
 São dois porque os tempos de vida são dois (ADR-0020): os buckets são o ground
 truth do experimento e precisam sobreviver ao `destroy` que encerra a campanha.
@@ -128,14 +128,80 @@ buckets pelo remote state dele:
 
 Sobem a VPC com uma subnet pública, o internet gateway, a route table, o
 gateway endpoint de S3, os dois security groups, as quatro roles com instance
-profile, o key pair com a privada no SSM e o orçamento. A AZ da subnet não é
-escolhida na mão: um data source de ofertas por tipo devolve as zonas de cada
-tipo da allowlist, e a subnet fica na primeira zona, em ordem, que oferece
-**todos** eles.
+profile, o key pair com a privada no SSM, o orçamento e a **instância do
+Orquestrador**. A AZ da subnet não é escolhida na mão: um data source de ofertas
+por tipo devolve as zonas de cada tipo da allowlist, e a subnet fica na primeira
+zona, em ordem, que oferece **todos** eles.
 
-Os outputs são o que o user-data das instâncias injeta: `subnet_id`, os dois
-security groups, os quatro instance profiles, `key_pair_name`, as três AMIs, os
-dois buckets e `ssh_private_key_parameter_name`.
+Os outputs são `orchestrator_public_ip` — o endereço por onde se entra na
+instância — mais o que o user-data dela injeta: `subnet_id`, os dois security
+groups, os quatro instance profiles, `key_pair_name`, as três AMIs, os dois
+buckets e `ssh_private_key_parameter_name`.
+
+**A partir deste `apply` a conta passa a ter custo recorrente**: a t3.micro
+fatura continuamente, com o volume de 16 GB, até o `destroy` do `compute/`. É o
+orçamento de $150 acima quem a vigia.
+
+## A instância do Orquestrador
+
+t3.micro com AMI amd64 e 16 GB de gp3, no security group do Orquestrador, com o
+instance profile `orchestrator` e o key pair do Terraform. Sem Elastic IP: ela
+não é parada durante o Experimento, então o IP público que o output imprime vale
+por toda a campanha.
+
+O user-data dela é o template compartilhado (`orchestrator/user-data.sh`),
+renderizado por `templatefile()` com o SHA do **HEAD do branch padrão no momento
+do `apply`**, lido da API do GitHub. Ele clona o repositório em
+`/home/ubuntu/transcoding-bench`, dá `checkout` nesse SHA e chama o
+`orchestrator/bootstrap.sh`, que instala o AWS CLI v2, `tmux`, `jq` e o venv de
+runtime, grava `/home/ubuntu/work/infra.json` e escreve a chave privada em
+`~/.ssh/transcoding-bench.pem`.
+
+O `user_data` está em `ignore_changes`: o SHA que a instância clonou é história
+do boot dela, e depois disso quem troca a versão do código é o pesquisador, por
+`checkout` no clone (ADR-0021). Sem o `ignore_changes`, o primeiro `apply` depois
+de um push no master recriaria a instância — no meio da campanha isso mata o
+`tmux` e deixa as efêmeras órfãs.
+
+## A chave privada, e como entrar
+
+A chave é um SecureString no SSM, e é o mesmo par que a instância usa para falar
+com as efêmeras. Do Mac, uma vez:
+
+    aws ssm get-parameter --region us-east-1 \
+        --name /transcoding-bench/orchestrator/ssh-private-key \
+        --with-decryption --query 'Parameter.Value' --output text \
+        > ~/.ssh/transcoding-bench.pem
+    chmod 600 ~/.ssh/transcoding-bench.pem
+
+O nome do parâmetro é o output `ssh_private_key_parameter_name`. O arquivo é
+`.pem` e a allowlist do `.gitignore` nunca o admitiria no repositório — mas o
+caminho acima é fora dele de qualquer forma.
+
+    ssh -i ~/.ssh/transcoding-bench.pem \
+        ubuntu@"$(terraform -chdir=infra/compute output -raw orchestrator_public_ip)"
+
+A conexão só fecha do `researcher_ssh_cidr`; se o IP de casa mudou, é reaplicar a
+variável antes. E o bootstrap leva alguns minutos: até ele terminar, o SSH pode
+recusar conexão. Na instância, o que confere que o provisionamento foi inteiro:
+
+    cloud-init status --wait          # `done`; o log é /var/log/cloud-init-output.log
+    cat /home/ubuntu/work/infra.json  # o arquivo de infra, completo
+    /home/ubuntu/transcoding-bench/.venv/bin/python -V
+    aws sts get-caller-identity       # responde pelo instance profile
+
+## Trocar o SHA da campanha
+
+O `apply` fixa o SHA só do boot. Daí em diante a versão do código que a campanha
+roda é a do clone da instância — é ele que o Orquestrador lê com `git rev-parse
+HEAD` e passa às efêmeras (ADR-0021):
+
+    cd /home/ubuntu/transcoding-bench
+    git fetch origin
+    git checkout <sha>
+
+O caminho é sempre commit → push → `fetch` + `checkout` aqui → relançar: editar o
+working tree da instância sem commitar não afeta instância nenhuma.
 
 A chave SSH privada **não sai em output**: ela é um SecureString no SSM, lido
 pelo Orquestrador no bootstrap e pelo pesquisador quando precisar entrar na
@@ -147,6 +213,11 @@ Cada root tem o seu, e os tempos de vida não são o mesmo momento:
 
     # fim da campanha
     terraform -chdir=infra/compute destroy
+
+O do `compute/` derruba a instância do Orquestrador junto com a rede e o resto, e
+é ele que encerra o custo recorrente. Instância efêmera que tenha ficado de pé
+não é dele: quem as termina é o Orquestrador, e uma órfã aparece na lista do
+`describe-instances` pela tag `role`.
 
     # fim do TCC, depois de o dado já ter saído dos buckets
     terraform -chdir=infra/storage destroy

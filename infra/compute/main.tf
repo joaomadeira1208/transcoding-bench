@@ -2,6 +2,8 @@ locals {
   name_prefix = "transcoding-bench"
   region      = "us-east-1"
 
+  ephemeral_roles = ["encode", "judge", "masters"]
+
   bucket_arns = [
     data.terraform_remote_state.storage.outputs.campaign_bucket_arn,
     data.terraform_remote_state.storage.outputs.pilot_bucket_arn,

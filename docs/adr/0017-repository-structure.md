@@ -34,6 +34,10 @@ Três escolhas de fronteira que o layout codifica:
 - **`docker/` separado de `encode/`.** A imagem é o *ambiente de medição reprodutível* (compartilhado por encode e Juiz); os `run_*.sh` são *código* montado nela. Ver ADR-0018.
 - **Cada papel é dono do seu bootstrap.** `user-data.sh`/`bootstrap.sh` moram com o papel; o Terraform e o orquestrador apenas fiam esses arquivos (`templatefile()` / `--user-data`), não os contêm.
 
+**Emenda: o user-data é um só, e mora no `orchestrator/`.** O bullet acima previa um `user-data.sh` por papel, e a divisão não se sustentou: o user-data de todo papel faz a mesma coisa — instala git, clona o repositório, dá `checkout <sha>` e chama o `bootstrap.sh` do papel com os argumentos dele (spec #40, D17) —, de modo que "um por papel" seriam três cópias do mesmo arquivo esperando divergir. Ele passa a ser um template único, e mora no `orchestrator/` porque é o Orquestrador quem o renderiza para os outros papéis; o Terraform o renderiza uma vez, para a instância do próprio Orquestrador. O `bootstrap.sh` — que é onde os papéis de fato diferem — continua morando com o papel, e a fronteira de propriedade deste ADR só muda para o arquivo que não tem diferença de papel a carregar.
+
+O custo é uma restrição no arquivo: ser renderizável pelos dois lados fixa a sintaxe de placeholder (a de cifrão-e-chaves, a única que `templatefile()` e o `string.Template` da stdlib resolvem) e proíbe cifrão de shell no template. A regra mora no cabeçalho dele e no `orchestrator/README.md`.
+
 ## Empacotamento Python
 
 Dois `requirements.txt` de runtime separados (`orchestrator/` quase vazio — stdlib + AWS CLI via `subprocess`; `analysis/` com pandas/pyarrow), não um `pyproject` com extras. Não há pacote a construir nem código compartilhado entre as pontas (o contrato entre `generate_scenarios`/`orchestrator` e `consolidate` é o JSON validado da ADR-0019, não um módulo comum). Python pinado em **3.12** (o que o Ubuntu 24.04 LTS entrega — ADR-0015 — e que tem `tomllib` na stdlib).

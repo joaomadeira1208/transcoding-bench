@@ -104,15 +104,23 @@ do Mac (ADR-0009) e o Orquestrador nunca o invoca. O módulo é partido em duas
 metades de natureza oposta. O argv e a chamada ao processo ficam **sem teste**,
 por decisão — asserir a lista de argv transcreve a implementação e quebra em
 refatoração inofensiva. A leitura da saída mora no `command_output.py`, é função
-pura e é onde os testes batem: id da instância do `run-instances`; estado e IP
-público do `describe-instances`; chaves e tamanhos do `list-objects-v2`,
+pura e é onde os testes batem: id da instância do `run-instances`; estado e os
+dois endereços do `describe-instances`; chaves e tamanhos do `list-objects-v2`,
 inclusive a saída vazia que a CLI v2 imprime quando o prefixo não casa com nada;
 o valor do `get-parameter`; o status do `cloud-init`.
+
+O endereço que a prontidão exige é o **privado**, e é por ele que o SSH abre: a
+regra de ingress das efêmeras referencia o security group do Orquestrador
+(ADR-0015), e uma referência a security group só casa tráfego que chega por
+dentro da VPC — o que é enviado ao IP público sai pelo internet gateway e volta
+com o IP público de origem, que a referência não bate. O público continua no
+`DescribedInstance` porque as efêmeras precisam dele para sair para a internet
+(não há NAT); ele só não é o alvo do SSH.
 
 A regra que o seam impõe a quem o usa é **"função pura recebe dado já buscado"**:
 uma lista de `S3Object`, nunca um prefixo a listar. O `instance_wait.py` é a
 mesma regra aplicada ao tempo — "pronta" é um predicado sobre o estado parseado
-(`running` **com** IP público) e "bootstrap concluído" é o status do `cloud-init`
+(`running` **com** IP privado) e "bootstrap concluído" é o status do `cloud-init`
 parseado; o laço só chama o probe que recebeu, consulta o relógio e dorme, com
 timeout por argumento e relógio injetável, e é isso que o torna exercível sem AWS
 e sem `sleep`. O probe do bootstrap roda `cloud-init status` **sem** `--wait`: é
@@ -139,3 +147,70 @@ do `cloud-init` acrescenta a isso um teto de tempo na própria chamada, por esta
 dentro do laço. A chave é a que o bootstrap da instância do Orquestrador
 grava em `~/.ssh` a partir do SSM (ADR-0016): o caminho é constante do módulo e
 argumento default, e tem de casar com o nome que aquele bootstrap escreve.
+
+## O user-data fino, um template para todos os papéis
+
+`user-data.sh` é o user-data de **todo** papel (ADR-0013/0017): instala git,
+clona o repositório público em `/home/ubuntu/transcoding-bench`, faz `checkout`
+no SHA e chama o `bootstrap.sh` do papel com os argumentos dele. Ele mora neste
+diretório, e não em cada papel, porque é um arquivo só e é este papel que o
+renderiza para os outros: o Terraform o renderiza por `templatefile()` para a
+instância do Orquestrador (com o SHA do HEAD do branch padrão no momento do
+`apply`), e o Orquestrador o renderiza por `string.Template` para as efêmeras
+(com o SHA do próprio clone, ADR-0021). O `bootstrap.sh` de cada papel segue
+sendo do papel.
+
+Os placeholders são de cifrão-e-chaves porque é a única sintaxe que os dois
+renderizadores resolvem, e é daí que sai a regra do arquivo: **nenhum cifrão fora
+deles**. Uma variável de shell ali dentro é placeholder para o `string.Template`,
+e a renderização em Python passa a levantar. O que precisa de variável mora no
+`bootstrap.sh`, que é script e não template.
+
+O `bootstrap.sh` daqui é o do Orquestrador (ADR-0016), chamado como o usuário
+`ubuntu` — o que precisa de root pede `sudo` linha a linha, e o venv, a chave e o
+work dir nascem do dono da máquina, que é quem dá SSH nela. Ele instala o AWS CLI
+v2 do instalador oficial, `git`, `jq`, `tmux` e o `python3.12-venv`; cria o venv
+em `.venv` do clone com o `requirements.txt` de runtime, **nunca** o `-dev`;
+grava o arquivo de infra no work dir; e escreve a chave privada lida do parâmetro
+SSM em `~/.ssh/transcoding-bench.pem` com permissão 600 — o mesmo caminho que o
+`external.py` abre por default. Docker não entra: o Orquestrador não mede nada.
+
+Nem o user-data nem o bootstrap têm teste automatizado, por decisão: o que eles
+fazem é provisionamento, e quem os verifica é o pesquisador no `apply`, pelo
+runbook do `infra/README.md`.
+
+## O arquivo de infra
+
+O Terraform injeta no user-data os ids que o Orquestrador precisa conhecer e o
+bootstrap os grava em `<work-dir>/infra.json` — hoje `/home/ubuntu/work/infra.json`.
+Todo subcomando recebe o caminho por `--infra`; descoberta por tag foi rejeitada
+(ADR-0019), a seleção é explícita e mora no lado inteligente. A forma:
+
+    {
+      "subnet_id": "subnet-0a1b2c3d4e5f60718",
+      "security_groups": {
+        "orchestrator": "sg-0a1b2c3d4e5f60718",
+        "ephemeral": "sg-0b2c3d4e5f6071829"
+      },
+      "instance_profiles": {
+        "orchestrator": "transcoding-bench-orchestrator",
+        "encode": "transcoding-bench-encode",
+        "judge": "transcoding-bench-judge",
+        "masters": "transcoding-bench-masters"
+      },
+      "key_pair_name": "transcoding-bench",
+      "amis": {
+        "orchestrator": "ami-025d99823a4caad37",
+        "encode_amd64": "ami-025d99823a4caad37",
+        "encode_arm64": "ami-0246d714afcc1d494"
+      },
+      "buckets": {
+        "campaign": "transcoding-bench-123456789012-campaign",
+        "pilot": "transcoding-bench-123456789012-pilot"
+      },
+      "ssh_private_key_parameter_name": "/transcoding-bench/orchestrator/ssh-private-key"
+    }
+
+O bootstrap só o valida como JSON (é o `jq` que o escreve) e lê dele o nome do
+parâmetro da chave. O parser que confere a forma inteira é do ticket do
+`prepare-masters`.

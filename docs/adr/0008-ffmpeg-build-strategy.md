@@ -1,6 +1,6 @@
 # Build do FFmpeg a partir do source com flags nativas por arquitetura
 
-FFmpeg e os três encoders (`libx264`, `libx265`, `libsvtav1`) são compilados **from source**, mesmo commit/tag, com `-march=native` em cada arquitetura. Isso garante que cada arch exerce seus SIMD paths nativos (NEON no Graviton 3, AVX-512 no Sapphire Rapids e EPYC Genoa) — que é exatamente o que estamos medindo. Versões de FFmpeg e de cada encoder são pinadas por tag/commit no Dockerfile pra reprodutibilidade.
+FFmpeg e os três encoders (`libx264`, `libx265`, `libsvtav1`) são compilados **from source**, mesmo commit/tag, com `-march=native` em cada arquitetura. Isso garante que cada arch exerce seus SIMD paths nativos (NEON no Graviton 3 — incompleto, ver a emenda abaixo —, AVX-512 no Sapphire Rapids e EPYC Genoa) — que é exatamente o que estamos medindo. Versões de FFmpeg e de cada encoder são pinadas por tag/commit no Dockerfile pra reprodutibilidade.
 
 ## Considered Options
 

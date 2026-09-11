@@ -21,6 +21,11 @@ Mac e roda as ferramentas de dentro dela:
 
     .venv-smoke/bin/python -m pytest smoke/ --docker
 
+O que essa camada **não** cobre é a arquitetura do alvo. O `-march=native` resolve
+para o chip que builda, e o Mac ARM não tem SVE: o ICE do GCC 13 que a ADR-0008
+registra passou verde aqui e só apareceu na primeira `c7g` da campanha. Um build
+verde no Mac diz que o Dockerfile está são, não que ele compila em Graviton 3.
+
 Um pin desta tabela que mude é o momento de regenerar as capturas que alimentam
 os testes dos parsers do `analysis/` — o README do `smoke/` diz como.
 

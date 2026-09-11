@@ -79,6 +79,16 @@ def parse_get_parameter(raw: str) -> str:
     return value
 
 
+def parse_caller_identity(raw: str) -> str:
+    """O ARN da identidade que a credencial do IMDS resolve.
+
+    O ARN e não a conta: o que a auto-checagem do `preflight` precisa dizer é
+    **qual papel** está falando, e é a role errada — não a conta errada — que
+    produz o `AccessDenied` no meio do lançamento.
+    """
+    return _field(_parse_object(raw, "get-caller-identity"), "Arn", str)
+
+
 def parse_cloud_init_status(raw: str) -> CloudInitStatus:
     """O estado do bootstrap, lido do `cloud-init status`."""
     for line in raw.splitlines():

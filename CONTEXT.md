@@ -49,6 +49,11 @@ O **Experimento** em escopo menor, executado entre o smoke na AWS e a campanha: 
 _Avoid_: ensaio, pré-campanha, dry run, teste piloto.
 _Não confundir com_: o smoke (que atravessa o caminho com shims e não mede nada) nem com o warm-up (a primeira **Execução** de cada bloco).
 
+**Preflight** (`preflight`):
+A validação de fumaça do IAM da ADR-0016, ampliada pela ADR-0022, no que este degrau alcança: o subcomando do **Orquestrador** que prova, numa instância descartável de poucos minutos, que `PassRole`, condição de tipo de instância, chave via SSM, hop limit do IMDS, clone no SHA, build da imagem, fatia do plano, **Masters** baixados e validados, `perf` dentro do container e o `PutObject` do encode funcionam juntos — antes de a campanha faturar por dois dias. Começa por uma auto-checagem do Orquestrador (identidade, os dois buckets, o parâmetro SSM, o SHA do clone e um `s3 sync` entre os dois buckets) que roda antes de qualquer lançamento, e termina numa tabela passou/falhou por passo. Rodável nos três tipos por argumento.
+_Não confundir com_: o smoke na AWS, que mede — confere os dez eventos de PMU nas três arquiteturas e roda uma **Execução** de verdade —, nem com o **Piloto**, que é o Experimento em escopo menor. O preflight prova encanamento e não produz dado nenhum.
+_Avoid_: validação de fumaça (ambíguo entre os degraus da escada), dry run, health check.
+
 **Master** (`master`):
 Vídeo de entrada antes de qualquer transcoding pela pipeline. Existe em três resoluções (4K, 1080p, 720p), todas derivadas do source 4K canônico por downscale Lanczos lossless (FFV1).
 _Avoid_: source como sinônimo de Master (ambíguo), input bruto.

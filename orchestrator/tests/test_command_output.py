@@ -11,6 +11,7 @@ import pytest
 from command_output import (
     CloudInitStatus,
     OutputError,
+    parse_caller_identity,
     parse_cloud_init_status,
     parse_describe_instances,
     parse_get_parameter,
@@ -18,6 +19,8 @@ from command_output import (
     parse_run_instances,
 )
 from conftest import (
+    CALLER_ARN,
+    make_caller_identity_payload,
     make_describe_payload,
     make_described_instance,
     make_launched_instance,
@@ -240,6 +243,22 @@ class TestGetParameter:
             parse_get_parameter(payload)
 
         assert "42" not in str(error.value)
+
+
+class TestCallerIdentity:
+    def test_returns_the_arn_of_the_identity(self):
+        assert parse_caller_identity(make_caller_identity_payload()) == CALLER_ARN
+
+    def test_rejects_a_payload_without_the_arn(self):
+        payload = json.loads(make_caller_identity_payload())
+        del payload["Arn"]
+
+        with pytest.raises(OutputError, match="Arn"):
+            parse_caller_identity(json.dumps(payload))
+
+    def test_rejects_an_arn_that_is_not_a_string(self):
+        with pytest.raises(OutputError, match="Arn"):
+            parse_caller_identity(make_caller_identity_payload(Arn=None))
 
 
 class TestCloudInitStatus:

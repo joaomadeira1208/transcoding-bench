@@ -1,9 +1,60 @@
 # encode/
 
-Bash que roda **dentro do container**, na Instância de encode (ADR-0017/0018). É
-o papel burro da pipeline: recebe dado já decidido e o executa. Nenhuma seleção,
-nenhuma derivação, nenhuma consulta ao IMDS — a Instância nunca decide nada
-(ADR-0009/0019).
+Bash da Instância de encode (ADR-0017/0018), em duas camadas: no **host**, os
+três scripts que põem a máquina de pé; **dentro do container**, os dois que
+executam o plano. É o papel burro da pipeline: recebe dado já decidido e o
+executa. Nenhuma seleção, nenhuma derivação, nenhuma consulta ao IMDS — a
+Instância nunca decide nada (ADR-0009/0019).
+
+## O host
+
+O `bootstrap.sh` é o gordo do par user-data/bootstrap (ADR-0013/0017): o
+user-data do `orchestrator/` clona o SHA e o chama com os argumentos do papel.
+Ele instala Docker (o `docker.io` do Ubuntu — a versão do engine não toca a
+medição, e o que está pinado é a imagem), o `linux-tools` do kernel corrente e a
+AWS CLI v2 do instalador oficial; persiste `kernel.perf_event_paranoid=-1` em
+`/etc/sysctl.d/`, que é o que a ADR-0006 pede do host para o `perf stat` de
+dentro do container ler a PMU; cria o work dir e builda a imagem; e baixa a fatia
+do `scenarios.json` e o manifesto **pelas chaves que recebeu**, porque a
+Instância nunca decide path (ADR-0011/0019).
+
+    bash encode/bootstrap.sh \
+        --work-dir /home/ubuntu/work --bucket "$bucket" \
+        --plan-key scenarios/c7g.json --manifest-key masters/manifest.json \
+        --masters-prefix masters/
+
+O `fetch_masters.sh` é o último passo dele, e é script à parte por dois motivos:
+o smoke o exercita sozinho, e é ele a guarda contra Master corrompido — um
+Master errado não aparece em número nenhum, vira seis Execuções medidas sobre a
+entrada errada. Para cada Master que o manifesto lista, um `s3 cp` **por objeto**
+e um `sha256sum` contra o manifesto: o papel não tem `ListBucket` na matriz da
+ADR-0016, de modo que o manifesto *é* a lista. A primeira divergência para com
+status não-zero nomeando o Master, e nada além dele é considerado válido.
+
+    bash encode/fetch_masters.sh \
+        --manifest /home/ubuntu/work/manifest.json --bucket "$bucket" \
+        --prefix masters/ --dest /home/ubuntu/work/masters
+
+O `launch_container.sh` é o `docker run`, e é o comando que o Orquestrador
+dispara por SSH bloqueante. Ele monta as duas proveniências que a ADR-0018 não
+deixa se misturarem — `<clone>/encode` read-only em `/opt/encode`, o work dir de
+runtime em `/work` —, dá `--cap-add=PERFMON` e repassa ao `run_all.sh` os
+argumentos que recebeu. O `--plan` é o **nome** da fatia dentro do work dir: o
+caminho que o laço vê é o de dentro do container, e quem monta o work dir é quem
+sabe onde ele fica.
+
+    bash encode/launch_container.sh \
+        --work-dir /home/ubuntu/work --plan c7g.json --bucket "$bucket" \
+        --commit "$sha" --instance-id "$id" --instance-type c7g.xlarge
+
+O work dir é o contrato entre os três: o `bootstrap.sh` deixa lá a fatia, o
+manifesto e `masters/`; o `launch_container.sh` os encontra por esses nomes, e o
+`runs/` nasce dentro dele. Os dois invocam o `docker` com `sudo` em vez de
+`usermod -aG docker`: a sessão que o bootstrap já tem não ganharia o grupo, e o
+`docker build` dele falharia. O tag da imagem é o `transcoding-bench` do
+`docker/README.md`, e os dois têm de concordar sobre ele.
+
+## O container
 
 O `run_scenario.sh` é uma Execução. Ele recebe o objeto de run do plano como
 JSON, cunha o `run_id`, monta o argv do FFmpeg **só copiando** o que veio no
@@ -77,6 +128,12 @@ junto com eles, que os roda de verdade com `ffmpeg`, `perf`, `pidstat`, `aws` e
 que importa é a do argv, porque a ADR-0021 permite editar este diretório
 **durante** a campanha; e o smoke é o quarto job do CI justamente para que ela
 seja guarda automática, não revisão de diff.
+
+O `fetch_masters.sh` entra por ali também, sobre um manifesto montado pelo teste
+e Masters placeholder no bucket falso. O `bootstrap.sh` e o
+`launch_container.sh` ficam de fora: um é provisionamento e o outro é o `docker
+run`, e o que os prova é o preflight, que lança uma instância descartável na AWS
+para atravessá-los.
 
     .venv-smoke/bin/python -m pytest smoke/
 

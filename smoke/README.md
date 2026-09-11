@@ -42,11 +42,13 @@ Todo shim registra o argv que recebeu em `$SMOKE_ARGV_DIR/<tool>.argv` e o seu
 nome em `$SMOKE_ARGV_DIR/sequence`, a linha do tempo comum entre ferramentas —
 é por ela que se vê o upload acontecendo **entre** runs.
 
-O shim do `aws` traduz `s3 cp` e `s3api list-objects-v2` em operações sobre
-`$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que o layout de
-prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
+O shim do `aws` traduz `s3 cp` — nos dois sentidos — e `s3api list-objects-v2`
+em operações sobre `$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que
+o layout de prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
 `list-objects-v2` que o `resume.py` usará) — nunca semântica do S3, e por isso
-sem localstack.
+sem localstack. O sentido bucket → disco é o do `encode/fetch_masters.sh`, que
+baixa um objeto por Master listado no manifesto e confere o sha256 antes do
+primeiro Cenário.
 
 O laço fecha do outro lado: a árvore que o `run_all.sh` acabou de escrever é
 consolidada invocando `analysis/consolidate.py`, e o Parquet que sai é lido aqui.

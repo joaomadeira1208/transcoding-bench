@@ -138,13 +138,28 @@ esse 255 em `None`, e o laço trata `None` como espera — simétrico ao
 bootstrap dizer se o último estado foi um status do `cloud-init` ou silêncio no
 SSH.
 
+O probe da prontidão tem a sua própria tradução, pela mesma razão: o id que o
+`run-instances` acabou de devolver leva alguns segundos para aparecer no
+`describe-instances`, e no intervalo a CLI o recusa com
+`InvalidInstanceID.NotFound`. O `described_instance` devolve `None` nesse caso e
+propaga qualquer outro erro — um `AccessDenied` continua matando o passo em vez
+de virar espera até o timeout.
+
 O `ssh_exec` é bloqueante, recebe o comando remoto como argv e o entrega ao shell
 da instância já citado por `shlex.join`, que é o que faz um JSON no argv
 sobreviver (ADR-0018). Ele leva `ConnectTimeout` e keep-alive de servidor porque
 um `ssh` contra um security group que dropa pacotes pendura indefinidamente, e
 enquanto ele pendura o argumento `timeout` do laço de espera é mentira; o probe
 do `cloud-init` acrescenta a isso um teto de tempo na própria chamada, por estar
-dentro do laço. A chave é a que o bootstrap da instância do Orquestrador
+dentro do laço.
+
+O keep-alive cobre a rede que morre, e não o comando remoto que trava com a
+conexão viva: o `prepare.sh` baixa 7,4 GB de fonte externa com `curl` sem
+`--max-time`, e um download que estola é indistinguível das ~2 h de silêncio do
+caso normal. Por isso a chamada da preparação também leva um `timeout` próprio,
+generoso o bastante para não cortar uma corrida lenta — o que ele compra é a
+falha cair no `except` e a instância ser terminada sozinha, em vez de ficar
+faturando até alguém reparar. A chave é a que o bootstrap da instância do Orquestrador
 grava em `~/.ssh` a partir do SSM (ADR-0016): o caminho é constante do módulo e
 argumento default, e tem de casar com o nome que aquele bootstrap escreve.
 
@@ -212,5 +227,78 @@ Todo subcomando recebe o caminho por `--infra`; descoberta por tag foi rejeitada
     }
 
 O bootstrap só o valida como JSON (é o `jq` que o escreve) e lê dele o nome do
-parâmetro da chave. O parser que confere a forma inteira é do ticket do
-`prepare-masters`.
+parâmetro da chave. Quem confere a forma inteira é o `infra_config.py`, função
+pura sobre o arquivo já parseado: cada campo tem de estar lá e ser uma string
+não-vazia, **inclusive os aninhados** — o `security_groups.ephemeral` e o
+`instance_profiles.masters` ausentes só apareceriam como `KeyError` no meio do
+laço, depois de a instância estar de pé. Chave que o Terraform passe a emitir e o
+parser não conheça é ignorada: o arquivo é gerado por este mesmo repositório, e
+recusá-la amarraria um `apply` novo a um checkout novo do Orquestrador.
+
+## O CLI: `orchestrator.py`
+
+Um subcomando por passo da campanha, e o `--infra` antes dele, com o caminho do
+arquivo acima. Roda na instância do Orquestrador, **dentro de `tmux`**: os
+subcomandos bloqueiam por horas e a sessão SSH que cair não pode levar o passo
+junto.
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
+
+Nada é descoberto por tag (ADR-0019): a subnet, o security group das efêmeras, o
+perfil, a AMI e os dois buckets saem do `--infra`, e o SHA que as instâncias
+clonam sai do `git rev-parse` do clone que contém o próprio `orchestrator.py`
+(ADR-0021) — o `-C` do adaptador é o que impede o SHA de ser o do diretório de
+onde o pesquisador invocou o comando.
+
+O `prepare-masters` é o passo que roda uma vez, antes de qualquer medição, e
+leva cerca de duas horas:
+
+1. projeta o plano dos Masters do `config/experiment.toml` e resolve o SHA;
+2. lança uma `c7g.xlarge` arm64 com o perfil `masters`, 100 GB gp3, hop limit 2
+   do IMDS (o `aws` roda dentro do container, ADR-0018) e as tags `role`,
+   `commit` e `Name`, com o user-data fino renderizado por `string.Template`;
+3. espera `running` com IP privado, depois o `cloud-init` — status de erro é
+   falha do lançamento, não paciência;
+4. dispara por SSH **bloqueante** o `docker run` da preparação, com o plano JSON
+   no argv: o papel `masters` não tem `GetObject` (ADR-0016), então o plano não
+   pode chegar pelo S3. O arquivo de versões não vai no argv — quem o nomeia é o
+   `ENV VERSIONS_FILE` da imagem, como no `run_scenario.sh`, e repeti-lo aqui
+   faria mexer no `Dockerfile` quebrar a preparação;
+5. `s3 sync` de `masters/` da campanha para o do piloto, lista os dois prefixos e
+   compara nome e tamanho por função pura — divergência é erro;
+6. baixa o `manifest.json` da campanha **para o lado do arquivo de infra**
+   (`~/work/manifest.json`) e roda o checker sobre ele.
+
+**Em todo caminho de saída**, sucesso ou exceção, a instância lançada é
+terminada. As duas funções puras — a montagem do comando remoto e a comparação
+das duas listagens — moram no `masters_launch.py` e são o que ganha teste; o laço
+do subcomando e a renderização do template são escritos direto (ADR-0022).
+
+O que segue não é opcional e não é do programa: o **gate humano da ADR-0012**. O
+pesquisador lê o `~/work/manifest.json` contra a tabela de fontes da ADR-0004 e a
+geometria por vídeo e tier da ADR-0023 — os seis nomes, a largura e a altura de
+cada Master naquele vídeo, o `codec_name`, a cadência e a contagem de frames —
+antes de a campanha medir qualquer coisa. O checker aceita a forma e a semântica
+contra o TOML; quem confere se o TOML é o experimento que o artigo descreve é o
+pesquisador.
+
+### O `--copy-props` do `s3 sync`
+
+O espelho do passo 5 é uma cópia **S3→S3**, e ali o default da CLI é
+`--copy-props default`, que copia **tags** além da metadata — e para isso chama
+`GetObjectTagging` na origem mesmo quando não há tag alguma. A matriz da
+ADR-0016 não concede `s3:GetObjectTagging`, então o sync sairia com um
+`AccessDenied` no pior lugar possível: o último passo, depois de os seis Masters
+já estarem no bucket da campanha e a corrida de ~2 h já estar paga.
+
+Por isso o `s3_sync` do adaptador passa `--copy-props metadata-directive`, o
+degrau imediatamente abaixo do default: preserva `content-type`,
+`content-language`, `content-encoding`, `content-disposition`, `cache-control`,
+`--expires` e metadata, e não toca em tag. Conceder `GetObjectTagging` foi
+rejeitado — tag em objeto de Master não significa nada neste Experimento, e a
+permissão compraria uma capacidade que ninguém quer; `--copy-props none` também
+resolveria, mas descartaria a metadata junto. Os três valores válidos na CLI que
+a instância instala (`aws-cli/2.36.40`) são `none`, `metadata-directive` e
+`default`, e a flag **só se aplica a cópia S3→S3**: o `s3 cp` local↔S3 do resto
+do sistema não vê diferença. O argv fica sem teste, como o resto do adaptador
+(ADR-0022).

@@ -348,3 +348,44 @@ def make_instance_state(
         public_ip=public_ip,
         private_ip=private_ip,
     )
+
+
+# O arquivo de infra que o Terraform injeta no user-data e o bootstrap grava no
+# work dir: a forma está no `orchestrator/README.md`, e os valores são os do
+# exemplo de lá.
+
+_INFRA: dict[str, Any] = {
+    "subnet_id": "subnet-0a1b2c3d4e5f60718",
+    "security_groups": {
+        "orchestrator": "sg-0a1b2c3d4e5f60718",
+        "ephemeral": "sg-0b2c3d4e5f6071829",
+    },
+    "instance_profiles": {
+        "orchestrator": "transcoding-bench-orchestrator",
+        "encode": "transcoding-bench-encode",
+        "judge": "transcoding-bench-judge",
+        "masters": "transcoding-bench-masters",
+    },
+    "key_pair_name": "transcoding-bench",
+    "amis": {
+        "orchestrator": "ami-025d99823a4caad37",
+        "encode_amd64": "ami-025d99823a4caad37",
+        "encode_arm64": "ami-0246d714afcc1d494",
+    },
+    "buckets": {
+        "campaign": "transcoding-bench-123456789012-campaign",
+        "pilot": "transcoding-bench-123456789012-pilot",
+    },
+    "ssh_private_key_parameter_name": "/transcoding-bench/orchestrator/ssh-private-key",
+}
+
+
+def make_infra(**overrides: Any) -> dict[str, Any]:
+    """O `infra.json` já parseado, com overrides por chave de topo."""
+    infra = copy.deepcopy(_INFRA)
+    for key, value in overrides.items():
+        if value is _ABSENT:
+            infra.pop(key, None)
+        else:
+            infra[key] = value
+    return infra

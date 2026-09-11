@@ -26,6 +26,13 @@ ROOT_DEVICE_NAME = "/dev/sda1"
 
 VOLUME_TYPE = "gp3"
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# O default é `default`, que copia **tags** além da metadata — e para isso a CLI
+# chama `GetObjectTagging` na origem mesmo sem tag alguma, que a matriz da
+# ADR-0016 não concede.
+COPY_PROPS = "metadata-directive"
+
 SSH_USER = "ubuntu"
 
 SSH_KEY_PATH = Path.home() / ".ssh" / "transcoding-bench.pem"
@@ -37,6 +44,8 @@ SSH_KEEPALIVE_COUNT_MAX = 4
 # O `ssh` reserva o 255 para as falhas dele próprio; qualquer outro código veio
 # do comando remoto.
 SSH_UNREACHABLE_RETURNCODE = 255
+
+INSTANCE_NOT_FOUND_ERROR_CODE = "InvalidInstanceID.NotFound"
 
 # O `cloud-init status` sai 1 em `error` e 2 em `degraded`. Restringir a `(0,)`
 # faz uma instância que falhou o bootstrap chegar como falha de comando, e aí o
@@ -144,13 +153,36 @@ def describe_instances(instance_ids: Sequence[str]) -> list[DescribedInstance]:
     )
 
 
+def described_instance(instance_id: str) -> DescribedInstance | None:
+    """O estado de uma instância, ou `None` enquanto o `describe` ainda não a vê."""
+    try:
+        described = describe_instances([instance_id])
+    except ExternalCommandError as error:
+        if INSTANCE_NOT_FOUND_ERROR_CODE in str(error):
+            return None
+        raise
+    return described[0] if described else None
+
+
 def s3_cp(source: str, destination: str) -> None:
     """Copia um objeto, nos dois sentidos: cada ponta é caminho local ou `s3://`."""
     _run(["aws", "s3", "cp", "--only-show-errors", source, destination])
 
 
 def s3_sync(source: str, destination: str) -> None:
-    _run(["aws", "s3", "sync", "--only-show-errors", source, destination])
+    """Espelha um prefixo no outro, sem apagar o que só existe no destino."""
+    _run(
+        [
+            "aws",
+            "s3",
+            "sync",
+            "--only-show-errors",
+            "--copy-props",
+            COPY_PROPS,
+            source,
+            destination,
+        ]
+    )
 
 
 def s3_list_prefix(bucket: str, prefix: str) -> list[S3Object]:
@@ -238,8 +270,13 @@ def cloud_init_status(host: str, *, key_path: Path = SSH_KEY_PATH) -> CloudInitS
 
 
 def git_rev_parse(ref: str = "HEAD") -> str:
-    """O SHA que as instâncias vão receber para clonar (ADR-0021)."""
-    return _run(["git", "rev-parse", "--verify", ref]).strip()
+    """O SHA que as instâncias vão receber para clonar (ADR-0021).
+
+    Do clone que contém este arquivo, e não do diretório corrente: o SHA é o do
+    código que está rodando, e sem o `-C` ele passaria a ser o de onde quer que o
+    pesquisador tenha invocado o CLI.
+    """
+    return _run(["git", "-C", str(REPO_ROOT), "rev-parse", "--verify", ref]).strip()
 
 
 def _run(

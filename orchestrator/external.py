@@ -12,6 +12,7 @@ from command_output import (
     CloudInitStatus,
     DescribedInstance,
     S3Object,
+    parse_caller_identity,
     parse_cloud_init_status,
     parse_describe_instances,
     parse_get_parameter,
@@ -169,6 +170,11 @@ def s3_cp(source: str, destination: str) -> None:
     _run(["aws", "s3", "cp", "--only-show-errors", source, destination])
 
 
+def s3_rm(target: str) -> None:
+    """Apaga um objeto — o `DeleteObject` que a ADR-0016 escopa a `runs/*`."""
+    _run(["aws", "s3", "rm", "--only-show-errors", target])
+
+
 def s3_sync(source: str, destination: str) -> None:
     """Espelha um prefixo no outro, sem apagar o que só existe no destino."""
     _run(
@@ -201,6 +207,11 @@ def s3_list_prefix(bucket: str, prefix: str) -> list[S3Object]:
             ]
         )
     )
+
+
+def sts_caller_identity() -> str:
+    """O ARN da identidade corrente, sem permissão nenhuma exigida para perguntar."""
+    return parse_caller_identity(_run(["aws", "sts", "get-caller-identity", "--output", "json"]))
 
 
 def ssm_get_parameter(name: str) -> str:

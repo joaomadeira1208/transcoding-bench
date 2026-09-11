@@ -314,6 +314,18 @@ def make_describe_payload(*reservations: list[dict[str, Any]]) -> str:
     )
 
 
+CALLER_ARN = "arn:aws:sts::123456789012:assumed-role/transcoding-bench-orchestrator/i-0abc"
+
+
+def make_caller_identity_payload(**overrides: Any) -> str:
+    payload = {
+        "UserId": "AROAEXAMPLEID:i-0abc",
+        "Account": "123456789012",
+        "Arn": CALLER_ARN,
+    }
+    return json.dumps(payload | overrides)
+
+
 def make_s3_object(key: str, size: int = 4096) -> dict[str, Any]:
     return {
         "Key": key,

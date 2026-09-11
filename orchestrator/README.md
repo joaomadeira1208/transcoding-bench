@@ -107,7 +107,8 @@ refatoração inofensiva. A leitura da saída mora no `command_output.py`, é fu
 pura e é onde os testes batem: id da instância do `run-instances`; estado e os
 dois endereços do `describe-instances`; chaves e tamanhos do `list-objects-v2`,
 inclusive a saída vazia que a CLI v2 imprime quando o prefixo não casa com nada;
-o valor do `get-parameter`; o status do `cloud-init`.
+o valor do `get-parameter`; o ARN do `get-caller-identity`; o status do
+`cloud-init`.
 
 O endereço que a prontidão exige é o **privado**, e é por ele que o SSH abre: a
 regra de ingress das efêmeras referencia o security group do Orquestrador
@@ -240,9 +241,18 @@ recusá-la amarraria um `apply` novo a um checkout novo do Orquestrador.
 Um subcomando por passo da campanha, e o `--infra` antes dele, com o caminho do
 arquivo acima. Roda na instância do Orquestrador, **dentro de `tmux`**: os
 subcomandos bloqueiam por horas e a sessão SSH que cair não pode levar o passo
-junto.
+junto. São dois:
 
     python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
+    python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
+        --instance-type c7g.xlarge
+
+A escada em que eles se encaixam, cada degrau disparado pelo pesquisador
+(ADR-0022): preparação dos Masters → **gate humano** sobre o manifesto → preflight
+→ smoke AWS → piloto → campanha. O `prepare-masters` é o primeiro exercício real
+de `PassRole`, condição de tipo e chave via SSM; o preflight prova o resto do
+caminho do encode, incluindo a validação dos Masters, que só existe com Masters
+no bucket.
 
 Nada é descoberto por tag (ADR-0019): a subnet, o security group das efêmeras, o
 perfil, a AMI e os dois buckets saem do `--infra`, e o SHA que as instâncias
@@ -281,6 +291,71 @@ cada Master naquele vídeo, o `codec_name`, a cadência e a contagem de frames �
 antes de a campanha medir qualquer coisa. O checker aceita a forma e a semântica
 contra o TOML; quem confere se o TOML é o experimento que o artigo descreve é o
 pesquisador.
+
+### O `preflight`
+
+O segundo subcomando prova, antes de haver uma instância faturando por dois dias,
+que `PassRole`, condição de tipo, chave via SSM, hop limit, clone no SHA, build,
+fatia, Masters validados, `perf` dentro do container e o `PutObject` do encode
+funcionam **juntos**. Ele não mede nada: os dez eventos de PMU nas três
+arquiteturas seguem sendo o smoke AWS (ADR-0022).
+
+Cada execução é uma instância descartável de poucos minutos, e o tipo é
+argumento — `--instance-type c7i.xlarge` roda o mesmo caminho no x86, sem código
+por arquitetura: a AMI sai do arquivo de infra pela `arch` que o
+`experiment.toml` declara para aquele tipo. O `--bucket` escolhe quem recebe a
+fatia e o objeto de prova, e o default é o do piloto. Exige que os Masters já
+existam.
+
+A tabela que ele imprime tem uma linha por capacidade provada, e é ela o
+resultado do passo — o código de saída é não-zero se alguma falhou. As dez linhas
+mais o `terminate` são os seis passos nomeados da spec. `sts`, `buckets`, `ssm`,
+`git` e `s3-sync` são a auto-checagem, que roda inteira **antes de qualquer
+lançamento** e pega credencial ou infra errada de graça; `buckets` lista os dois
+e exige o `masters/manifest.json` naquele que a instância vai ler, porque sem os
+Masters ela só descobriria a ausência depois de pagar o `docker build`. `ami` e
+`launch` sobem a fatia para `scenarios/` e lançam a instância com o perfil de
+encode, 200 GB gp3, hop limit 2 e o user-data fino real; `bootstrap` espera
+`running` e o `cloud-init`, o que prova o clone no SHA, o build, a fatia, o
+manifesto e os Masters baixados e validados; `perf-stat` e `s3-put` são os dois
+`docker run` do passo 4; e `terminate` roda **em todo caminho de saída**.
+
+O `s3-sync` da auto-checagem é uma emenda ao passo 1, e o motivo é que o D25
+original não exercitava `s3_sync` em lugar nenhum: o único caminho de IAM que
+roda S3→S3 é o espelho do fim do `prepare-masters`, e ele estreava depois de uma
+corrida de ~2 h já paga. Aqui ele copia um objeto de poucos bytes entre os dois
+buckets, pela mesma função do adaptador, e o apaga dos dois em seguida — o objeto
+vive sob `runs/preflight/`, que é onde o `DeleteObject` da ADR-0016 alcança.
+
+O `perf stat` do passo 4 decide sobre o **valor**, não sobre o código de saída:
+um evento indisponível naquela PMU não faz o `perf` falhar (ADR-0006), ele
+reporta `<not supported>` e segue. O objeto que o container escreve em
+`runs/preflight/` é listado e apagado pelo Orquestrador, o que fecha `PutObject`
+do encode, `ListBucket` e `DeleteObject` no mesmo passo.
+
+O que o preflight **não** apaga é a fatia. Os dois objetos de prova vivem sob
+`runs/preflight/` e somem; `scenarios/{id}.json` fica no bucket, e o
+`DeleteObject` da ADR-0016 nem alcança `scenarios/`. O que sobra ali é a fatia da
+**campanha inteira** daquela arquitetura, não um resto do preflight: quem lançar o
+piloto sobrescreve essa chave, e ninguém deve ler um objeto já presente nela como
+se o próprio lançamento o tivesse posto.
+
+O que ganha teste é o núcleo do `preflight.py`: a decisão sobre a saída do `perf`,
+a montagem da tabela — inclusive o passo que **não** rodou, porque uma capacidade
+que ninguém provou não pode sair do relatório como silêncio — e a escolha da AMI
+pela arquitetura do tipo pedido, que é onde o `x86_64` do `experiment.toml` e o
+`amd64` do arquivo de infra se encontram. O laço e os dois `docker run` são
+escritos direto (ADR-0022).
+
+**O primeiro preflight real é a hora de capturar os payloads da AWS CLI.** As
+fixtures do adaptador em `conftest.py` — `run-instances`, `describe-instances`,
+`list-objects-v2`, `get-parameter`, `get-caller-identity` — são escritas à mão no
+formato documentado, e a ADR-0022 pede a âncora real. Rodando o preflight, o
+pesquisador captura a saída de cada um desses comandos (`aws ec2 run-instances`,
+`aws ec2 describe-instances`, `aws s3api list-objects-v2`, `aws ssm get-parameter`
+— **sem** o valor, que é a chave privada —, `aws sts get-caller-identity`) e
+substitui os payloads da factory pelos capturados. É passo manual do pesquisador,
+fora do ticket que escreveu o subcomando.
 
 ### O `--copy-props` do `s3 sync`
 

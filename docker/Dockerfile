@@ -123,9 +123,8 @@ RUN git clone --depth 1 --branch "${VMAF_VERSION}" https://github.com/Netflix/vm
 # explícito porque o `libvmaf.pc` do upstream não a declara, e o configure falha
 # com "libvmaf not found", que aponta para o lugar errado.
 #
-# `--disable-filter=ciescope`: apagar esta linha derruba o build no Graviton 3 e
-# em nenhuma outra máquina — o ICE do GCC 13 só existe quando o `-march=native`
-# habilita SVE, e quem conferir num Mac ARM vai ver passar. ADR-0008.
+# `--disable-filter=ciescope`: apagá-la derruba o build no Graviton 3 e só nele,
+# então uma conferência no Mac passa verde. ADR-0008.
 ARG FFMPEG_VERSION=n8.1.2
 WORKDIR /tmp/ffmpeg
 RUN git clone --depth 1 --branch "${FFMPEG_VERSION}" https://github.com/FFmpeg/FFmpeg.git . \

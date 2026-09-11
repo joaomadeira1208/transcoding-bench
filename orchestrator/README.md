@@ -151,7 +151,15 @@ sobreviver (ADR-0018). Ele leva `ConnectTimeout` e keep-alive de servidor porque
 um `ssh` contra um security group que dropa pacotes pendura indefinidamente, e
 enquanto ele pendura o argumento `timeout` do laço de espera é mentira; o probe
 do `cloud-init` acrescenta a isso um teto de tempo na própria chamada, por estar
-dentro do laço. A chave é a que o bootstrap da instância do Orquestrador
+dentro do laço.
+
+O keep-alive cobre a rede que morre, e não o comando remoto que trava com a
+conexão viva: o `prepare.sh` baixa 7,4 GB de fonte externa com `curl` sem
+`--max-time`, e um download que estola é indistinguível das ~2 h de silêncio do
+caso normal. Por isso a chamada da preparação também leva um `timeout` próprio,
+generoso o bastante para não cortar uma corrida lenta — o que ele compra é a
+falha cair no `except` e a instância ser terminada sozinha, em vez de ficar
+faturando até alguém reparar. A chave é a que o bootstrap da instância do Orquestrador
 grava em `~/.ssh` a partir do SSM (ADR-0016): o caminho é constante do módulo e
 argumento default, e tem de casar com o nome que aquele bootstrap escreve.
 
@@ -253,7 +261,9 @@ leva cerca de duas horas:
    falha do lançamento, não paciência;
 4. dispara por SSH **bloqueante** o `docker run` da preparação, com o plano JSON
    no argv: o papel `masters` não tem `GetObject` (ADR-0016), então o plano não
-   pode chegar pelo S3;
+   pode chegar pelo S3. O arquivo de versões não vai no argv — quem o nomeia é o
+   `ENV VERSIONS_FILE` da imagem, como no `run_scenario.sh`, e repeti-lo aqui
+   faria mexer no `Dockerfile` quebrar a preparação;
 5. `s3 sync` de `masters/` da campanha para o do piloto, lista os dois prefixos e
    compara nome e tamanho por função pura — divergência é erro;
 6. baixa o `manifest.json` da campanha **para o lado do arquivo de infra**

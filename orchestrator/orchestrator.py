@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""CLI do Orquestrador: um subcomando por passo da campanha (ADR-0010).
-
-    python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
-
-Roda na instância do Orquestrador, dentro de `tmux`: os subcomandos bloqueiam por
-horas, e a sessão SSH que cair não pode levar a campanha junto.
-"""
+"""CLI do Orquestrador: um subcomando por passo da campanha — ver `orchestrator/README.md`."""
 
 from __future__ import annotations
 
@@ -73,6 +67,10 @@ READY_TIMEOUT_SECONDS = 600.0
 # O bootstrap dos papéis de medição termina no `docker build`, que compila o
 # FFmpeg da ADR-0008 (10 a 20 min, ADR-0013).
 BOOTSTRAP_TIMEOUT_SECONDS = 3600.0
+
+# Sem teto, o `curl` do `prepare.sh` que estola pendura o CLI para sempre, com a
+# instância faturando e indistinguível das ~2 h de silêncio do caso normal.
+PREPARE_TIMEOUT_SECONDS = 10800.0
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -201,6 +199,7 @@ def _drive_preparation(
             repo_dir=REMOTE_REPO_DIR,
             work_dir=REMOTE_WORK_DIR,
         ),
+        timeout=PREPARE_TIMEOUT_SECONDS,
     )
 
     _report(f"espelhando {MASTERS_PREFIX} de {campaign} em {pilot}")
@@ -257,7 +256,6 @@ def _lines(headline: str, details: Sequence[str]) -> str:
 
 
 def _report(message: str) -> None:
-    """O progresso, com hora: o passo dura horas e o pesquisador o lê de dentro do tmux."""
     print(f"{datetime.now(UTC):%H:%M:%S} {PROG}: {message}", file=sys.stderr)
 
 

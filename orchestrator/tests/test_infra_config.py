@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from conftest import make_infra
+from conftest import ABSENT, make_infra
 from infra_config import InfraError, parse_infra
 
 SECTIONS = ("security_groups", "instance_profiles", "amis", "buckets")
@@ -75,10 +75,7 @@ class TestMissingFields:
         ],
     )
     def test_a_missing_top_level_key_is_rejected_naming_it(self, key):
-        payload = make_infra()
-        del payload[key]
-
-        assert key in message(payload)
+        assert key in message(make_infra(**{key: ABSENT}))
 
     @pytest.mark.parametrize(("section", "field"), NESTED_FIELDS)
     def test_a_missing_nested_key_is_rejected_naming_it(self, section, field):

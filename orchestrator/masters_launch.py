@@ -17,10 +17,6 @@ WORK_MOUNT = "/work"
 
 PREPARE_SCRIPT = f"{SCRIPTS_MOUNT}/prepare.sh"
 
-# O `ENV VERSIONS_FILE` do `docker/Dockerfile`, que é onde a imagem grava as
-# versões que o manifesto carrega verbatim.
-IMAGE_VERSIONS_FILE = "/opt/transcoding-bench/versions.json"
-
 
 def prepare_masters_command(
     *,
@@ -48,8 +44,6 @@ def prepare_masters_command(
         bucket,
         "--work-dir",
         WORK_MOUNT,
-        "--versions-file",
-        IMAGE_VERSIONS_FILE,
     ]
 
 

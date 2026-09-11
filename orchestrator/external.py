@@ -154,12 +154,7 @@ def describe_instances(instance_ids: Sequence[str]) -> list[DescribedInstance]:
 
 
 def described_instance(instance_id: str) -> DescribedInstance | None:
-    """O estado de uma instância, ou `None` enquanto o `describe` ainda não a vê.
-
-    O id que o `run-instances` acabou de devolver leva alguns segundos para
-    aparecer, e a CLI o recusa com `InvalidInstanceID.NotFound` nesse intervalo —
-    sem esta tradução, o primeiro poll do laço de espera mataria o passo.
-    """
+    """O estado de uma instância, ou `None` enquanto o `describe` ainda não a vê."""
     try:
         described = describe_instances([instance_id])
     except ExternalCommandError as error:

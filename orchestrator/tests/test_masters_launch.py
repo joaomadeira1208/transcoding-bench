@@ -10,7 +10,6 @@ import json
 
 from command_output import S3Object
 from masters_launch import (
-    IMAGE_VERSIONS_FILE,
     SCRIPTS_MOUNT,
     WORK_MOUNT,
     mirror_differences,
@@ -70,9 +69,6 @@ class TestWhereTheCommandRuns:
 
         assert f"{WORK_DIR}:{WORK_MOUNT}" in mounts(argv)
         assert value_after(argv, "--work-dir") == WORK_MOUNT
-
-    def test_the_versions_file_is_the_one_the_image_wrote(self):
-        assert value_after(command(), "--versions-file") == IMAGE_VERSIONS_FILE
 
     def test_the_container_does_not_survive_the_run(self):
         assert "--rm" in command()

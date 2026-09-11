@@ -122,6 +122,8 @@ RUN git clone --depth 1 --branch "${VMAF_VERSION}" https://github.com/Netflix/vm
 # transitivas que o `Libs.private` de cada `.pc` declara. O `-lstdc++` ainda vai
 # explícito porque o `libvmaf.pc` do upstream não a declara, e o configure falha
 # com "libvmaf not found", que aponta para o lugar errado.
+#
+# `--disable-filter=ciescope`: apagá-la derruba o build no Graviton 3. ADR-0008.
 ARG FFMPEG_VERSION=n8.1.2
 WORKDIR /tmp/ffmpeg
 RUN git clone --depth 1 --branch "${FFMPEG_VERSION}" https://github.com/FFmpeg/FFmpeg.git . \
@@ -138,6 +140,7 @@ RUN git clone --depth 1 --branch "${FFMPEG_VERSION}" https://github.com/FFmpeg/F
     --enable-libvmaf \
     --disable-shared \
     --enable-static \
+    --disable-filter=ciescope \
     --disable-doc \
     --disable-debug \
   && make -j"$(nproc)" \

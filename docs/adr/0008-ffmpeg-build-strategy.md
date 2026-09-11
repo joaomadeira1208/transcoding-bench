@@ -13,7 +13,11 @@ O `./configure` do FFmpeg passa `--disable-filter=ciescope`. O binário que o ex
 
 Compilando `libavfilter/vf_ciescope.c`, o GCC 13 aborta com um internal compiler error no passo de vetorização (`vectorizable_live_operation`, `tree-vect-loop.cc:9875`). O erro derruba o `docker build` inteiro, e com ele a preparação dos Masters e toda a medição em ARM.
 
-A condição que o destrava é **SVE**, e não arm64. O mesmo Dockerfile, com a mesma imagem base pinada — portanto o mesmo GCC —, compila sem erro num Apple M1, onde `-march=native` não habilita SVE; falha no Graviton 3 (Neoverse V1), onde habilita. Isto corrige, de passagem, uma imprecisão do texto acima: o SIMD path nativo do Graviton 3 não é só NEON, é NEON **e SVE**, e é o segundo que expõe o bug. x264, x265, SVT-AV1 e VMAF compilam inteiros sob as mesmas flags — o problema é um laço de um arquivo do FFmpeg.
+**O que foi observado**, e é o que sustenta a decisão: o mesmo Dockerfile, com a mesma imagem base pinada — portanto o mesmo GCC —, compila sem erro num Apple M1 e falha duas vezes no Graviton 3 (Neoverse V1). x264, x265, SVT-AV1 e VMAF compilam inteiros sob as mesmas flags nas duas máquinas; o que quebra é um laço de um arquivo do FFmpeg.
+
+**O que é inferência, e fica registrada como tal:** a diferença de ISA entre as duas máquinas é o SVE, que o `-march=native` habilita no Graviton 3 e não no M1, e essa é a explicação mais provável. Não foi isolada — um build no Graviton 3 com o SVE explicitamente desligado fecharia a questão e não foi feito. De passagem, isto qualifica o texto acima: o SIMD path nativo do Graviton 3 não é só NEON, é NEON **e SVE**.
+
+**O que não foi testado:** o build em x86. Ele nunca rodou, nem em CI nem localmente, e o ICE é em `tree-vect-loop.cc` — o vetorizador *target-independent* do GCC, não o backend aarch64. A arquitetura decide se o compilador tenta a vetorização que dispara o bug, não se o bug existe; nada garante que o AVX-512 não abra a mesma porta. A primeira medição em `c7i`/`c7a` é que vai responder.
 
 `ciescope` é um filtro de visualização de colorimetria. Nenhum Cenário o invoca: o que o experimento usa são os três encoders, o `scale` e o `libvmaf`. Desligá-lo não altera nenhum caminho de código medido.
 

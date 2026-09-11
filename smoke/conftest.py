@@ -22,6 +22,7 @@ FETCH_MASTERS = REPO_ROOT / "encode" / "fetch_masters.sh"
 GENERATE_SCENARIOS = REPO_ROOT / "orchestrator" / "generate_scenarios.py"
 GENERATE_MASTERS_PLAN = REPO_ROOT / "orchestrator" / "generate_masters_plan.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
+VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 META_CHECK_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
@@ -132,6 +133,7 @@ class Fetch(ShimTrail):
     """O que uma invocação do `fetch_masters.sh` deixou para trás."""
 
     manifest: dict[str, Any]
+    manifest_path: Path
     returncode: int
     stdout: str
     stderr: str
@@ -440,6 +442,7 @@ def fetch_masters(
         )
         return Fetch(
             manifest=masters_manifest,
+            manifest_path=manifest_path,
             returncode=result.returncode,
             stdout=result.stdout,
             stderr=result.stderr,
@@ -520,6 +523,22 @@ def validate_with_cli(meta_path: Path) -> subprocess.CompletedProcess[str]:
     """A CLI de validação do `analysis/`, invocada como caixa-preta."""
     return subprocess.run(
         [sys.executable, str(VALIDATE_META), str(meta_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def validate_manifest_with_cli(manifest_path: Path) -> subprocess.CompletedProcess[str]:
+    """A CLI do contrato do manifesto, do `orchestrator/`, invocada como caixa-preta."""
+    return subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATE_MANIFEST),
+            str(manifest_path),
+            "--config",
+            str(EXPERIMENT_TOML),
+        ],
         capture_output=True,
         text=True,
         check=False,

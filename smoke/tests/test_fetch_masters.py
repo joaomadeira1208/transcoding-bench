@@ -1,17 +1,18 @@
 # Smoke do `encode/fetch_masters.sh`: o download dos Masters e a guarda contra
 # Master corrompido, com o shim do `aws` no sentido bucket → disco (ADR-0022).
-#
-# A asserção central é a do argv, como nos outros dois módulos, e aqui ela tem um
-# segundo dono: o papel do encode não tem `ListBucket` na matriz da ADR-0016, de
-# modo que o manifesto **é** a lista e um `s3 cp` por objeto é a única forma que
-# a credencial da Instância autoriza.
 
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
-from conftest import BUCKET, MASTERS_PREFIX, Fetch, master_bytes
+from conftest import (
+    BUCKET,
+    MASTERS_PREFIX,
+    Fetch,
+    master_bytes,
+    validate_manifest_with_cli,
+)
 
 
 def names(manifest: dict[str, Any]) -> list[str]:
@@ -32,6 +33,13 @@ def corrupt_master(masters_manifest: dict[str, Any]) -> str:
 @pytest.fixture(scope="session")
 def fetched_with_a_corrupt_master(fetch_masters, corrupt_master: str) -> Fetch:
     return fetch_masters(corrupt=corrupt_master)
+
+
+class TestTheManifest:
+    def test_the_contract_of_the_orchestrator_accepts_it(self, fetched):
+        result = validate_manifest_with_cli(fetched.manifest_path)
+
+        assert result.returncode == 0, result.stderr
 
 
 class TestDownload:

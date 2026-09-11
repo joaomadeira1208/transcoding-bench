@@ -19,11 +19,12 @@ ROLE_ROOT = Path(__file__).resolve().parent
 
 RUN_SCENARIO = REPO_ROOT / "encode" / "run_scenario.sh"
 RUN_ALL = REPO_ROOT / "encode" / "run_all.sh"
+FETCH_MASTERS = REPO_ROOT / "encode" / "fetch_masters.sh"
 PREPARE_MASTERS = REPO_ROOT / "masters" / "prepare.sh"
 GENERATE_SCENARIOS = REPO_ROOT / "orchestrator" / "generate_scenarios.py"
 GENERATE_MASTERS_PLAN = REPO_ROOT / "orchestrator" / "generate_masters_plan.py"
-VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
+VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 META_CHECK_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
@@ -33,6 +34,8 @@ COMMIT = "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900"
 INSTANCE_ID = "i-0123456789abcdef0"
 INSTANCE_TYPE = "c7g.xlarge"
 BUCKET = "smoke-bucket"
+MASTERS_PREFIX = "masters/"
+MANIFEST_SCHEMA_VERSION = "1"
 
 VERSIONS = {
     "base_image": "ubuntu:24.04@sha256:33ceb719",
@@ -48,6 +51,15 @@ VERSIONS = {
 # vídeo: como o `ffmpeg` é shimado ninguém decodifica isto, e gerá-lo de
 # verdade custaria uma dependência de binário no CI.
 PLACEHOLDER_BYTES = bytes(range(256)) * 16
+
+
+def master_bytes(name: str) -> bytes:
+    """O placeholder daquele Master.
+
+    O nome entra no conteúdo: com seis placeholders idênticos, um `s3 cp` que
+    trouxesse o Master errado casaria o sha256 do manifesto assim mesmo.
+    """
+    return PLACEHOLDER_BYTES + name.encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -136,6 +148,21 @@ class Loop(ShimTrail):
         return [Path(argv[-1]).parent.name for argv in self.argv("ffmpeg") if argv[-1] != "-"]
 
 
+@dataclass(frozen=True)
+class Fetch(ShimTrail):
+    """O que uma invocação do `fetch_masters.sh` deixou para trás."""
+
+    manifest: dict[str, Any]
+    manifest_path: Path
+    returncode: int
+    stdout: str
+    stderr: str
+    dest: Path
+
+    def downloaded(self) -> set[str]:
+        return {path.name for path in self.dest.iterdir()}
+
+
 def _load_config(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         return tomllib.load(handle)
@@ -210,6 +237,42 @@ def masters_dir(
     for name in named:
         (masters / name).write_bytes(PLACEHOLDER_BYTES)
     return masters
+
+
+def _generate_masters_plan() -> dict[str, Any]:
+    """O plano dos Masters da campanha, pelo CLI do orquestrador como caixa-preta."""
+    result = subprocess.run(
+        [sys.executable, str(GENERATE_MASTERS_PLAN), "--config", str(EXPERIMENT_TOML)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.fixture(scope="session")
+def masters_manifest() -> dict[str, Any]:
+    """O manifesto que a preparação escreveria, montado aqui sobre os placeholders.
+
+    O plano sai do CLI, e não de uma lista transcrita: o que o bash tira do
+    manifesto são o nome e o sha256 de cada objeto, e os nomes têm de ser os que
+    a preparação materializa.
+    """
+    plan = _generate_masters_plan()
+    return {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "versions": VERSIONS,
+        "sources": {video["video"]: video["source"] for video in plan["videos"]},
+        "masters": [
+            {
+                **master,
+                "size": len(master_bytes(master["name"])),
+                "sha256": hashlib.sha256(master_bytes(master["name"])).hexdigest(),
+            }
+            for video in plan["videos"]
+            for master in (video["master"], *video["derived"])
+        ],
+    }
 
 
 @pytest.fixture(scope="session")
@@ -353,6 +416,62 @@ def run_all(
         )
 
     return _run_all
+
+
+@pytest.fixture(scope="session")
+def fetch_masters(
+    tmp_path_factory: pytest.TempPathFactory,
+    shim_bin: Path,
+    masters_manifest: dict[str, Any],
+):
+    """Roda o `fetch_masters.sh` de verdade sobre um bucket falso semeado com um
+    placeholder por Master do manifesto; `corrupt` troca um byte no objeto
+    daquele Master, do lado do bucket."""
+
+    def _fetch_masters(*, corrupt: str | None = None, **shim_env: str) -> Fetch:
+        workdir = tmp_path_factory.mktemp("fetch")
+        env = shim_environment(shim_bin, workdir, shim_env)
+        prefix_dir = Path(env["SMOKE_S3_ROOT"]) / BUCKET / MASTERS_PREFIX
+        prefix_dir.mkdir(parents=True)
+        for master in masters_manifest["masters"]:
+            payload = bytearray(master_bytes(master["name"]))
+            if master["name"] == corrupt:
+                payload[0] ^= 0xFF
+            (prefix_dir / master["name"]).write_bytes(payload)
+
+        manifest_path = workdir / "manifest.json"
+        manifest_path.write_text(json.dumps(masters_manifest), encoding="utf-8")
+        dest = workdir / "masters"
+        result = subprocess.run(
+            [
+                "bash",
+                str(FETCH_MASTERS),
+                "--manifest",
+                str(manifest_path),
+                "--bucket",
+                BUCKET,
+                "--prefix",
+                MASTERS_PREFIX,
+                "--dest",
+                str(dest),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return Fetch(
+            manifest=masters_manifest,
+            manifest_path=manifest_path,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            dest=dest,
+            argv_dir=Path(env["SMOKE_ARGV_DIR"]),
+            s3_root=Path(env["SMOKE_S3_ROOT"]),
+        )
+
+    return _fetch_masters
 
 
 @pytest.fixture(scope="session")
@@ -594,7 +713,13 @@ def validate_with_cli(meta_path: Path) -> subprocess.CompletedProcess[str]:
 def validate_manifest_with_cli(
     manifest_path: Path, config: Path
 ) -> subprocess.CompletedProcess[str]:
-    """A CLI do contrato do manifesto, do orquestrador, invocada como caixa-preta."""
+    """A CLI do contrato do manifesto, do `orchestrator/`, invocada como caixa-preta.
+
+    O config é do chamador: o `test_fetch_masters.py` confere um manifesto montado
+    sobre o `config/experiment.toml`, e o `test_prepare_masters.py`, um que o bash
+    escreveu a partir do TOML remendado com o sha256 do placeholder. Fixar um dos
+    dois aqui deixaria o outro conferindo contra a spec errada.
+    """
     return subprocess.run(
         [sys.executable, str(VALIDATE_MANIFEST), str(manifest_path), "--config", str(config)],
         capture_output=True,

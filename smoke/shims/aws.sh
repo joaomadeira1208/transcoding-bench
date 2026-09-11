@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Shim da AWS CLI: `s3://<bucket>/<key>` é `$SMOKE_S3_ROOT/<bucket>/<key>`.
+# Shim da AWS CLI: `s3://<bucket>/<key>` é `$SMOKE_S3_ROOT/<bucket>/<key>`, nos
+# dois sentidos do `s3 cp`.
 
 set -euo pipefail
 
@@ -48,6 +49,17 @@ s3_cp() {
     shift
   done
   [[ -n $source && -n $destination ]] || fail "s3 cp exige origem e destino"
+
+  if [[ $source == s3://* ]]; then
+    [[ -z $recursive ]] || fail "s3 cp --recursive de bucket para disco não é shimado"
+    source=$(object_path "$source")
+    [[ -f $source ]] || fail "objeto inexistente: $source"
+    mkdir -p "$(dirname "$destination")"
+    cp "$source" "$destination"
+    printf 'download: %s to %s\n' "$source" "$destination"
+    return
+  fi
+
   destination=$(object_path "$destination")
 
   if [[ -n $recursive ]]; then

@@ -15,8 +15,10 @@ registro ofensor.
 Cada `[[video]]` declara também o que a preparação e a validação dos Masters vão
 copiar: `frame_rate`, `frames` e uma sub-tabela `source` com `url`, `file`,
 `size` e `sha256`. Os valores são os da emenda da ADR-0004 — os dois arquivos 4K
-que o `download.blender.org` publica, inspecionados com o `ffprobe` da imagem de
-medição (ADR-0018) —, e o `size` e o `sha256` são os do arquivo **descomprimido**,
+da Blender, inspecionados com o `ffprobe` da imagem de medição (ADR-0018) —, e a
+`url` aponta para um espelho, e não para o `download.blender.org`, que recusa a
+faixa de IP da EC2: quem manda no que é baixado é o `sha256`, e a ADR-0004
+registra a verificação que autorizou a troca de host. O `size` e o `sha256` são os do arquivo **descomprimido**,
 não os do `.zip` que a URL entrega, porque é depois do `unzip` que o bootstrap
 confere o master. O `frame_rate` é a racional que o `ffprobe` reporta (`30/1`,
 `24/1`) e é declarado como string: um número não exprime `24000/1001` e chegaria

@@ -85,14 +85,14 @@ EXPECTED_SOURCES = {
     "bbb": {
         "file": "bbb_sunflower_2160p_30fps_normal.mp4",
         "url": (
-            "https://download.blender.org/demo/movies/BBB/bbb_sunflower_2160p_30fps_normal.mp4.zip"
+            "https://ftp.nluug.nl/pub/graphics/blender/demo/movies/BBB/bbb_sunflower_2160p_30fps_normal.mp4.zip"
         ),
         "size": 633016449,
         "sha256": "37f0ff251a606c2dcfa26c19fe6bf843234b4e7a8889cfab50bc26f644e55520",
     },
     "tos": {
         "file": "tearsofsteel_4k.mov",
-        "url": "https://download.blender.org/demo/movies/ToS/tearsofsteel_4k.mov.zip",
+        "url": "https://ftp.nluug.nl/pub/graphics/blender/demo/movies/ToS/tearsofsteel_4k.mov.zip",
         "size": 6737592810,
         "sha256": "89b7fd21c7729b7d5071af993939997f847b5af06613a3388ba158dae9e52ab3",
     },

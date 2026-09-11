@@ -45,5 +45,4 @@ rm -rf "$AWS_INSTALLER_DIR" "$AWS_INSTALLER_ZIP"
 
 mkdir -p "$work_dir"
 
-sudo usermod -aG docker "$(id -un)"
 sudo docker build -t "$IMAGE_TAG" "$repo_dir/docker"

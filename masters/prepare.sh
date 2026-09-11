@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-#
-# O bash copia, nunca deriva (ADR-0019): nome, geometria, codec, cadência e
-# contagem de frames de cada Master chegam no plano, e o que este script faz é
-# materializá-los e conferir o que o `ffprobe` encontrou contra eles.
 
 set -euo pipefail
 
@@ -47,6 +43,14 @@ plan_field() {
     <<<"$1"
 }
 
+file_size() {
+  wc -c <"$1" | tr -d ' '
+}
+
+file_sha256() {
+  sha256sum "$1" | cut -d' ' -f1
+}
+
 prepare_source() {
   local video=$1 slug source url file expected archive path digest size
   slug=$(plan_field "$video" video)
@@ -62,11 +66,11 @@ prepare_source() {
   "$UNZIP_COMMAND" -q -o -j "$archive" -d "$sources_dir"
   [[ -r $path ]] || source_error "$slug: o unzip de $url não produziu $file"
 
-  digest=$(sha256sum "$path" | cut -d' ' -f1)
+  digest=$(file_sha256 "$path")
   if [[ $digest != "$expected" ]]; then
     source_error "$slug: o sha256 de $file diverge do plano: esperado $expected, observado $digest"
   fi
-  size=$(wc -c <"$path" | tr -d ' ')
+  size=$(file_size "$path")
 
   jq -cn \
     --arg slug "$slug" \
@@ -79,10 +83,8 @@ prepare_source() {
 }
 
 remux_master() {
-  local video=$1 source file name
-  source=$(jq -c '.source' <<<"$video")
-  file=$(plan_field "$source" file)
-  name=$(plan_field "$(jq -c '.master' <<<"$video")" name)
+  local video=$1 name=$2 file
+  file=$(plan_field "$(jq -c '.source' <<<"$video")" file)
 
   "$FFMPEG_COMMAND" -nostdin -y \
     -i "$sources_dir/$file" \
@@ -121,15 +123,15 @@ probe_master() {
       }' <<<"$probe")
 
   for field in "${PROBED_FIELDS[@]}"; do
-    seen=$(plan_field "$observed" "$field")
+    seen=$(jq -r --arg name "$field" '.[$name]' <<<"$observed")
     want=$(plan_field "$master" "$field")
     if [[ $seen != "$want" ]]; then
       master_error "$name: o ffprobe diverge do plano em $field: esperado $want, observado $seen"
     fi
   done
 
-  size=$(wc -c <"$masters_dir/$name" | tr -d ' ')
-  digest=$(sha256sum "$masters_dir/$name" | cut -d' ' -f1)
+  size=$(file_size "$masters_dir/$name")
+  digest=$(file_sha256 "$masters_dir/$name")
 
   jq -cn \
     --argjson master "$master" \
@@ -194,10 +196,11 @@ masters_ndjson=$work_dir/masters.ndjson
 video_count=$(jq '.videos | length' <<<"$plan")
 for ((v = 0; v < video_count; v++)); do
   video=$(jq -c ".videos[$v]" <<<"$plan")
-  prepare_source "$video"
-  remux_master "$video"
-
   remuxed=$(plan_field "$(jq -c '.master' <<<"$video")" name)
+
+  prepare_source "$video"
+  remux_master "$video" "$remuxed"
+
   derived_count=$(jq '.derived | length' <<<"$video")
   for ((d = 0; d < derived_count; d++)); do
     derive_master "$(jq -c ".derived[$d]" <<<"$video")" "$remuxed"

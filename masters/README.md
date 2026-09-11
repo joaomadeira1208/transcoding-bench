@@ -19,11 +19,13 @@ Docker, AWS CLI v2, work dir e o `docker build` da imagem de medição.
 `perf` e sem `perf_event_paranoid`, que o bootstrap do encode instala e ajusta:
 aqui não se mede nada — a instância baixa, remuxa, escala e sobe, e o contador de
 PMU não entra em nada disso. O bootstrap **para no build**; quem dá o
-`docker run` é o `prepare-masters` do Orquestrador, por SSH bloqueante.
+`docker run` é o `prepare-masters` do Orquestrador, por SSH bloqueante. O `ubuntu`
+não entra no grupo `docker`: são dois comandos na vida da instância, os dois com
+`sudo`, e um grupo novo só valeria a partir da sessão seguinte.
 
 ## Container: `prepare.sh`
 
-    docker run --rm \
+    sudo docker run --rm \
         -v <clone>/masters:/masters:ro -v ~/work:/work \
         transcoding-bench \
         bash /masters/prepare.sh \

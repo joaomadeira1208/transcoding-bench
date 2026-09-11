@@ -44,9 +44,10 @@ VERSIONS = {
     "aws_cli": "2.36.38",
 }
 
-# Nunca um vídeo: como o `ffmpeg` é shimado ninguém decodifica isto, e gerá-lo de
+# O que faz as vezes de um Master no disco e de um source baixado. Nunca um
+# vídeo: como o `ffmpeg` é shimado ninguém decodifica isto, e gerá-lo de
 # verdade custaria uma dependência de binário no CI.
-MASTER_BYTES = bytes(range(256)) * 16
+PLACEHOLDER_BYTES = bytes(range(256)) * 16
 
 
 @dataclass(frozen=True)
@@ -207,7 +208,7 @@ def masters_dir(
         for run in block["runs"]
     }
     for name in named:
-        (masters / name).write_bytes(MASTER_BYTES)
+        (masters / name).write_bytes(PLACEHOLDER_BYTES)
     return masters
 
 
@@ -365,16 +366,28 @@ def loop(plan: dict[str, Any], block: dict[str, Any], run_all) -> Loop:
     return run_all(plan, [block])
 
 
-SOURCE_SHA256 = hashlib.sha256(MASTER_BYTES).hexdigest()
-SOURCE_SIZE = len(MASTER_BYTES)
+SOURCE_SHA256 = hashlib.sha256(PLACEHOLDER_BYTES).hexdigest()
+SOURCE_SIZE = len(PLACEHOLDER_BYTES)
 
 
 @pytest.fixture(scope="session")
 def masters_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """O arquivo que o shim do `curl` entrega no lugar dos GB de cada fonte."""
     path = tmp_path_factory.mktemp("source") / "source.bin"
-    path.write_bytes(MASTER_BYTES)
+    path.write_bytes(PLACEHOLDER_BYTES)
     return path
+
+
+def _substitute_once_per_video(text: str, pattern: str, replacement: str) -> str:
+    """Uma linha por `[video.source]`, e a contagem é a asserção.
+
+    Hoje `sha256` e `size` só aparecem lá. Um campo homônimo em outro registro
+    — um sha256 por Master, digamos — passaria a ser reescrito junto, e o
+    manifesto seria conferido contra um TOML adulterado sem que nada avisasse.
+    """
+    patched, count = re.subn(pattern, replacement, text, flags=re.MULTILINE)
+    assert count == len(EXPERIMENT["video"]), pattern
+    return patched
 
 
 @pytest.fixture(scope="session")
@@ -386,9 +399,12 @@ def masters_toml(tmp_path_factory: pytest.TempPathFactory) -> Path:
     cadência, os frames — sendo o do repositório: é contra este TOML que a CLI do
     checker confere o manifesto que o bash escreveu.
     """
-    text = EXPERIMENT_TOML.read_text(encoding="utf-8")
-    text = re.sub(r'^sha256 = ".*"$', f'sha256 = "{SOURCE_SHA256}"', text, flags=re.MULTILINE)
-    text = re.sub(r"^size = \d+$", f"size = {SOURCE_SIZE}", text, flags=re.MULTILINE)
+    text = _substitute_once_per_video(
+        EXPERIMENT_TOML.read_text(encoding="utf-8"),
+        r'^sha256 = ".*"$',
+        f'sha256 = "{SOURCE_SHA256}"',
+    )
+    text = _substitute_once_per_video(text, r"^size = \d+$", f"size = {SOURCE_SIZE}")
     path = tmp_path_factory.mktemp("masters-config") / "experiment.toml"
     path.write_text(text, encoding="utf-8")
     return path

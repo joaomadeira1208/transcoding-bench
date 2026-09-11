@@ -1,11 +1,11 @@
-# Smoke do `masters/prepare.sh`: o script de verdade, dirigido no Mac com `curl`,
-# `unzip`, `ffmpeg`, `ffprobe` e `aws` shimados, sem Docker, sem AWS e sem FFmpeg
-# (ADR-0022).
+# Smoke do `masters/prepare.sh`: a preparação dos seis Masters de verdade, do
+# download ao manifesto, com os shims do `curl`, do `unzip` e do `ffprobe` ao
+# lado dos do encode (ADR-0022).
 #
-# A asserção central é a mesma do `run_scenario.sh` — a cadeia `experiment.toml` →
-# gerador → plano → `jq` → argv —, e aqui ela guarda o passo que roda uma vez e
-# cujo erro é o mais caro do projeto: um Master com a geometria errada vira seis
-# Execuções medidas sobre a entrada errada.
+# A asserção central é a mesma do `run_scenario.sh` — a cadeia `experiment.toml`
+# → gerador → plano → `jq` → argv —, e aqui ela guarda o passo que roda uma vez
+# e cujo erro é o mais caro do projeto: um Master com a geometria errada vira
+# seis Execuções medidas sobre a entrada errada, e ninguém olha os pixels.
 
 from __future__ import annotations
 

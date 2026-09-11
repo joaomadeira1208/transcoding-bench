@@ -1,0 +1,83 @@
+{
+  "Contents": [
+    {
+      "Key": "masters/bbb_1080p.mkv",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"00000000000000000000000000000000-1579\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 13241706380,
+      "StorageClass": "STANDARD"
+    },
+    {
+      "Key": "masters/bbb_2160p.mkv",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"11111111111111111111111111111111-74\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 620384134,
+      "StorageClass": "STANDARD"
+    },
+    {
+      "Key": "masters/bbb_720p.mkv",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"22222222222222222222222222222222-833\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 6984307360,
+      "StorageClass": "STANDARD"
+    },
+    {
+      "Key": "masters/manifest.json",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"33333333333333333333333333333333\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 3018,
+      "StorageClass": "STANDARD"
+    },
+    {
+      "Key": "masters/tos_1080p.mkv",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"44444444444444444444444444444444-1339\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 11227902753,
+      "StorageClass": "STANDARD"
+    },
+    {
+      "Key": "masters/tos_2160p.mkv",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"55555555555555555555555555555555-804\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 6737353071,
+      "StorageClass": "STANDARD"
+    },
+    {
+      "Key": "masters/tos_720p.mkv",
+      "LastModified": "2026-09-07T12:00:00+00:00",
+      "ETag": "\"66666666666666666666666666666666-665\"",
+      "ChecksumAlgorithm": [
+        "CRC64NVME"
+      ],
+      "ChecksumType": "FULL_OBJECT",
+      "Size": 5577834076,
+      "StorageClass": "STANDARD"
+    }
+  ],
+  "RequestCharged": null,
+  "Prefix": "masters/"
+}

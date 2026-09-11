@@ -20,6 +20,7 @@ from command_output import (
 )
 from conftest import (
     CALLER_ARN,
+    captured,
     make_caller_identity_payload,
     make_describe_payload,
     make_described_instance,
@@ -89,7 +90,7 @@ class TestDescribeInstances:
         payload = make_describe_payload(
             [
                 make_described_instance(
-                    state="running", public_ip="54.210.1.2", private_ip="10.0.1.42"
+                    state="running", public_ip="203.0.113.2", private_ip="10.0.1.42"
                 )
             ]
         )
@@ -97,7 +98,7 @@ class TestDescribeInstances:
         (instance,) = parse_describe_instances(payload)
 
         assert instance.state == "running"
-        assert instance.public_ip == "54.210.1.2"
+        assert instance.public_ip == "203.0.113.2"
         assert instance.private_ip == "10.0.1.42"
 
     def test_running_without_private_ip(self):
@@ -136,7 +137,7 @@ class TestDescribeInstances:
         # — que deixa qualquer coisa truthy passar por "tem IP" no predicado de
         # prontidão.
         instance = make_described_instance()
-        instance["PublicIpAddress"] = ["54.210.1.2"]
+        instance["PublicIpAddress"] = ["203.0.113.2"]
 
         with pytest.raises(OutputError, match="PublicIpAddress"):
             parse_describe_instances(make_describe_payload([instance]))
@@ -290,3 +291,55 @@ class TestCloudInitStatus:
     def test_rejects_output_without_a_status_line(self):
         with pytest.raises(OutputError, match="status"):
             parse_cloud_init_status("Permission denied (publickey).\n")
+
+
+class TestCapturedPayloads:
+    """As saídas que a AWS CLI v2 emitiu de verdade — `tests/fixtures/README.md`.
+
+    Um valor aqui que não bate é a realidade divergindo do que o parser assume.
+    Editar a fixture para o teste passar apaga a única coisa que estes arquivos
+    têm e as factories não.
+    """
+
+    def test_run_instances_gives_the_launched_id(self):
+        assert parse_run_instances(captured("run-instances.json")) == "i-0123456789abcdef0"
+
+    def test_describe_running_carries_both_addresses(self):
+        (instance,) = parse_describe_instances(captured("describe-instances-running.json"))
+
+        assert instance.instance_id == "i-0123456789abcdef0"
+        assert instance.state == "running"
+        assert instance.private_ip == "10.0.1.42"
+        assert instance.public_ip == "203.0.113.2"
+
+    def test_describe_terminated_has_no_private_ip(self):
+        (instance,) = parse_describe_instances(captured("describe-instances-terminated.json"))
+
+        assert instance.state == "terminated"
+        assert instance.private_ip is None
+
+    def test_list_objects_gives_the_six_masters_and_the_manifest(self):
+        objects = parse_list_objects(captured("list-objects-v2.json"))
+
+        assert [item.key for item in objects] == [
+            "masters/bbb_1080p.mkv",
+            "masters/bbb_2160p.mkv",
+            "masters/bbb_720p.mkv",
+            "masters/manifest.json",
+            "masters/tos_1080p.mkv",
+            "masters/tos_2160p.mkv",
+            "masters/tos_720p.mkv",
+        ]
+        assert objects[3].size == 3018
+
+    def test_list_objects_of_a_prefix_that_matches_nothing(self):
+        assert parse_list_objects(captured("list-objects-v2-empty.json")) == []
+
+    def test_get_parameter_gives_the_value(self):
+        assert parse_get_parameter(captured("get-parameter.json")) == "PLACEHOLDER"
+
+    def test_caller_identity_gives_the_assumed_role_arn(self):
+        assert parse_caller_identity(captured("get-caller-identity.json")) == (
+            "arn:aws:sts::123456789012:assumed-role/transcoding-bench-orchestrator/"
+            "i-0fedcba9876543210"
+        )

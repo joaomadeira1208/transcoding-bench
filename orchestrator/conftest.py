@@ -246,8 +246,17 @@ _ABSENT = _Absent()
 ABSENT: Any = _ABSENT
 
 
-# Payloads da AWS CLI v2 escritos à mão, no formato documentado, até o primeiro
-# preflight capturar os reais (ADR-0022).
+FIXTURES = REPO_ROOT / "orchestrator" / "tests" / "fixtures"
+
+
+def captured(name: str) -> str:
+    """A saída crua de uma execução real da CLI — `tests/fixtures/README.md`."""
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+# Payloads montados em código, e não substituíveis pelos capturados de
+# `tests/fixtures/`: a API nunca devolve um lançamento sem `InstanceId` nem com
+# duas instâncias, e é isso que os parsers recusam (ADR-0022).
 
 
 def make_launched_instance(instance_id: str = "i-0123456789abcdef0") -> dict[str, Any]:
@@ -278,7 +287,7 @@ def make_run_instances_payload(*instances: dict[str, Any]) -> str:
 def make_described_instance(
     instance_id: str = "i-0123456789abcdef0",
     state: str = "running",
-    public_ip: str | None = "54.210.1.2",
+    public_ip: str | None = "203.0.113.2",
     private_ip: str | None = "10.0.1.42",
 ) -> dict[str, Any]:
     instance = {
@@ -350,7 +359,7 @@ def make_list_objects_payload(*contents: dict[str, Any], **overrides: Any) -> st
 
 def make_instance_state(
     state: str = "running",
-    public_ip: str | None = "54.210.1.2",
+    public_ip: str | None = "203.0.113.2",
     private_ip: str | None = "10.0.1.42",
 ) -> DescribedInstance:
     """O estado já parseado, que é o que o predicado de prontidão recebe."""

@@ -96,13 +96,38 @@ def a_source_that_arrived_corrupt(masters_plan, prepare) -> Preparation:
     return prepare(plan)
 
 
-@pytest.fixture(scope="session")
-def a_master_that_came_out_wrong(masters_plan, prepare) -> Preparation:
-    """O último dos seis sai com a largura errada: os cinco anteriores estão prontos."""
+# Um valor por campo do gate, no tipo em que o `ffprobe` emitiria aquele campo.
+# São os seis que o `PROBED_FIELDS` do `prepare.sh` compara: sem um caso por
+# campo, cinco deles podem sair do gate sem que teste nenhum fique vermelho.
+WRONG_PROBE_VALUES = {
+    "width": 1918,
+    "height": 570,
+    "codec_name": "rawvideo",
+    "pix_fmt": "yuv422p",
+    "frame_rate": "30/1",
+    "frames": 17615,
+}
+
+
+@pytest.fixture(scope="session", params=list(WRONG_PROBE_VALUES))
+def a_master_that_came_out_wrong(request, masters_plan, prepare) -> tuple[Preparation, str]:
+    """O último dos seis sai errado num campo: os cinco anteriores estão prontos."""
+    field = request.param
     master = masters_of(masters_plan)[-1]
-    response = probe_response(master)
-    response["streams"][0]["width"] = master["width"] + 2
-    return prepare(masters_plan, {master["name"]: response})
+    wrong = WRONG_PROBE_VALUES[field]
+
+    assert wrong != master[field], field
+
+    response = probe_response({**master, field: wrong})
+    return prepare(masters_plan, {master["name"]: response}), field
+
+
+@pytest.fixture(scope="session")
+def a_plan_missing_the_derived_masters(masters_plan, prepare) -> Preparation:
+    """Um vídeo do plano sem a lista `derived`."""
+    plan = copy.deepcopy(masters_plan)
+    del plan["videos"][-1]["derived"]
+    return prepare(plan)
 
 
 class TestPreparation:
@@ -114,6 +139,13 @@ class TestPreparation:
         per_video = ["curl", "unzip"] + ["ffmpeg"] * (1 + len(DERIVED_TIERS))
 
         assert relevant == per_video * len(EXPERIMENT["video"])
+
+    def test_only_the_extracted_sources_survive_the_download(self, preparation):
+        sources = preparation.work_dir / "sources"
+
+        assert sorted(path.name for path in sources.iterdir()) == sorted(
+            video["source"]["file"] for video in EXPERIMENT["video"]
+        )
 
     def test_nothing_is_uploaded_before_the_six_are_probed(self, preparation):
         sequence = preparation.sequence()
@@ -225,12 +257,24 @@ class TestDivergence:
     def test_a_master_that_does_not_match_the_plan_stops_naming_it_and_the_field(
         self, a_master_that_came_out_wrong, masters_plan
     ):
-        stderr = a_master_that_came_out_wrong.stderr
+        preparation, field = a_master_that_came_out_wrong
+        stderr = preparation.stderr
 
-        assert a_master_that_came_out_wrong.returncode != 0
+        assert preparation.returncode != 0
         assert masters_of(masters_plan)[-1]["name"] in stderr
-        assert "width" in stderr
+        assert field in stderr
 
     def test_not_even_the_five_that_came_out_right_are_uploaded(self, a_master_that_came_out_wrong):
-        assert "aws" not in a_master_that_came_out_wrong.sequence()
-        assert not a_master_that_came_out_wrong.bucket_dir().exists()
+        preparation, _ = a_master_that_came_out_wrong
+
+        assert "aws" not in preparation.sequence()
+        assert not preparation.bucket_dir().exists()
+
+    def test_a_plan_without_the_derived_masters_stops_before_downloading(
+        self, a_plan_missing_the_derived_masters
+    ):
+        preparation = a_plan_missing_the_derived_masters
+
+        assert preparation.returncode != 0
+        assert "plano" in preparation.stderr
+        assert not preparation.work_dir.exists()

@@ -65,6 +65,7 @@ prepare_source() {
   "$CURL_COMMAND" -fsSL "$url" -o "$archive"
   "$UNZIP_COMMAND" -q -o -j "$archive" -d "$sources_dir"
   [[ -r $path ]] || source_error "$slug: o unzip de $url não produziu $file"
+  rm "$archive"
 
   digest=$(file_sha256 "$path")
   if [[ $digest != "$expected" ]]; then
@@ -182,6 +183,9 @@ done
 [[ -r $versions_file ]] || usage_error "arquivo de versões ilegível: $versions_file"
 jq -e '.videos | type == "array" and length > 0' >/dev/null <<<"$plan" ||
   usage_error "o plano não tem a lista .videos"
+jq -e 'all(.videos[]; (.master | type == "object") and (.derived | type == "array"))' \
+  >/dev/null <<<"$plan" ||
+  usage_error "o plano tem vídeo sem .master ou sem .derived"
 
 sources_dir=$work_dir/sources
 masters_dir=$work_dir/$MASTERS_PREFIX
@@ -207,13 +211,15 @@ for ((v = 0; v < video_count; v++)); do
   done
 done
 
+planned_masters=$(jq -c '.videos[] | .master, .derived[]' <<<"$plan")
 while IFS= read -r master; do
   probe_master "$master"
-done < <(jq -c '.videos[] | .master, .derived[]' <<<"$plan")
+done <<<"$planned_masters"
 
+probed_names=$(jq -r '.name' "$masters_ndjson")
 while IFS= read -r name; do
   "$AWS_COMMAND" s3 cp "$masters_dir/$name" "s3://$bucket/$MASTERS_PREFIX/$name"
-done < <(jq -r '.name' "$masters_ndjson")
+done <<<"$probed_names"
 
 write_manifest
 "$AWS_COMMAND" s3 cp "$manifest_json" "s3://$bucket/$MASTERS_PREFIX/$MANIFEST_NAME"

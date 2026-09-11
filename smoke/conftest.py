@@ -431,8 +431,17 @@ def masters_plan(tmp_path_factory: pytest.TempPathFactory, masters_toml: Path) -
 
 
 def masters_of(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    """Os Masters do plano: por vídeo, o 4K e os seus derivados."""
-    return [master for video in plan["videos"] for master in (video["master"], *video["derived"])]
+    """Os Masters do plano: por vídeo, o 4K e os seus derivados.
+
+    O `derived` sai com default porque um dos casos é o plano que não o traz, e
+    quem tem que recusá-lo é o `prepare.sh`. Sem o default, o harness estoura
+    montando as respostas do `ffprobe` e o script nem chega a ser invocado.
+    """
+    return [
+        master
+        for video in plan["videos"]
+        for master in (video["master"], *video.get("derived", ()))
+    ]
 
 
 def probe_response(master: dict[str, Any]) -> dict[str, Any]:

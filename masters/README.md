@@ -39,7 +39,14 @@ versões vem da imagem (`VERSIONS_FILE`), como no `run_scenario.sh`.
 
 Ele **copia, nunca deriva** (ADR-0019): nome, URL, sha256, geometria, codec,
 `pix_fmt`, cadência e contagem de frames de cada Master chegam no plano, e nada é
-reconstruído do nome do arquivo nem lido do `experiment.toml`. A ordem:
+reconstruído do nome do arquivo nem lido do `experiment.toml`.
+
+O plano é conferido na entrada — `.videos` não-vazia, e todo vídeo com `.master`
+e com `.derived` —, antes de qualquer download. A checagem é de milissegundos, e
+o que ela compra é a diferença entre recusar um plano malformado de imediato e
+descobri-lo depois de horas baixando 7,4 GB e escalando seis Masters.
+
+A ordem:
 
 1. por vídeo — `curl` da URL, `unzip`, `sha256sum` contra o plano, remux do 4K
    com `-c copy` (sem re-encode) e, por tier derivado, o downscale
@@ -48,6 +55,12 @@ reconstruído do nome do arquivo nem lido do `experiment.toml`. A ordem:
    `pix_fmt`, frame rate e contagem de frames com o plano;
 3. os seis uploads, por `s3 cp` objeto a objeto;
 4. o manifesto, por último.
+
+O `.zip` de cada fonte é apagado assim que o `unzip` entregou o arquivo: são
+7,4 GB que ninguém volta a ler, e a ADR-0015 dimensiona o volume da instância de
+preparação contando os dois sources, os seis Masters — os quatro FFV1 somam 50–70
+GB — e uma folga de trabalho que é, quase exatamente, o que os dois arquivos
+ocupariam parados.
 
 As três fases são separadas porque a segunda é um **gate**: qualquer divergência
 sai não-zero nomeando o Master e o campo, e nenhum dos seis chegou ao bucket

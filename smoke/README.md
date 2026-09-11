@@ -32,7 +32,8 @@ pela união dos dois planos.
 
 **A preparação dos Masters atravessa o mesmo harness.** O `masters/prepare.sh` é
 dirigido com três shims novos — o `curl` entrega um placeholder no lugar dos GB
-de cada fonte (`SMOKE_SOURCE_FILE`), o `unzip` renomeia o que ele baixou e o
+de cada fonte (`SMOKE_SOURCE_FILE`), o `unzip` copia o que ele baixou — como o
+de verdade, que deixa o `.zip` no lugar para o `prepare.sh` apagar — e o
 `ffprobe` emite a resposta que o teste preparou para cada Master
 (`$SMOKE_PROBE_DIR/<nome>.json`) — mais o `ffmpeg` e o `aws` do encode. O plano
 sai do `generate_masters_plan.py` invocado como caixa-preta, e o argv do remux e

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 #
 # Shim do `unzip`: o arquivo baixado é o placeholder cru, então "descomprimir" é
-# renomeá-lo para dentro do diretório de destino, sem o sufixo do arquivo.
+# copiá-lo para dentro do diretório de destino, sem o sufixo do arquivo.
+#
+# Cópia e não `mv`: o unzip de verdade deixa o arquivo onde estava, e quem o
+# apaga é o `prepare.sh`. Com `mv`, aquele `rm` passaria a agir sobre um arquivo
+# que já não existe e o smoke não teria como flagrá-lo.
 
 set -euo pipefail
 
@@ -33,4 +37,4 @@ if [[ -z $archive || -z $destination ]]; then
 fi
 
 entry=$(basename "$archive")
-mv "$archive" "$destination/${entry%.zip}"
+cp "$archive" "$destination/${entry%.zip}"

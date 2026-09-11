@@ -19,6 +19,7 @@ from preflight import (
     STEPS,
     Outcome,
     PreflightError,
+    Step,
     StepResult,
     encode_target,
     failed,
@@ -134,7 +135,7 @@ class TestTheAmiOfTheRequestedType:
             encode_target(config, amis(), "c7x.xlarge")
 
 
-def passed(step: str, detail: str = "") -> StepResult:
+def passed(step: Step, detail: str = "") -> StepResult:
     return StepResult(step, Outcome.PASSED, detail)
 
 
@@ -156,12 +157,8 @@ class TestTheResultTable:
     def test_a_step_recorded_twice_is_refused(self):
         # O laço registra o passo pelo nome; dois registros do mesmo nome são um
         # passo cujo resultado foi sobrescrito por outro — e some da tabela.
-        with pytest.raises(PreflightError, match=STEPS[0]):
+        with pytest.raises(PreflightError, match=STEPS[0].value):
             summarize([passed(STEPS[0]), passed(STEPS[0])])
-
-    def test_a_step_that_is_not_declared_is_refused(self):
-        with pytest.raises(PreflightError, match="scp"):
-            summarize([passed("scp")])
 
     def test_a_failure_anywhere_is_a_failure(self):
         results = summarize([StepResult(STEPS[0], Outcome.FAILED, "AccessDenied")])
@@ -180,13 +177,14 @@ class TestTheRenderedTable:
         rendered = render_table(summarize([]))
 
         for step in STEPS:
-            assert len([line for line in rendered.splitlines() if line.startswith(step)]) == 1
+            lines = [line for line in rendered.splitlines() if line.startswith(step.value)]
+            assert len(lines) == 1
 
     def test_the_outcome_and_the_detail_of_a_step_are_on_its_line(self):
         results = summarize([StepResult(STEPS[0], Outcome.FAILED, "AccessDenied no sts")])
 
         line = next(
-            line for line in render_table(results).splitlines() if line.startswith(STEPS[0])
+            line for line in render_table(results).splitlines() if line.startswith(STEPS[0].value)
         )
         assert Outcome.FAILED.value in line
         assert "AccessDenied no sts" in line

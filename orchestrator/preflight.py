@@ -24,25 +24,28 @@ NOT_SUPPORTED = "<not supported>"
 PROBE_CONTENT = "preflight"
 PROBE_PATH = "/tmp/preflight"
 
-STS = "sts"
-BUCKETS = "buckets"
-SSM = "ssm"
-GIT = "git"
-SYNC = "s3-sync"
-AMI = "ami"
-LAUNCH = "launch"
-BOOTSTRAP = "bootstrap"
-PERF = "perf-stat"
-ENCODE_PUT = "s3-put"
-TERMINATE = "terminate"
-
-STEPS = (STS, BUCKETS, SSM, GIT, SYNC, AMI, LAUNCH, BOOTSTRAP, PERF, ENCODE_PUT, TERMINATE)
-
 HEADER = ("passo", "resultado", "detalhe")
 
 
 class PreflightError(Exception):
     """O resultado que um passo do `preflight` observou e recusou."""
+
+
+class Step(Enum):
+    STS = "sts"
+    BUCKETS = "buckets"
+    SSM = "ssm"
+    GIT = "git"
+    SYNC = "s3-sync"
+    AMI = "ami"
+    LAUNCH = "launch"
+    BOOTSTRAP = "bootstrap"
+    PERF = "perf-stat"
+    ENCODE_PUT = "s3-put"
+    TERMINATE = "terminate"
+
+
+STEPS = tuple(Step)
 
 
 class Outcome(Enum):
@@ -53,7 +56,7 @@ class Outcome(Enum):
 
 @dataclass(frozen=True)
 class StepResult:
-    step: str
+    step: Step
     outcome: Outcome
     detail: str
 
@@ -143,12 +146,10 @@ def perf_counter_value(raw: str, event: str) -> float:
 
 def summarize(observed: Sequence[StepResult]) -> tuple[StepResult, ...]:
     """A tabela inteira, na ordem declarada: o que não rodou aparece dizendo isso."""
-    seen: dict[str, StepResult] = {}
+    seen: dict[Step, StepResult] = {}
     for result in observed:
-        if result.step not in STEPS:
-            raise PreflightError(f"{result.step}: passo não declarado em STEPS")
         if result.step in seen:
-            raise PreflightError(f"{result.step}: passo registrado duas vezes")
+            raise PreflightError(f"{result.step.value}: passo registrado duas vezes")
         seen[result.step] = result
 
     return tuple(seen.get(step, StepResult(step, Outcome.SKIPPED, "")) for step in STEPS)
@@ -162,7 +163,10 @@ def render_table(results: Sequence[StepResult]) -> str:
     """A tabela como o pesquisador a lê, e como ela entra no relatório do piloto."""
     rows = [
         HEADER,
-        *((result.step, result.outcome.value, _single_line(result.detail)) for result in results),
+        *(
+            (result.step.value, result.outcome.value, _single_line(result.detail))
+            for result in results
+        ),
     ]
     step_width = max(len(step) for step, _, _ in rows)
     outcome_width = max(len(outcome) for _, outcome, _ in rows)

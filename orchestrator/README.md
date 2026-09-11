@@ -333,6 +333,13 @@ reporta `<not supported>` e segue. O objeto que o container escreve em
 `runs/preflight/` é listado e apagado pelo Orquestrador, o que fecha `PutObject`
 do encode, `ListBucket` e `DeleteObject` no mesmo passo.
 
+O que o preflight **não** apaga é a fatia. Os dois objetos de prova vivem sob
+`runs/preflight/` e somem; `scenarios/{id}.json` fica no bucket, e o
+`DeleteObject` da ADR-0016 nem alcança `scenarios/`. O que sobra ali é a fatia da
+**campanha inteira** daquela arquitetura, não um resto do preflight: quem lançar o
+piloto sobrescreve essa chave, e ninguém deve ler um objeto já presente nela como
+se o próprio lançamento o tivesse posto.
+
 O que ganha teste é o núcleo do `preflight.py`: a decisão sobre a saída do `perf`,
 a montagem da tabela — inclusive o passo que **não** rodou, porque uma capacidade
 que ninguém provou não pode sair do relatório como silêncio — e a escolha da AMI

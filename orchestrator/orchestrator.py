@@ -42,21 +42,11 @@ from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
 from masters_plan import build_masters_plan
 from preflight import (
-    AMI,
-    BOOTSTRAP,
-    BUCKETS,
-    ENCODE_PUT,
-    GIT,
-    LAUNCH,
-    PERF,
     PERF_EVENT,
-    SSM,
-    STS,
-    SYNC,
-    TERMINATE,
     EncodeTarget,
     Outcome,
     PreflightError,
+    Step,
     StepResult,
     encode_put_command,
     encode_target,
@@ -131,10 +121,6 @@ class _Aborted(Exception):
     """Um passo do `preflight` falhou; o que vinha depois dele não roda."""
 
 
-# O que o `main` já passa a todo subcomando; o resto do `argv` parseado é dele.
-_COMMON_ARGUMENTS = frozenset({"infra", "subcommand", "run"})
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -156,7 +142,7 @@ def main() -> int:
             "fica ao lado do arquivo de infra, para o gate humano da ADR-0012."
         ),
     )
-    prepare.set_defaults(run=prepare_masters)
+    prepare.set_defaults(run=lambda args, **common: prepare_masters(**common))
     check = subcommands.add_parser(
         "preflight",
         help="prova o caminho do encode numa instância descartável, antes de a fatura correr",
@@ -176,19 +162,18 @@ def main() -> int:
         default=None,
         help="bucket que recebe a fatia e o objeto de prova (default: o do piloto)",
     )
-    check.set_defaults(run=preflight)
+    check.set_defaults(
+        run=lambda args, **common: preflight(
+            instance_type=args.instance_type, bucket=args.bucket, **common
+        )
+    )
     args = parser.parse_args()
 
     infra_path = args.infra.expanduser()
     try:
         infra = _load_infra(infra_path)
         config = _load_config(EXPERIMENT_TOML)
-        return args.run(
-            infra=infra,
-            config=config,
-            work_dir=infra_path.parent,
-            **{name: value for name, value in vars(args).items() if name not in _COMMON_ARGUMENTS},
-        )
+        return args.run(args, infra=infra, config=config, work_dir=infra_path.parent)
     except _FAILURES as error:
         _fail(error)
         return EXIT_FAILURE
@@ -309,22 +294,22 @@ def preflight(
     instance_id: str | None = None
 
     try:
-        _step(results, STS, sts_caller_identity)
-        _step(results, BUCKETS, lambda: _list_both_buckets(infra, target))
-        _step(results, SSM, lambda: _read_ssh_key(infra.ssh_private_key_parameter_name))
-        commit = _step(results, GIT, git_rev_parse)
-        _step(results, SYNC, lambda: _sync_between_buckets(infra, work_dir))
+        _step(results, Step.STS, sts_caller_identity)
+        _step(results, Step.BUCKETS, lambda: _list_both_buckets(infra, target))
+        _step(results, Step.SSM, lambda: _read_ssh_key(infra.ssh_private_key_parameter_name))
+        commit = _step(results, Step.GIT, git_rev_parse)
+        _step(results, Step.SYNC, lambda: _sync_between_buckets(infra, work_dir))
 
         encode = _step(
             results,
-            AMI,
+            Step.AMI,
             lambda: encode_target(config, infra.amis, instance_type),
             detail=lambda chosen: f"{instance_type} ({chosen.instance.arch}): {chosen.image_id}",
         )
         slice_key = f"{SCENARIOS_PREFIX}{encode.instance.id}.json"
         instance_id = _step(
             results,
-            LAUNCH,
+            Step.LAUNCH,
             lambda: _launch_encode(
                 encode=encode,
                 infra=infra,
@@ -337,22 +322,22 @@ def preflight(
             detail=lambda launched: f"{launched} no commit {commit}, fatia em {slice_key}",
         )
 
-        host = _step(results, BOOTSTRAP, lambda: _wait_for_bootstrapped_instance(instance_id))
+        host = _step(results, Step.BOOTSTRAP, lambda: _wait_for_bootstrapped_instance(instance_id))
         _step(
             results,
-            PERF,
+            Step.PERF,
             lambda: perf_counter_value(
                 ssh_exec(host, perf_probe_command(), timeout=PROBE_TIMEOUT_SECONDS), PERF_EVENT
             ),
             detail=lambda counted: f"{PERF_EVENT} = {counted:.0f} dentro do container",
         )
-        _step(results, ENCODE_PUT, lambda: _put_from_container(host, target, instance_id))
+        _step(results, Step.ENCODE_PUT, lambda: _put_from_container(host, target, instance_id))
     except _Aborted:
         pass
     finally:
         if instance_id is not None:
             with suppress(_Aborted):
-                _step(results, TERMINATE, lambda: _terminate(instance_id))
+                _step(results, Step.TERMINATE, lambda: _terminate(instance_id))
 
     table = summarize(results)
     print(render_table(table))
@@ -504,12 +489,12 @@ def _terminate(instance_id: str) -> str:
 
 def _step[Observed](
     results: list[StepResult],
-    step: str,
+    step: Step,
     action: Callable[[], Observed],
     detail: Callable[[Observed], str] = str,
 ) -> Observed:
     """Roda um passo, registra como ele terminou e devolve o que ele observou."""
-    _report(f"{step}: rodando")
+    _report(f"{step.value}: rodando")
     try:
         value = action()
     except _FAILURES as error:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ ROLE_ROOT = Path(__file__).resolve().parent
 RUN_SCENARIO = REPO_ROOT / "encode" / "run_scenario.sh"
 RUN_ALL = REPO_ROOT / "encode" / "run_all.sh"
 FETCH_MASTERS = REPO_ROOT / "encode" / "fetch_masters.sh"
+PREPARE_MASTERS = REPO_ROOT / "masters" / "prepare.sh"
 GENERATE_SCENARIOS = REPO_ROOT / "orchestrator" / "generate_scenarios.py"
 GENERATE_MASTERS_PLAN = REPO_ROOT / "orchestrator" / "generate_masters_plan.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
@@ -45,9 +47,10 @@ VERSIONS = {
     "aws_cli": "2.36.38",
 }
 
-# Nunca um vídeo: como o `ffmpeg` é shimado ninguém decodifica isto, e gerá-lo de
+# O que faz as vezes de um Master no disco e de um source baixado. Nunca um
+# vídeo: como o `ffmpeg` é shimado ninguém decodifica isto, e gerá-lo de
 # verdade custaria uma dependência de binário no CI.
-MASTER_BYTES = bytes(range(256)) * 16
+PLACEHOLDER_BYTES = bytes(range(256)) * 16
 
 
 def master_bytes(name: str) -> bytes:
@@ -56,7 +59,7 @@ def master_bytes(name: str) -> bytes:
     O nome entra no conteúdo: com seis placeholders idênticos, um `s3 cp` que
     trouxesse o Master errado casaria o sha256 do manifesto assim mesmo.
     """
-    return MASTER_BYTES + name.encode("utf-8")
+    return PLACEHOLDER_BYTES + name.encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,23 @@ class Execution(ShimTrail):
 
     def meta(self) -> dict[str, Any]:
         return json.loads((self.run_dir / "meta.json").read_text(encoding="utf-8"))
+
+
+@dataclass(frozen=True)
+class Preparation(ShimTrail):
+    """O que uma invocação do `masters/prepare.sh` deixou para trás."""
+
+    plan: dict[str, Any]
+    returncode: int
+    stdout: str
+    stderr: str
+    work_dir: Path
+
+    def manifest_path(self) -> Path:
+        return self.work_dir / "manifest.json"
+
+    def manifest(self) -> dict[str, Any]:
+        return json.loads(self.manifest_path().read_text(encoding="utf-8"))
 
 
 @dataclass(frozen=True)
@@ -215,7 +235,7 @@ def masters_dir(
         for run in block["runs"]
     }
     for name in named:
-        (masters / name).write_bytes(MASTER_BYTES)
+        (masters / name).write_bytes(PLACEHOLDER_BYTES)
     return masters
 
 
@@ -465,6 +485,167 @@ def loop(plan: dict[str, Any], block: dict[str, Any], run_all) -> Loop:
     return run_all(plan, [block])
 
 
+SOURCE_SHA256 = hashlib.sha256(PLACEHOLDER_BYTES).hexdigest()
+SOURCE_SIZE = len(PLACEHOLDER_BYTES)
+
+
+@pytest.fixture(scope="session")
+def masters_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """O arquivo que o shim do `curl` entrega no lugar dos GB de cada fonte."""
+    path = tmp_path_factory.mktemp("source") / "source.bin"
+    path.write_bytes(PLACEHOLDER_BYTES)
+    return path
+
+
+def _substitute_once_per_video(text: str, pattern: str, replacement: str) -> str:
+    """Uma linha por `[video.source]`, e a contagem é a asserção.
+
+    Hoje `sha256` e `size` só aparecem lá. Um campo homônimo em outro registro
+    — um sha256 por Master, digamos — passaria a ser reescrito junto, e o
+    manifesto seria conferido contra um TOML adulterado sem que nada avisasse.
+    """
+    patched, count = re.subn(pattern, replacement, text, flags=re.MULTILINE)
+    assert count == len(EXPERIMENT["video"]), pattern
+    return patched
+
+
+@pytest.fixture(scope="session")
+def masters_toml(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """O `config/experiment.toml` com o sha256 e o tamanho do placeholder.
+
+    É o único fato do arquivo que um download shimado não tem como honrar, e
+    trocá-lo aqui é o que mantém o resto — as fontes, a geometria de cada tier, a
+    cadência, os frames — sendo o do repositório: é contra este TOML que a CLI do
+    checker confere o manifesto que o bash escreveu.
+    """
+    text = _substitute_once_per_video(
+        EXPERIMENT_TOML.read_text(encoding="utf-8"),
+        r'^sha256 = ".*"$',
+        f'sha256 = "{SOURCE_SHA256}"',
+    )
+    text = _substitute_once_per_video(text, r"^size = \d+$", f"size = {SOURCE_SIZE}")
+    path = tmp_path_factory.mktemp("masters-config") / "experiment.toml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.fixture(scope="session")
+def masters_plan(tmp_path_factory: pytest.TempPathFactory, masters_toml: Path) -> dict[str, Any]:
+    """O plano dos Masters, gerado pelo CLI do orquestrador como caixa-preta."""
+    out = tmp_path_factory.mktemp("masters-plan") / "masters.json"
+    subprocess.run(
+        [
+            sys.executable,
+            str(GENERATE_MASTERS_PLAN),
+            "--config",
+            str(masters_toml),
+            "--out",
+            str(out),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def masters_of(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Os Masters do plano: por vídeo, o 4K e os seus derivados.
+
+    O `derived` sai com default porque um dos casos é o plano que não o traz, e
+    quem tem que recusá-lo é o `prepare.sh`. Sem o default, o harness estoura
+    montando as respostas do `ffprobe` e o script nem chega a ser invocado.
+    """
+    return [
+        master
+        for video in plan["videos"]
+        for master in (video["master"], *video.get("derived", ()))
+    ]
+
+
+def probe_response(master: dict[str, Any]) -> dict[str, Any]:
+    """O que o `ffprobe` emitiria sobre um Master que saiu como o plano pediu."""
+    return {
+        "streams": [
+            {
+                "codec_name": master["codec_name"],
+                "width": master["width"],
+                "height": master["height"],
+                "pix_fmt": master["pix_fmt"],
+                "r_frame_rate": master["frame_rate"],
+                "nb_read_packets": str(master["frames"]),
+            }
+        ]
+    }
+
+
+@pytest.fixture(scope="session")
+def prepare(
+    tmp_path_factory: pytest.TempPathFactory,
+    shim_bin: Path,
+    masters_source: Path,
+    versions_file: Path,
+):
+    """Roda o `masters/prepare.sh` de verdade, com os shims.
+
+    `probes` substitui a resposta do `ffprobe` de um Master pela que o caso
+    precisa; sem ele, cada um dos seis é inspecionado com sucesso.
+    """
+
+    def _prepare(
+        plan: dict[str, Any],
+        probes: dict[str, dict[str, Any]] | None = None,
+        **shim_env: str,
+    ) -> Preparation:
+        workdir = tmp_path_factory.mktemp("preparation")
+        probe_dir = workdir / "probes"
+        probe_dir.mkdir()
+        responses = {master["name"]: probe_response(master) for master in masters_of(plan)}
+        responses.update(probes or {})
+        for name, response in responses.items():
+            (probe_dir / f"{name}.json").write_text(json.dumps(response), encoding="utf-8")
+
+        env = shim_environment(
+            shim_bin,
+            workdir,
+            {
+                "SMOKE_SOURCE_FILE": str(masters_source),
+                "SMOKE_PROBE_DIR": str(probe_dir),
+                **shim_env,
+            },
+        )
+        work_dir = workdir / "work"
+        result = subprocess.run(
+            [
+                "bash",
+                str(PREPARE_MASTERS),
+                "--plan",
+                json.dumps(plan),
+                "--bucket",
+                BUCKET,
+                "--work-dir",
+                str(work_dir),
+                "--versions-file",
+                str(versions_file),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return Preparation(
+            plan=plan,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            work_dir=work_dir,
+            argv_dir=Path(env["SMOKE_ARGV_DIR"]),
+            s3_root=Path(env["SMOKE_S3_ROOT"]),
+        )
+
+    return _prepare
+
+
 @pytest.fixture(scope="session")
 def list_objects(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
     """O lado leitor do layout de prefixos: `s3api list-objects-v2` pelo shim,
@@ -529,16 +710,18 @@ def validate_with_cli(meta_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def validate_manifest_with_cli(manifest_path: Path) -> subprocess.CompletedProcess[str]:
-    """A CLI do contrato do manifesto, do `orchestrator/`, invocada como caixa-preta."""
+def validate_manifest_with_cli(
+    manifest_path: Path, config: Path
+) -> subprocess.CompletedProcess[str]:
+    """A CLI do contrato do manifesto, do `orchestrator/`, invocada como caixa-preta.
+
+    O config é do chamador: o `test_fetch_masters.py` confere um manifesto montado
+    sobre o `config/experiment.toml`, e o `test_prepare_masters.py`, um que o bash
+    escreveu a partir do TOML remendado com o sha256 do placeholder. Fixar um dos
+    dois aqui deixaria o outro conferindo contra a spec errada.
+    """
     return subprocess.run(
-        [
-            sys.executable,
-            str(VALIDATE_MANIFEST),
-            str(manifest_path),
-            "--config",
-            str(EXPERIMENT_TOML),
-        ],
+        [sys.executable, str(VALIDATE_MANIFEST), str(manifest_path), "--config", str(config)],
         capture_output=True,
         text=True,
         check=False,

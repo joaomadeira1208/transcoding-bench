@@ -1,16 +1,17 @@
 # smoke/
 
-O que o Mac do pesquisador roda para saber que o caminho de encode funciona
-(ADR-0022). Diretório de topo porque o critério da ADR-0017 é *quem roda aquilo*,
-e quem roda isto é o Mac — mesmo dono de `analysis/` e do futuro `infra/`.
+O que o Mac do pesquisador roda para saber que o caminho de encode e a preparação
+dos Masters funcionam (ADR-0022). Diretório de topo porque o critério da ADR-0017
+é *quem roda aquilo*, e quem roda isto é o Mac — mesmo dono de `analysis/` e do
+futuro `infra/`.
 
     python -m venv .venv-smoke
     .venv-smoke/bin/pip install -r smoke/requirements-dev.txt
     .venv-smoke/bin/python -m pytest smoke/
 
-Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `perf`, `pidstat`, `aws`
-e `/usr/bin/time` são substituídos por shims, e o ciclo fecha em segundos. O
-mesmo `pytest smoke/` é o quarto job do CI.
+Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `ffprobe`, `perf`,
+`pidstat`, `aws`, `curl`, `unzip` e `/usr/bin/time` são substituídos por shims, e
+o ciclo fecha em segundos. O mesmo `pytest smoke/` é o quarto job do CI.
 
 **O smoke nunca importa; só invoca.** O gerador do plano, a CLI de validação do
 `meta.json` e o checador stdlib do orquestrador entram como subprocessos, e o que
@@ -28,6 +29,23 @@ consolidado pelo mesmo `consolidate.py`; o argv que sai dali é conferido contra
 (ADR-0022). Os caminhos de falha não se repetem sobre ele: são propriedade dos
 scripts, e o piloto não tem script próprio. Os masters placeholder são nomeados
 pela união dos dois planos.
+
+**A preparação dos Masters atravessa o mesmo harness.** O `masters/prepare.sh` é
+dirigido com três shims novos — o `curl` entrega um placeholder no lugar dos GB
+de cada fonte (`SMOKE_SOURCE_FILE`), o `unzip` copia o que ele baixou — como o
+de verdade, que deixa o `.zip` no lugar para o `prepare.sh` apagar — e o
+`ffprobe` emite a resposta que o teste preparou para cada Master
+(`$SMOKE_PROBE_DIR/<nome>.json`) — mais o `ffmpeg` e o `aws` do encode. O plano
+sai do `generate_masters_plan.py` invocado como caixa-preta, e o argv do remux e
+de cada downscale é conferido contra a geometria do `config/experiment.toml`.
+
+O único fato daquele arquivo que um download shimado não tem como honrar é o par
+`size`/`sha256` de cada fonte, e é só ele que o smoke troca: o plano e o checker
+recebem um `experiment.toml` temporário com os do placeholder, e URL, arquivo,
+geometria de cada tier, cadência e frames continuam sendo os do repositório. É
+contra esse arquivo que a CLI do `validate_manifest.py` confere o manifesto que o
+bash acabou de escrever — a âncora cross-language do contrato, com o `jq`
+montando o JSON de um lado e o Python estrito o aceitando ou recusando do outro.
 
 Os shims moram em `shims/` como `*.sh` e são instalados com o nome do binário que
 substituem num diretório temporário que entra no PATH: a allowlist do

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from conftest import (
     BUCKET,
+    EXPERIMENT_TOML,
     MASTERS_PREFIX,
     Fetch,
     master_bytes,
@@ -37,7 +38,7 @@ def fetched_with_a_corrupt_master(fetch_masters, corrupt_master: str) -> Fetch:
 
 class TestTheManifest:
     def test_the_contract_of_the_orchestrator_accepts_it(self, fetched):
-        result = validate_manifest_with_cli(fetched.manifest_path)
+        result = validate_manifest_with_cli(fetched.manifest_path, EXPERIMENT_TOML)
 
         assert result.returncode == 0, result.stderr
 

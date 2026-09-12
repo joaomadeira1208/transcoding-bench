@@ -8,6 +8,7 @@ from typing import Any
 import pyarrow.parquet as pq
 import pytest
 from conftest import (
+    INSTANCE_ID,
     INSTANCE_TYPE,
     PILOT,
     Loop,
@@ -16,7 +17,7 @@ from conftest import (
     validate_with_cli,
 )
 from test_consolidate import perf_column
-from test_run_all import DONE_MARKER, scenario_ids
+from test_run_all import DONE_MARKER, PROGRESS_OBJECT, done_marker, scenario_ids
 from test_run_scenario import ARTIFACTS, UUID4, contains_subsequence, value_after
 
 BLOCK_SUFFIXES = ["_warmup", "_rep1", "_rep2", "_rep3", "_rep4", "_rep5"]
@@ -97,10 +98,11 @@ class TestBlock:
     def test_every_run_is_uploaded_before_the_next_encode(self, pilot_loop):
         relevant = [tool for tool in pilot_loop.sequence() if tool in {"ffmpeg", "aws"}]
 
-        assert relevant == ["ffmpeg", "ffmpeg", "aws"] * 6 + ["aws"]
+        assert relevant == ["ffmpeg", "ffmpeg", "aws", "aws"] * 6 + ["aws"]
 
     def test_the_done_marker_closes_the_slice(self, pilot_loop, list_objects):
-        assert list_objects(pilot_loop, "status/") == [DONE_MARKER]
+        assert list_objects(pilot_loop, "status/") == [DONE_MARKER, PROGRESS_OBJECT]
+        assert done_marker(pilot_loop)["instance_id"] == INSTANCE_ID
 
     def test_every_meta_json_reports_success(self, pilot_loop):
         assert {meta["exit_code"] for meta in pilot_loop.metas().values()} == {0}

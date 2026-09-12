@@ -260,3 +260,62 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 - Se o smoke revelar um evento PMU indisponível numa arquitetura, a resposta é decisão de desenho experimental (trocar o evento, ou reportar a métrica em duas das três), não de testes. Cai na ADR-0006 no dia em que ocorrer.
 - Nomes de arquivo dos módulos de teste, das factories e dos shims ficam abertos até o desenvolvimento, coerente com a ADR-0017.
 - O piloto custa um bucket a mais (ADR-0011), um `config/pilot.toml` com o seu teste de subconjunto (ADR-0019), 2–4 h de três instâncias, e um relatório commitado. É a primeira vez que se sabe quanto a campanha vai custar.
+
+## Emenda: a superfície nova da instrumentação, e o probe que passa a medir
+
+A ADR-0006 emendada troca o que o `preflight` prova, e com isso o que ganha teste.
+
+**No inventário de falha silenciosa entram quatro alvos**, todos funções puras do
+`orchestrator/`:
+
+| Alvo | Falha silenciosa que o teste barra |
+|---|---|
+| Montagem do `-e` a partir dos pares declarados | Grupo que não sai entre chaves → o kernel escalona os eventos soltos e cada razão volta a dividir janelas diferentes de execução, sem que nada falhe |
+| Validação dos pares (`numerator`/`denominator` em `pmu_events`, nenhum evento em dois grupos) | Um contador a mais faz o grupo inteiro não ser escalonado e voltar `<not counted>` — o modo de falha do c7g |
+| As três recusas (`<not supported>`, `<not counted>`, zero em hardware) | O zero é número válido: passa por qualquer guarda de string e vira coluna nula para uma arquitetura inteira |
+| Os tetos de plausibilidade por métrica | Responder não é medir: os dois `passou` da primeira rodada tinham números não-zero em todos os contadores |
+
+A regra que a ADR-0006 já impunha vale para os quatro: **a configuração real é a
+entrada do teste**, nunca uma cópia dela escrita no arquivo de teste. Trocar um par
+no `config/experiment.toml` tem de mudar o que o `preflight` confere, ou o que se
+está conferindo não é o experimento que vai rodar. As recusas são exercidas **evento
+a evento**, parametrizadas sobre a lista declarada, e as plausibilidades, métrica a
+métrica — e uma delas roda sobre os números do c7a da primeira rodada, verbatim.
+
+**O probe do `preflight` passa a ser um encode.** O `-- true` termina em
+microssegundos: curto demais para o rodízio da PMU girar uma volta — foi o que
+produziu os três `<not counted>` do c7g — e curto demais para um contador que
+responde zero provar alguma coisa. No lugar dele, segundos de um Master real com o
+FFmpeg da própria imagem, no container invocado com **os mesmos mounts e a mesma
+capability do `launch_container.sh`**: o degrau só prova o que roda pelo mesmo
+caminho, e o probe e a campanha eram até aqui duas invocações diferentes de
+`docker run`. Segundos de encode geram milhões de referências a cache — se o número
+continuar zero, está provado que o evento não conta naquele guest.
+
+O argv do probe continua sendo argv de sistema e continua sem teste próprio pelo
+que ele tem de `docker run`; o que ganha teste é o que nele é desenho experimental:
+o `-e` que ele carrega, o Master e os parâmetros de encode saírem do objeto de run,
+e os dois mounts.
+
+**Os dois leitores de `perf stat` ganham um teste de acordo.** O
+`instrumentation_failure_reason` do `run_scenario.sh` e o `perf_counters` do
+`preflight.py` são a mesma regra escrita duas vezes, em linguagens diferentes, pela
+mesma razão que o `meta.json` tem três leitores (ADR-0019). O que a duplicação
+compra só vale se os dois concordarem: um degrau que aprove o que a campanha
+rejeita não prova nada, e uma campanha que rejeite o que o degrau aprovou queima
+dois dias de instância. O `smoke/` passa o **mesmo** `perf.json` — o que o shim
+acabou de escrever no disco — pelos dois, e assere que os vereditos batem, em cada
+um dos modos de falha e nos dois casos que têm de passar: zero em evento de
+software e `pcnt-running` abaixo de 100.
+
+**O que o aceite com Docker passa a cobrir.** Nada de novo por desenho — o PMU
+continua fora do alcance do Mac —, mas de graça: `perf stat` recusa uma sintaxe de
+grupo malformada do mesmo jeito que recusa um nome de evento que não conhece, então
+o `-e` com chaves é verificado lá antes de qualquer instância subir.
+
+**O `preflight` passa a guardar a saída crua do probe.** Stdout (`perf stat -j`) e
+stderr (o dump dos `perf_event_attr` do `-vv`) vão para o log do Orquestrador e
+para `runs/preflight/<instance-id>/`, **sem apagar** — ao contrário dos dois
+objetos de prova do passo, que somem porque o deles é prova de permissão e este é
+dado. É a evidência do passo que **reprova** que importa: a primeira rodada guardou
+só a tabela, e com ela não se separa multiplexação de PMU virtual contando errado.

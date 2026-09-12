@@ -378,6 +378,9 @@ class TestRunParameters:
                 "scale_flags",
                 "bitstream_muxer",
                 "pmu_events",
+                "perf_event_spec",
+                "pmu_hardware_events",
+                "pmu_metrics",
             }
 
     def test_a_known_run_repeats_the_identity_of_its_block(self, plan):

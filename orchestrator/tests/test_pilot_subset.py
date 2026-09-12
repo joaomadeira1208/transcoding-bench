@@ -220,8 +220,10 @@ class TestConfigLevelRejects:
         assert "'gop_size'" in message
 
     def test_another_pmu_event_list(self, make_subset):
+        # Um evento a menos, e não outro: a lista tem de continuar válida contra a
+        # métrica que a agrupa, ou o que falha é a validação e não a guarda.
         pilot, campaign = make_subset(
-            instrumentation=make_instrumentation(pmu_events=["cycles", "cache-misses"])
+            instrumentation=make_instrumentation(pmu_events=["cycles", "instructions"])
         )
 
         message = only_divergence(pilot, campaign)

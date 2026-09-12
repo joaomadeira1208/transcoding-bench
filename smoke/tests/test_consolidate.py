@@ -20,6 +20,10 @@ def perf_column(event: str) -> str:
     return f"perf_{event.replace('-', '_')}"
 
 
+def pcnt_column(event: str) -> str:
+    return f"{perf_column(event)}_pcnt_running"
+
+
 @pytest.fixture(scope="session")
 def consolidation(loop: Loop, tmp_path_factory: pytest.TempPathFactory):
     out = tmp_path_factory.mktemp("consolidated") / "runs.parquet"
@@ -78,6 +82,15 @@ class TestParsedArtifacts:
             column = table.column(perf_column(event)).to_pylist()
 
             assert column == [1234567.0] * 5, event
+
+    def test_every_pmu_event_carries_the_regime_it_was_measured_in(self, table):
+        # Ao lado do valor: abaixo de 100 o número é estimativa extrapolada, e sem
+        # a coluna uma estimativa e uma contagem entram indistinguíveis na
+        # comparação entre arquiteturas (ADR-0006).
+        for event in PMU_EVENTS:
+            column = table.column(pcnt_column(event)).to_pylist()
+
+            assert column == [100.0] * 5, event
 
     def test_the_time_aggregates_are_columns(self, table):
         assert table.column("time_elapsed_s").to_pylist() == [0.0] * 5

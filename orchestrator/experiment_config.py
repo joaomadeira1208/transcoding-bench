@@ -106,6 +106,24 @@ class FixedEncodeParams:
 
 
 @dataclass(frozen=True)
+class MetricRecord:
+    """Uma das razões da ADR-0006: o par de eventos dela e o teto de plausibilidade."""
+
+    name: str
+    numerator: str
+    denominator: str
+    max_ratio: float
+
+    @property
+    def events(self) -> tuple[str, str]:
+        return (self.numerator, self.denominator)
+
+    def exceeds(self, numerator: float, denominator: float) -> bool:
+        """Sem dividir: com denominador zero a razão não existe, e o produto decide."""
+        return numerator > self.max_ratio * denominator
+
+
+@dataclass(frozen=True)
 class Instrumentation:
     """Os eventos de PMU que instrumentam cada Execução (ADR-0006).
 
@@ -114,6 +132,38 @@ class Instrumentation:
     """
 
     pmu_events: tuple[str, ...]
+    metrics: tuple[MetricRecord, ...]
+
+    @property
+    def event_spec(self) -> str:
+        """O argumento do `-e` do `perf stat`: os pares entre chaves, o resto solto.
+
+        Os membros saem na ordem de `pmu_events` e o grupo ocupa a posição do
+        primeiro deles, de modo que o `-e` achatado **seja** a lista declarada.
+        Ordenar o grupo pela declaração da métrica reordenaria os contadores do
+        `perf.json`, e quem lê a saída por posição passaria a ler outro evento.
+        """
+        grouped = {event: metric for metric in self.metrics for event in metric.events}
+        parts: list[str] = []
+        emitted: set[str] = set()
+        for event in self.pmu_events:
+            if event in emitted:
+                continue
+            metric = grouped.get(event)
+            if metric is None:
+                parts.append(event)
+                emitted.add(event)
+                continue
+            members = [name for name in self.pmu_events if name in metric.events]
+            parts.append("{" + ",".join(members) + "}")
+            emitted.update(members)
+        return ",".join(parts)
+
+    @property
+    def hardware_events(self) -> tuple[str, ...]:
+        """Os eventos que ocupam contador de PMU: os que alguma métrica agrupa."""
+        grouped = {event for metric in self.metrics for event in metric.events}
+        return tuple(event for event in self.pmu_events if event in grouped)
 
 
 @dataclass(frozen=True)
@@ -181,7 +231,7 @@ def _encode(record: Mapping[str, Any]) -> FixedEncodeParams:
 
 def _instrumentation(record: Mapping[str, Any]) -> Instrumentation:
     where = "instrumentation"
-    _reject_unknown(record, {"pmu_events"}, where)
+    _reject_unknown(record, {"pmu_events", "metric"}, where)
 
     events = _str_list(record, "pmu_events", where)
     # Um `perf stat` sem `-e` roda, coleta o conjunto default e devolve um JSON
@@ -192,7 +242,57 @@ def _instrumentation(record: Mapping[str, Any]) -> Instrumentation:
     # e quem lê o JSON por nome fica com uma delas, escolhida por acaso.
     _reject_duplicates(events, "pmu_events", "event")
 
-    return Instrumentation(pmu_events=events)
+    metrics = tuple(_metric(r, i) for i, r in enumerate(_records(record, "metric")))
+    _reject_duplicates((metric.name for metric in metrics), f"{where}: metric", "name")
+    _reject_ungrouped_events(metrics, events)
+    _reject_shared_events(metrics)
+
+    return Instrumentation(pmu_events=events, metrics=metrics)
+
+
+def _metric(record: Mapping[str, Any], index: int) -> MetricRecord:
+    where = f"instrumentation: {_where('metric', index, record.get('name'))}"
+    _reject_unknown(record, {"name", "numerator", "denominator", "max_ratio"}, where)
+
+    metric = MetricRecord(
+        name=_str(record, "name", where),
+        numerator=_str(record, "numerator", where),
+        denominator=_str(record, "denominator", where),
+        max_ratio=_positive_number(record, "max_ratio", where),
+    )
+    # Um grupo de um membro só não é grupo: o `perf` o escalona sozinho e a razão
+    # volta a misturar duas janelas de execução.
+    if metric.numerator == metric.denominator:
+        raise ConfigError(
+            f"{where}: 'numerator' and 'denominator' must be different events, "
+            f"both are '{metric.numerator}'"
+        )
+    return metric
+
+
+def _reject_ungrouped_events(metrics: Sequence[MetricRecord], events: Sequence[str]) -> None:
+    """Todo evento de uma métrica é um dos declarados em `pmu_events`."""
+    declared = set(events)
+    for index, metric in enumerate(metrics):
+        for field, event in (("numerator", metric.numerator), ("denominator", metric.denominator)):
+            if event not in declared:
+                raise ConfigError(
+                    f"instrumentation: {_where('metric', index, metric.name)}: '{field}' "
+                    f"names '{event}', which is not declared in 'pmu_events'"
+                )
+
+
+def _reject_shared_events(metrics: Sequence[MetricRecord]) -> None:
+    """Nenhum evento em dois grupos: o `perf` abriria dois contadores para ele."""
+    owner: dict[str, str] = {}
+    for index, metric in enumerate(metrics):
+        for event in metric.events:
+            if event in owner:
+                raise ConfigError(
+                    f"instrumentation: {_where('metric', index, metric.name)}: '{event}' "
+                    f"is already grouped by metric '{owner[event]}'"
+                )
+            owner[event] = metric.name
 
 
 def _codec(record: Mapping[str, Any], index: int) -> CodecRecord:
@@ -374,6 +474,16 @@ def _int(record: Mapping[str, Any], key: str, where: str, *, minimum: int | None
     if minimum is not None and value < minimum:
         raise ConfigError(f"{where}: '{key}' must be >= {minimum}, got {value}")
     return value
+
+
+def _positive_number(record: Mapping[str, Any], key: str, where: str) -> float:
+    """Teto de plausibilidade: aceita o inteiro do TOML e devolve sempre float."""
+    value = _require(record, key, where)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ConfigError(f"{where}: '{key}' must be a number, got {type(value).__name__}")
+    if value <= 0:
+        raise ConfigError(f"{where}: '{key}' must be > 0, got {value}")
+    return float(value)
 
 
 def _even(record: Mapping[str, Any], key: str, where: str) -> int:

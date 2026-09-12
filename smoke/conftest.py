@@ -26,7 +26,7 @@ GENERATE_MASTERS_PLAN = REPO_ROOT / "orchestrator" / "generate_masters_plan.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
 VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
-META_CHECK_DIR = REPO_ROOT / "orchestrator"
+ORCHESTRATOR_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
 
@@ -700,7 +700,37 @@ def check_with_stdlib_checker(meta_path: Path) -> subprocess.CompletedProcess[st
         "check_meta(open(sys.argv[2], 'rb').read())"
     )
     return subprocess.run(
-        [sys.executable, "-c", program, str(META_CHECK_DIR), str(meta_path)],
+        [sys.executable, "-c", program, str(ORCHESTRATOR_DIR), str(meta_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def check_with_preflight(perf_json: Path) -> subprocess.CompletedProcess[str]:
+    """Roda o mesmo `perf.json` contra o leitor do `preflight`, sem importar.
+
+    Os dois leitores de `perf stat` são escritos de propósito em linguagens
+    diferentes (ADR-0019/0022), e é aqui que se verifica que eles concordam: um
+    degrau que aprove o que a campanha rejeita não prova nada, e uma campanha que
+    rejeite o que o degrau aprovou queima dois dias de instância.
+    """
+    program = (
+        "import sys, tomllib; sys.path.insert(0, sys.argv[1]);"
+        "from experiment_config import validate_config;"
+        "from preflight import perf_counters;"
+        "config = validate_config(tomllib.load(open(sys.argv[3], 'rb')));"
+        "perf_counters(open(sys.argv[2], encoding='utf-8').read(), config.instrumentation)"
+    )
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            program,
+            str(ORCHESTRATOR_DIR),
+            str(perf_json),
+            str(EXPERIMENT_TOML),
+        ],
         capture_output=True,
         text=True,
         check=False,

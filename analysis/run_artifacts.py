@@ -39,6 +39,14 @@ class TimeMetrics(BaseModel):
 
 
 @dataclass(frozen=True)
+class PerfCounter:
+    """Um contador do `perf stat -j`: o valor e a fração do tempo em que ele rodou."""
+
+    value: float | None
+    pcnt_running: float | None
+
+
+@dataclass(frozen=True)
 class FfmpegStats:
     """Os parseados do `-stats` no stderr do FFmpeg (ADR-0006)."""
 
@@ -55,18 +63,21 @@ def parse_time(raw: str | bytes) -> TimeMetrics:
         raise ArtifactError("; ".join(offending_fields(error))) from error
 
 
-def parse_perf(raw: str) -> dict[str, float | None]:
+def parse_perf(raw: str) -> dict[str, PerfCounter]:
     """Os contadores de um `perf stat -j`, por evento.
 
-    Evento indisponível sai como `None`, nunca como zero — que entraria na razão
-    como medição.
+    Evento indisponível sai com valor `None`, nunca como zero — que entraria na
+    razão como medição.
     """
-    counters: dict[str, float | None] = {}
+    counters: dict[str, PerfCounter] = {}
     for line in raw.splitlines():
         record = _json_object(line)
         if record is None or "event" not in record or "counter-value" not in record:
             continue
-        counters[str(record["event"])] = _optional_float(record["counter-value"])
+        counters[_event_name(record["event"])] = PerfCounter(
+            value=_optional_float(record["counter-value"]),
+            pcnt_running=_optional_float(record.get("pcnt-running")),
+        )
 
     if not counters:
         raise ArtifactError("nenhum contador de perf stat -j")
@@ -134,6 +145,15 @@ def _json_object(line: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return record if isinstance(record, dict) else None
+
+
+def _event_name(reported: Any) -> str:
+    """O nome sem o modificador que o `perf` ecoa (`cycles:u`).
+
+    As duas guardas do `perf.json` já o descartam: mantê-lo aqui faria a coluna
+    daquele evento sair nula num run que as duas aprovaram.
+    """
+    return str(reported).split(":")[0]
 
 
 def _optional_float(value: Any) -> float | None:

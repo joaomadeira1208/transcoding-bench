@@ -176,12 +176,51 @@ janela, depois dele. O `meta.json` fecha o run antes da subida, e um
 upload que falhe não o reabre — a cópia local segue íntegra, e é o status de
 saída (72) que carrega a falha para o log do laço.
 
-Falha de instrumentação — o `perf` estourando, um evento voltando `<not
-supported>`, o PID do FFmpeg não resolvido — é **falha do run**, não aviso: nunca
+Falha de instrumentação — o `perf` estourando, um contador sem medição, uma razão
+impossível, o PID do FFmpeg não resolvido — é **falha do run**, não aviso: nunca
 existe run "bem-sucedido" sem os contadores que são o achado principal, e não há
 flag que desligue a medição (ADR-0022). Um run falho registra `exit_code != 0` no
 `meta.json` e preserva o que tem, para que o `resume.py` o trate como
 não-completo em vez de ele sumir.
+
+## A guarda do `perf.json`
+
+O `-e` do `perf stat` chega **pronto no objeto de run** (`perf_event_spec`), com
+os pares da ADR-0006 entre chaves: `{cycles,instructions},{cache-references,cache-misses},{branch-instructions,branch-misses}`
+mais os quatro eventos de software soltos. Montar essa sintaxe no `jq` seria o bash
+derivando o que decide se as três razões do artigo são medidas ou inventadas — o
+`perf` escalona um grupo de forma atômica, e é isso que faz numerador e denominador
+verem a mesma janela de execução quando o kernel multiplexa os contadores.
+
+Pela mesma razão chegam prontos a lista dos eventos (`pmu_events`), a dos que
+ocupam contador de PMU (`pmu_hardware_events`) e as métricas com o teto de cada uma
+(`pmu_metrics`). O bash não decide o que é hardware nem qual é o teto: ele copia
+(ADR-0019).
+
+A guarda lê o arquivo linha a linha — `perf stat -j` emite um objeto por linha,
+com cabeçalho que varia com a versão — e recusa, **nomeando o evento**:
+
+- `<not supported>`, o evento que não existe na PMU daquela arquitetura;
+- `<not counted>`, o contador que abriu e nunca rodou;
+- **zero em evento de hardware**, o contador que respondeu e não contou.
+
+Os três pedem decisões opostas, e por isso a mensagem os distingue. Os quatro
+eventos de software ficam fora da regra do zero: `context-switches = 0` e
+`cpu-migrations = 0` são resultados legítimos e desejáveis.
+
+Passando isso, cada métrica é conferida contra o seu `max_ratio`: `branch-misses`
+não passa de `branch-instructions`, `cache-misses` não passa de `cache-references`,
+e o IPC não passa do teto declarado. É o que separa "o contador respondeu" de "o
+contador mediu" — dois números não-zero, nenhum string de erro, e uma razão
+impossível.
+
+O `pcnt-running` **não** é recusa: com os pares, fração abaixo de 100 é o regime
+esperado onde a PMU tem menos contadores que eventos, e a razão continua correta.
+Ele atravessa para o Parquet como coluna (ADR-0006/0007).
+
+Esta é a segunda escrita da mesma regra — a outra é o `preflight.py` —, duplicada
+de propósito (ADR-0019/0022). Que as duas concordem sobre o mesmo `perf.json` é
+asserção do `smoke/`: um degrau que aprove o que a campanha rejeita não é degrau.
 
 ## Verificação
 

@@ -130,26 +130,79 @@ run_field() {
     <<<"$run"
 }
 
-# A checagem do `perf.json` é textual porque `perf stat -j` emite um objeto por
-# linha, com cabeçalho que varia com a versão.
+# O mesmo, para os campos que são lista ou objeto: `-c` em vez de `-r`, e a mesma
+# recusa por ausência — um campo que saísse como `null` chegaria ao `jq` da guarda
+# como erro de sintaxe, longe daqui.
+run_field_json() {
+  jq -c --arg name "$1" \
+    'if has($name) then .[$name] else error("campo ausente no objeto de run: \($name)") end' \
+    <<<"$run"
+}
+
+# Lê o `perf.json` linha a linha porque `perf stat -j` emite um objeto por linha,
+# com cabeçalho que varia com a versão: o `fromjson?` descarta o que não é objeto
+# em vez de derrubar a leitura inteira.
+#
+# Nada de nome de evento nem de teto escrito aqui: a lista, os eventos de hardware
+# e as métricas com o `max_ratio` de cada uma chegam pelo plano (ADR-0019). Esta é
+# a segunda leitura da mesma regra — o `preflight.py` é a outra —, duplicada de
+# propósito, porque um degrau que aprove o que a campanha rejeita não é degrau.
+# shellcheck disable=SC2016 # é um filtro do jq, e é ele que expande
+PERF_VERDICT_FILTER='
+  [ split("\n")[] | fromjson? | objects
+    | select(has("event") and has("counter-value"))
+    | {event: (.event | tostring | split(":")[0]), value: (."counter-value" | tostring)} ]
+  | reduce .[] as $row ({}; if has($row.event) then . else .[$row.event] = $row.value end)
+  | . as $counter
+  | [ $events[]
+      | . as $event
+      | ($counter[$event]) as $raw
+      | ($raw | if . == null then null else (tonumber? // null) end) as $number
+      | if $raw == null then "\($event): nenhum contador com esse nome"
+        elif $raw == "<not supported>" then
+          "\($event): <not supported> — o evento não existe na PMU desta arquitetura"
+        elif $raw == "<not counted>" then
+          "\($event): <not counted> — o contador abriu e nunca rodou nesta arquitetura"
+        elif $number == null then "\($event): counter-value não é um número: \($raw)"
+        elif $number == 0 and ($hardware | index($event)) != null then
+          "\($event): zero — o contador de hardware respondeu e não contou nada neste guest"
+        else empty end ] as $refusals
+  | if ($refusals | length) > 0 then $refusals
+    else
+      [ $metrics[]
+        | . as $metric
+        | ($counter[$metric.numerator] | tonumber) as $numerator
+        | ($counter[$metric.denominator] | tonumber) as $denominator
+        | if $numerator > ($metric.max_ratio * $denominator) then
+            "\($metric.name): \($metric.numerator) = \($numerator) passa de "
+            + "\($metric.max_ratio) x \($metric.denominator) = \($denominator)"
+          else empty end ]
+    end
+  | join("; ")
+'
+
+perf_verdict() {
+  jq -R -s -r \
+    --argjson events "$pmu_events_json" \
+    --argjson hardware "$pmu_hardware_events_json" \
+    --argjson metrics "$pmu_metrics_json" \
+    "$PERF_VERDICT_FILTER" "$perf_json"
+}
+
 instrumentation_failure_reason() {
-  local event
+  local verdict
   if [[ ! -s $perf_json ]]; then
     printf '%s' "o perf stat não escreveu $perf_json"
     return 0
   fi
-  if grep -q "not supported" "$perf_json"; then
-    printf '%s' "algum evento de PMU voltou não-suportado em $perf_json"
+  if ! verdict=$(perf_verdict); then
+    printf '%s' "o perf.json não pôde ser lido: $perf_json"
     return 0
   fi
-  for event in "${pmu_events[@]}"; do
-    # Entre aspas, e não como substring: solto, `instructions` casaria dentro de
-    # `branch-instructions` e um contador ausente passaria pela guarda.
-    if ! grep -q -- "\"$event\"" "$perf_json"; then
-      printf '%s' "o evento $event não aparece em $perf_json"
-      return 0
-    fi
-  done
+  if [[ -n $verdict ]]; then
+    printf '%s' "$verdict"
+    return 0
+  fi
   if [[ ! -s $time_json ]] || ! jq . "$time_json" >/dev/null 2>&1; then
     printf '%s' "o /usr/bin/time não escreveu JSON em $time_json"
     return 0
@@ -267,8 +320,13 @@ strip_audio=$(run_field strip_audio)
 container=$(run_field container)
 bitstream_muxer=$(run_field bitstream_muxer)
 
-pmu_event_list=$(jq -r '.pmu_events | join(",")' <<<"$run")
-IFS=, read -r -a pmu_events <<<"$pmu_event_list"
+# Copiado pronto do plano: o `-e` agrupa os pares que têm de ser contados juntos
+# (`{instructions,cycles}`), e montar essa sintaxe no `jq` seria o bash derivando
+# o que decide se as três razões da ADR-0006 são medidas ou inventadas.
+perf_event_spec=$(run_field perf_event_spec)
+pmu_events_json=$(run_field_json pmu_events)
+pmu_hardware_events_json=$(run_field_json pmu_hardware_events)
+pmu_metrics_json=$(run_field_json pmu_metrics)
 
 run_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
 run_dir=$runs_dir/$run_id
@@ -315,7 +373,7 @@ started_at=$(date -Iseconds)
 # instruções. É por isso que o `2>` prende no `time` e o `ffmpeg.log` acaba
 # recebendo o stderr da cadeia — prendê-lo no argv mais interno exigiria um shell.
 "$TIME_BIN" --quiet -f "$TIME_FORMAT" -o "$time_json" \
-  "$PERF_COMMAND" stat -j -e "$pmu_event_list" -o "$perf_json" -- \
+  "$PERF_COMMAND" stat -j -e "$perf_event_spec" -o "$perf_json" -- \
   "${ffmpeg_argv[@]}" >/dev/null 2>"$ffmpeg_log" &
 chain_pid=$!
 

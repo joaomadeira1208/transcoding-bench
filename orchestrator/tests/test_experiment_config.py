@@ -15,6 +15,7 @@ from conftest import (
     make_geometry,
     make_instance,
     make_instrumentation,
+    make_metric,
     make_source,
     make_video,
     real_config,
@@ -51,6 +52,31 @@ EXPECTED_PMU_EVENTS = [
     "context-switches",
     "cpu-migrations",
     "page-faults",
+]
+
+# Transcrição da ADR-0006 emendada: cada razão é um par que o `perf` tem de contar
+# no mesmo grupo, e trocar um numerador mantém a forma intacta enquanto o artigo
+# passa a reportar outra coisa com o mesmo nome.
+EXPECTED_METRIC_PAIRS = {
+    "ipc": ("instructions", "cycles"),
+    "cache_miss_rate": ("cache-misses", "cache-references"),
+    "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
+}
+
+EXPECTED_EVENT_SPEC = (
+    "{cycles,instructions},"
+    "{cache-references,cache-misses},"
+    "{branch-instructions,branch-misses},"
+    "task-clock,context-switches,cpu-migrations,page-faults"
+)
+
+EXPECTED_HARDWARE_EVENTS = [
+    "cycles",
+    "instructions",
+    "cache-references",
+    "cache-misses",
+    "branch-instructions",
+    "branch-misses",
 ]
 
 # Transcritos, e não computados a partir do `slug`: um teste que derivasse o
@@ -193,6 +219,36 @@ class TestRealExperimentToml:
     def test_declares_the_ten_pmu_events_of_the_adr_in_order(self):
         # Lista, não conjunto: a ordem é requisito, não coincidência.
         assert list(real_config().instrumentation.pmu_events) == EXPECTED_PMU_EVENTS
+
+    def test_declares_the_three_metrics_of_the_adr_with_their_pairs(self):
+        # Transcrição da ADR-0006 pelo mesmo instinto dos pares e dos muxers: um
+        # numerador trocado por outro evento mantém contagem e forma intactas, e o
+        # artigo passa a reportar outra coisa com o mesmo nome.
+        declared = {
+            metric.name: (metric.numerator, metric.denominator)
+            for metric in real_config().instrumentation.metrics
+        }
+
+        assert declared == EXPECTED_METRIC_PAIRS
+
+    def test_the_event_argument_groups_each_pair_and_leaves_the_rest_loose(self):
+        # O `-e` é o que decide se as três razões são medidas ou inventadas: sem
+        # as chaves, o kernel escalona cada evento por conta e o numerador de uma
+        # razão passa a ser medido numa janela diferente do denominador.
+        assert real_config().instrumentation.event_spec == EXPECTED_EVENT_SPEC
+
+    def test_the_event_argument_flattens_to_the_declared_order(self):
+        # Os membros de um grupo saem na ordem de `pmu_events`, de modo que o
+        # `perf.json` continue trazendo os contadores na ordem da spec.
+        spec = real_config().instrumentation.event_spec
+
+        assert spec.replace("{", "").replace("}", "").split(",") == EXPECTED_PMU_EVENTS
+
+    def test_the_hardware_events_are_exactly_the_grouped_ones(self):
+        # A lista que governa a regra do zero, e ela não é declarada à parte:
+        # `context-switches = 0` é resultado legítimo, e o que separa esse zero do
+        # zero mudo de um contador de PMU é estar ou não num grupo.
+        assert list(real_config().instrumentation.hardware_events) == EXPECTED_HARDWARE_EVENTS
 
     def test_pins_the_source_file_of_every_video(self):
         assert declared_sources(real_config()) == EXPECTED_SOURCES
@@ -747,3 +803,110 @@ class TestRejectsBadInstrumentation:
         message = str(excinfo.value)
         assert "instrumentation" in message
         assert "sample_rate" in message
+
+
+class TestRejectsBadMetrics:
+    """O par de uma métrica é o **grupo** que o `perf` escalona atomicamente.
+
+    Um grupo mal declarado não estoura: ou pede um evento que ninguém declarou
+    medir, ou gasta um contador a mais e faz o grupo inteiro voltar
+    `<not counted>` — que foi o que a primeira rodada viu no c7g.
+    """
+
+    @pytest.mark.parametrize("field", ["name", "numerator", "denominator", "max_ratio"])
+    def test_missing_field(self, make_raw_config, field):
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(metric=[make_metric(**{field: ABSENT})])
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "metric[0]" in message
+        assert field in message
+
+    def test_missing_metric_table(self, make_raw_config):
+        # Sem grupo nenhum, o `perf` escalona os dez soltos e volta a multiplexar:
+        # numerador e denominador medidos em janelas diferentes.
+        raw = make_raw_config(instrumentation=make_instrumentation(metric=ABSENT))
+
+        with pytest.raises(ConfigError, match="metric"):
+            validate_config(raw)
+
+    def test_empty_metric_list(self, make_raw_config):
+        raw = make_raw_config(instrumentation=make_instrumentation(metric=[]))
+
+        with pytest.raises(ConfigError, match="metric"):
+            validate_config(raw)
+
+    def test_an_event_the_pmu_events_does_not_declare(self, make_raw_config):
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(metric=[make_metric(numerator="branch-misses")])
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "metric[0]" in message
+        assert "branch-misses" in message
+        assert "pmu_events" in message
+
+    def test_the_same_event_in_two_groups(self, make_raw_config):
+        # Dois contadores para o mesmo evento, num orçamento que o c7g mostrou
+        # poder ser de três.
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(
+                pmu_events=["cycles", "instructions", "context-switches"],
+                metric=[
+                    make_metric(),
+                    make_metric(name="outra", numerator="cycles", denominator="context-switches"),
+                ],
+            )
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "metric[1]" in message
+        assert "cycles" in message
+        assert "ipc" in message
+
+    def test_a_group_of_a_single_event(self, make_raw_config):
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(
+                metric=[make_metric(numerator="cycles", denominator="cycles")]
+            )
+        )
+
+        with pytest.raises(ConfigError, match="cycles"):
+            validate_config(raw)
+
+    def test_duplicate_metric_name(self, make_raw_config):
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(metric=[make_metric(), make_metric()])
+        )
+
+        with pytest.raises(ConfigError, match="ipc"):
+            validate_config(raw)
+
+    @pytest.mark.parametrize("ceiling", [0, -1.0, "10", True])
+    def test_a_ceiling_that_is_not_a_positive_number(self, make_raw_config, ceiling):
+        # Zero ou negativo reprovaria toda medição, e um teto em string é a
+        # comparação que nunca dispara: os dois desligam a checagem em silêncio.
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(metric=[make_metric(max_ratio=ceiling)])
+        )
+
+        with pytest.raises(ConfigError, match="max_ratio"):
+            validate_config(raw)
+
+    def test_unknown_key_in_a_metric(self, make_raw_config):
+        raw = make_raw_config(
+            instrumentation=make_instrumentation(metric=[make_metric(min_ratio=0.1)])
+        )
+
+        with pytest.raises(ConfigError, match="min_ratio"):
+            validate_config(raw)

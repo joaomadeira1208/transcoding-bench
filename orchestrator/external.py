@@ -6,6 +6,7 @@ import json
 import shlex
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from command_output import (
@@ -253,6 +254,43 @@ def ssm_get_parameter(name: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class CommandOutput:
+    """As duas saídas de um comando remoto e o status dele, quando as três são evidência."""
+
+    stdout: str
+    stderr: str
+    returncode: int
+
+
+def ssh_capture(
+    host: str,
+    command: Sequence[str],
+    *,
+    key_path: Path = SSH_KEY_PATH,
+    timeout: float | None = None,
+) -> CommandOutput:
+    """O mesmo que o `ssh_exec`, entregando as duas saídas e o status em vez do `stdout`.
+
+    O status é devolvido e não levantado: fazê-lo levantar descartaria as saídas
+    do comando que **falhou**, que são a evidência que o chamador guarda. Só a
+    falha do próprio `ssh` continua sendo exceção — dela não há saída a preservar.
+    """
+    completed = _run_capture(
+        _ssh_argv(host, command, key_path=key_path),
+        allowed_returncodes=None,
+        timeout=timeout,
+    )
+    if completed.returncode == SSH_UNREACHABLE_RETURNCODE:
+        raise ExternalCommandError(
+            f"ssh {host} falhou (exit {completed.returncode}): {completed.stderr.strip()}",
+            returncode=completed.returncode,
+        )
+    return CommandOutput(
+        stdout=completed.stdout, stderr=completed.stderr, returncode=completed.returncode
+    )
+
+
 def ssh_exec(
     host: str,
     command: Sequence[str],
@@ -263,26 +301,30 @@ def ssh_exec(
 ) -> str:
     """Roda um comando na instância e devolve o `stdout`, bloqueando até o fim."""
     return _run(
-        [
-            "ssh",
-            "-i",
-            str(key_path),
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            f"ConnectTimeout={SSH_CONNECT_TIMEOUT_SECONDS}",
-            "-o",
-            f"ServerAliveInterval={SSH_KEEPALIVE_INTERVAL_SECONDS}",
-            "-o",
-            f"ServerAliveCountMax={SSH_KEEPALIVE_COUNT_MAX}",
-            f"{SSH_USER}@{host}",
-            shlex.join(command),
-        ],
+        _ssh_argv(host, command, key_path=key_path),
         allowed_returncodes=allowed_returncodes,
         timeout=timeout,
     )
+
+
+def _ssh_argv(host: str, command: Sequence[str], *, key_path: Path) -> list[str]:
+    return [
+        "ssh",
+        "-i",
+        str(key_path),
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"ConnectTimeout={SSH_CONNECT_TIMEOUT_SECONDS}",
+        "-o",
+        f"ServerAliveInterval={SSH_KEEPALIVE_INTERVAL_SECONDS}",
+        "-o",
+        f"ServerAliveCountMax={SSH_KEEPALIVE_COUNT_MAX}",
+        f"{SSH_USER}@{host}",
+        shlex.join(command),
+    ]
 
 
 def cloud_init_status(host: str, *, key_path: Path = SSH_KEY_PATH) -> CloudInitStatus | None:
@@ -318,6 +360,16 @@ def _run(
     allowed_returncodes: Sequence[int] = (0,),
     timeout: float | None = None,
 ) -> str:
+    return _run_capture(argv, allowed_returncodes=allowed_returncodes, timeout=timeout).stdout
+
+
+def _run_capture(
+    argv: Sequence[str],
+    *,
+    allowed_returncodes: Sequence[int] | None = (0,),
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """`None` em `allowed_returncodes` é "qualquer status", e não "nenhum"."""
     try:
         completed = subprocess.run(
             argv, capture_output=True, text=True, check=False, timeout=timeout
@@ -327,13 +379,13 @@ def _run(
             f"{_command_name(argv)} não respondeu em {timeout:g}s", returncode=None
         ) from error
 
-    if completed.returncode not in allowed_returncodes:
+    if allowed_returncodes is not None and completed.returncode not in allowed_returncodes:
         raise ExternalCommandError(
             f"{_command_name(argv)} falhou (exit {completed.returncode}): "
             f"{completed.stderr.strip()}",
             returncode=completed.returncode,
         )
-    return completed.stdout
+    return completed
 
 
 def _command_name(argv: Sequence[str]) -> str:

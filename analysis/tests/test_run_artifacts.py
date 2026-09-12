@@ -53,7 +53,15 @@ class TestTheRealTools:
         # tabela declara: trocar um evento de um lado só deixaria a métrica vazia
         # para a campanha inteira, e o `perf stat` não reclama disso.
         assert set(counters) == set(PMU_EVENTS)
-        assert all(value is None or value > 0 for value in counters.values())
+        assert all(counter.value is None or counter.value > 0 for counter in counters.values())
+
+    def test_the_fraction_of_time_each_counter_ran_is_read(self, encoder):
+        # O campo que a primeira rodada do `preflight` descartou: abaixo de 100 o
+        # valor é estimativa extrapolada, e sem a coluna uma estimativa e uma
+        # contagem ficam indistinguíveis no Parquet (ADR-0006).
+        counters = parse_perf(read_capture(encoder, "perf.json"))
+
+        assert all(counter.pcnt_running == 100.0 for counter in counters.values())
 
     def test_the_absent_counters_are_exactly_the_unsupported_ones(self, encoder):
         # A captura vem sem PMU (o Docker no Mac não a expõe ao guest), então ela
@@ -63,7 +71,7 @@ class TestTheRealTools:
         raw = read_capture(encoder, "perf.json")
         counters = parse_perf(raw)
 
-        assert {event for event, value in counters.items() if value is None} == {
+        assert {event for event, counter in counters.items() if counter.value is None} == {
             json.loads(line)["event"] for line in raw.splitlines() if "<not supported>" in line
         }
 
@@ -123,14 +131,40 @@ class TestPerf:
         # `run_scenario.sh` confere o arquivo textualmente.
         counters = parse_perf(make_perf_json(header='{"cpu" : "0", "thread" : "ffmpeg"}'))
 
-        assert counters["cycles"] == 4_000_000_000.0
+        assert counters["cycles"].value == 4_000_000_000.0
 
     def test_an_unsupported_event_comes_out_absent_not_zero(self):
         # `perf stat` não falha quando o evento não existe na arquitetura; zero
         # entraria numa média como medição.
         counters = parse_perf(make_perf_json({"cycles": "<not supported>"}))
 
-        assert counters["cycles"] is None
+        assert counters["cycles"].value is None
+
+    def test_the_modifier_perf_appends_to_the_event_still_names_the_column(self):
+        # `perf` ecoa o evento com o modificador que aplicou, e as duas guardas do
+        # `run_scenario.sh` e do `preflight` já o descartam: mantê-lo aqui faria a
+        # coluna daquele evento sair nula num run que as duas aprovaram.
+        counters = parse_perf(make_perf_json({"cycles:u": 4e9}))
+
+        assert counters["cycles"].value == 4_000_000_000.0
+
+    def test_a_counter_that_never_ran_comes_out_absent_not_zero(self):
+        # `<not counted>` é o segundo modo de falha, e o `perf` também não falha
+        # nele: o contador abriu e o kernel nunca o escalonou.
+        counters = parse_perf(make_perf_json({"cycles": "<not counted>"}))
+
+        assert counters["cycles"].value is None
+
+    def test_a_counter_that_ran_a_fraction_of_the_time_keeps_the_fraction(self):
+        counters = parse_perf(make_perf_json(pcnt_running=33.33))
+
+        assert counters["cycles"].pcnt_running == 33.33
+
+    def test_a_perf_that_does_not_report_the_fraction_leaves_it_absent(self):
+        counters = parse_perf(make_perf_json(pcnt_running=None))
+
+        assert counters["cycles"].value == 4_000_000_000.0
+        assert counters["cycles"].pcnt_running is None
 
     def test_an_absent_event_is_absent_from_the_mapping(self):
         counters = parse_perf(make_perf_json({"instructions": 1.0}))

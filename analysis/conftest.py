@@ -124,11 +124,17 @@ def make_time_json(**overrides: Any) -> str:
     return json.dumps(_with_overrides(_VALID_TIME, overrides)) + "\n"
 
 
-def make_perf_json(counters: Mapping[str, Any] | None = None, header: str = "") -> str:
+def make_perf_json(
+    counters: Mapping[str, Any] | None = None,
+    header: str = "",
+    pcnt_running: float | None = 100.00,
+) -> str:
     """Um `perf.json`: um objeto por linha, o contador como string.
 
     `header` entra como primeira linha porque o cabeçalho do `perf stat -j` varia
-    com a versão e o parser tem de atravessá-lo.
+    com a versão e o parser tem de atravessá-lo. O `pcnt-running` é parâmetro
+    porque abaixo de 100 o valor é estimativa, e `None` o omite — versão de
+    `perf` que não o reporta é o caso que a coluna tem de atravessar.
     """
     if counters is None:
         counters = _VALID_COUNTERS
@@ -140,7 +146,7 @@ def make_perf_json(counters: Mapping[str, Any] | None = None, header: str = "") 
                 "unit": "",
                 "event": event,
                 "event-runtime": 1000000,
-                "pcnt-running": 100.00,
+                **({} if pcnt_running is None else {"pcnt-running": pcnt_running}),
             }
         )
         for event, value in counters.items()

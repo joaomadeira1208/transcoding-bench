@@ -62,6 +62,14 @@ séries do `pidstat` ficam **fora**: só o agregado entra, e a série continua n
 raw dir, consultada sob demanda, para que a tabela não ganhe centenas de milhares
 de linhas.
 
+Cada evento de PMU tem **duas** colunas: `perf_{evento}` com o valor e
+`perf_{evento}_pcnt_running` com a fração do tempo em que aquele contador esteve
+rodando. Abaixo de 100 o valor é estimativa extrapolada, não contagem, e é o regime
+esperado onde a PMU tem menos contadores que eventos — os pares da ADR-0006 mantêm
+a razão correta ali, mas sem a coluna uma estimativa de uma arquitetura e uma
+contagem de outra entrariam na mesma comparação indistinguíveis. É o que permite ao
+artigo dizer qual dos dois cada número é.
+
 Quem entra:
 
 - todo `meta.json` é validado na leitura, e um inválido **derruba** a

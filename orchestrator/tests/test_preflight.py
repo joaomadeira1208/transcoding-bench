@@ -1,7 +1,12 @@
-# O núcleo puro do `preflight`. Os dois alvos falham em silêncio, e os dois
-# custam uma instância faturando: um `perf stat` que não abriu contador passa por
-# "rodou" se ninguém olhar o valor, e um passo que some da tabela é uma capacidade
-# que ninguém provou e o pesquisador acha que sim.
+# O núcleo puro do `preflight`. Os alvos falham em silêncio, e cada um custa uma
+# instância faturando: um `perf stat` que não abriu contador passa por "rodou" se
+# ninguém olhar o valor; um contador que responde `0` ou uma razão impossível
+# passam por "mediu" se ninguém olhar o que o valor diz; e um passo que some da
+# tabela é uma capacidade que ninguém provou e o pesquisador acha que sim.
+#
+# A primeira rodada do passo reprovou o c7g por `<not counted>` e **aprovou** o
+# c7i com `cache-references = 0` e o c7a com `branch-misses` quase o dobro de
+# `instructions`. Os três casos moram aqui.
 
 from __future__ import annotations
 
@@ -11,72 +16,175 @@ import re
 import pytest
 from conftest import real_config
 from preflight import (
+    NOT_COUNTED,
     NOT_SUPPORTED,
+    PROBE_SECONDS,
     STEPS,
     Outcome,
     PreflightError,
     Step,
     StepResult,
     failed,
-    perf_counter_values,
+    perf_counters,
     perf_detail,
     perf_probe_command,
+    probe_encode_argv,
     render_table,
     summarize,
 )
+from scenario_plan import build_canonical_plan
 
-PMU_EVENTS = real_config().instrumentation.pmu_events
+INSTRUMENTATION = real_config().instrumentation
+PMU_EVENTS = INSTRUMENTATION.pmu_events
+HARDWARE_EVENTS = INSTRUMENTATION.hardware_events
+SOFTWARE_EVENTS = tuple(event for event in PMU_EVENTS if event not in HARDWARE_EVENTS)
+METRICS = INSTRUMENTATION.metrics
 
 
-def counter_line(event: str, value: str) -> str:
+def counter_line(event: str, value: str, pcnt_running: float = 100.0) -> str:
     return json.dumps(
         {
             "counter-value": value,
             "unit": "",
             "event": event,
             "event-runtime": 1001233,
-            "pcnt-running": 100.0,
+            "pcnt-running": pcnt_running,
             "metric-value": "0.000000",
             "metric-unit": "(null)",
         }
     )
 
 
-def perf_output(values: dict[str, str]) -> str:
-    return "\n".join(counter_line(event, value) for event, value in values.items())
+def perf_output(values: dict[str, str], pcnt_running: float = 100.0) -> str:
+    return "\n".join(counter_line(event, value, pcnt_running) for event, value in values.items())
 
 
 def every_event_counted() -> dict[str, str]:
     return {event: "1234567.000000" for event in PMU_EVENTS}
 
 
-class TestThePerfProbe:
-    def test_the_probe_asks_for_the_events_the_configuration_declares(self):
-        # O resto deste argv é argv de sistema e fica sem teste (ADR-0022); a
-        # lista, não: transcrevê-la aqui faria trocar um evento no TOML mudar o
-        # que a campanha mede sem mudar o que o preflight confere.
-        argv = perf_probe_command(PMU_EVENTS)
+def counted(values: dict[str, str], pcnt_running: float = 100.0):
+    return perf_counters(perf_output(values, pcnt_running), INSTRUMENTATION)
 
-        assert argv[argv.index("-e") + 1] == ",".join(PMU_EVENTS)
+
+def first_run() -> dict:
+    return build_canonical_plan(real_config())["blocks"][0]["runs"][0]
+
+
+class TestThePerfProbe:
+    def test_the_probe_asks_for_the_events_grouped_as_the_configuration_declares(self):
+        # O resto deste argv é argv de sistema e fica sem teste (ADR-0022); o `-e`,
+        # não: transcrevê-lo aqui faria trocar um par no TOML mudar o que a
+        # campanha mede sem mudar o que o preflight confere.
+        argv = perf_probe_command(
+            run=first_run(),
+            event_spec=INSTRUMENTATION.event_spec,
+            repo_dir="/home/ubuntu/transcoding-bench",
+            work_dir="/home/ubuntu/work",
+        )
+
+        assert argv[argv.index("-e") + 1] == INSTRUMENTATION.event_spec
+
+    def test_the_probe_dumps_the_resolved_event_of_each_name(self):
+        # Sem o `-vv` não há como dizer se `cache-references` é L1D, LLC ou L2
+        # naquela arquitetura, e o "cache miss rate" compararia três coisas.
+        argv = perf_probe_command(
+            run=first_run(),
+            event_spec=INSTRUMENTATION.event_spec,
+            repo_dir="/home/ubuntu/transcoding-bench",
+            work_dir="/home/ubuntu/work",
+        )
+
+        assert "-vv" in argv
+
+    def test_the_probe_runs_the_container_of_the_campaign(self):
+        # Mesmos mounts e mesma capability do `launch_container.sh`: um degrau só
+        # prova o que roda pelo mesmo caminho.
+        argv = perf_probe_command(
+            run=first_run(),
+            event_spec=INSTRUMENTATION.event_spec,
+            repo_dir="/home/ubuntu/transcoding-bench",
+            work_dir="/home/ubuntu/work",
+        )
+
+        assert "--cap-add=PERFMON" in argv
+        assert "/home/ubuntu/transcoding-bench/encode:/opt/encode:ro" in argv
+        assert "/home/ubuntu/work:/work" in argv
+
+    def test_the_probe_encodes_the_master_the_run_names(self):
+        # `-- true` termina em microssegundos: curto demais para o rodízio da PMU
+        # girar uma volta, e curto demais para um contador que responde zero
+        # provar coisa alguma.
+        run = first_run()
+        argv = probe_encode_argv(run)
+
+        assert argv[0] == "ffmpeg"
+        assert argv[argv.index("-i") + 1].endswith(f"/{run['master']}")
+        assert argv[argv.index("-t") + 1] == str(PROBE_SECONDS)
+
+    def test_the_probe_encodes_with_the_parameters_of_that_scenario(self):
+        run = first_run()
+        argv = probe_encode_argv(run)
+
+        assert argv[argv.index("-c:v") + 1] == run["encoder"]
+        assert argv[argv.index("-crf") + 1] == str(run["crf"])
+        assert argv[argv.index("-vf") + 1].startswith(
+            f"scale={run['output_width']}:{run['output_height']}"
+        )
+
+    def test_the_probe_writes_no_output(self):
+        # Segundos de encode no disco de uma instância descartável não são dado;
+        # o trabalho que a PMU conta é o mesmo com o muxer `null`.
+        assert probe_encode_argv(first_run())[-2:] == ["null", "/dev/null"]
 
 
 class TestThePerfCounters:
     def test_the_ten_events_with_a_numeric_value_are_the_measurement(self):
-        counted = perf_counter_values(perf_output(every_event_counted()), PMU_EVENTS)
+        measured = counted(every_event_counted())
 
-        assert list(counted) == list(PMU_EVENTS)
-        assert set(counted.values()) == {1234567.0}
+        assert list(measured) == list(PMU_EVENTS)
+        assert {counter.value for counter in measured.values()} == {1234567.0}
 
     @pytest.mark.parametrize("event", PMU_EVENTS)
     def test_not_supported_is_refused_naming_the_event(self, event):
-        # O modo de falha inteiro do passo: `perf stat` **não** sai não-zero
-        # quando o evento não existe naquela PMU (ADR-0006), então quem só olha o
-        # código de saída dá o contador por aberto.
+        # `perf stat` **não** sai não-zero quando o evento não existe naquela PMU
+        # (ADR-0006), então quem só olha o código de saída dá o contador por
+        # aberto.
         values = every_event_counted() | {event: NOT_SUPPORTED}
 
         with pytest.raises(PreflightError, match=re.escape(event)) as refusal:
-            perf_counter_values(perf_output(values), PMU_EVENTS)
-        assert "not supported" in str(refusal.value)
+            counted(values)
+        assert NOT_SUPPORTED in str(refusal.value)
+
+    @pytest.mark.parametrize("event", PMU_EVENTS)
+    def test_not_counted_is_refused_naming_the_event(self, event):
+        # O modo de falha do c7g, e distinto do anterior: o contador abriu e nunca
+        # rodou. Um manda trocar o evento, o outro manda olhar o orçamento de
+        # contadores — a recusa tem de dizer qual dos dois.
+        values = every_event_counted() | {event: NOT_COUNTED}
+
+        with pytest.raises(PreflightError, match=re.escape(event)) as refusal:
+            counted(values)
+        assert NOT_COUNTED in str(refusal.value)
+
+    @pytest.mark.parametrize("event", HARDWARE_EVENTS)
+    def test_a_zeroed_hardware_counter_is_refused_naming_the_event(self, event):
+        # O modo de falha do c7i, e o pior dos três: zero é número válido, passa
+        # por qualquer guarda de string e vira `cache_miss_rate` nulo para uma
+        # arquitetura inteira, descoberto só no `consolidate.py`.
+        values = every_event_counted() | {event: "0.000000"}
+
+        with pytest.raises(PreflightError, match=re.escape(event)) as refusal:
+            counted(values)
+        assert "zero" in str(refusal.value)
+
+    @pytest.mark.parametrize("event", SOFTWARE_EVENTS)
+    def test_a_zeroed_software_counter_is_a_measurement(self, event):
+        # `context-switches = 0` e `cpu-migrations = 0` são resultados legítimos e
+        # desejáveis: recusá-los derrubaria todo run de uma instância ociosa.
+        values = every_event_counted() | {event: "0.000000"}
+
+        assert counted(values)[event].value == 0.0
 
     @pytest.mark.parametrize("event", PMU_EVENTS)
     def test_an_event_absent_from_the_output_is_refused_naming_it(self, event):
@@ -84,14 +192,14 @@ class TestThePerfCounters:
         del values[event]
 
         with pytest.raises(PreflightError, match=re.escape(event)):
-            perf_counter_values(perf_output(values), PMU_EVENTS)
+            counted(values)
 
     @pytest.mark.parametrize("event", PMU_EVENTS)
     def test_a_counter_value_that_is_not_a_number_is_refused_naming_the_event(self, event):
         values = every_event_counted() | {event: ""}
 
         with pytest.raises(PreflightError, match=re.escape(event)):
-            perf_counter_values(perf_output(values), PMU_EVENTS)
+            counted(values)
 
     def test_every_event_without_a_counter_is_named_in_the_same_refusal(self):
         # Uma execução do passo é uma instância: recusar no primeiro evento faria
@@ -100,13 +208,13 @@ class TestThePerfCounters:
         values = every_event_counted() | dict.fromkeys(PMU_EVENTS[:3], NOT_SUPPORTED)
 
         with pytest.raises(PreflightError) as refusal:
-            perf_counter_values(perf_output(values), PMU_EVENTS)
+            counted(values)
         for event in PMU_EVENTS[:3]:
             assert event in str(refusal.value)
 
     def test_an_empty_output_is_refused_naming_every_event(self):
         with pytest.raises(PreflightError) as refusal:
-            perf_counter_values("", PMU_EVENTS)
+            perf_counters("", INSTRUMENTATION)
 
         for event in PMU_EVENTS:
             assert event in str(refusal.value)
@@ -116,41 +224,120 @@ class TestThePerfCounters:
             ["# started on Fri Sep 11 18:00:00 2026", "", perf_output(every_event_counted())]
         )
 
-        assert len(perf_counter_values(output, PMU_EVENTS)) == len(PMU_EVENTS)
+        assert len(perf_counters(output, INSTRUMENTATION)) == len(PMU_EVENTS)
 
     def test_the_modifier_perf_appends_to_the_event_still_counts(self):
         # `perf` ecoa o evento com o modificador que aplicou (`cycles:u`), e uma
         # comparação exata recusaria um contador que abriu.
         values = {f"{event}:u": "7.000000" for event in PMU_EVENTS}
 
-        assert perf_counter_values(perf_output(values), PMU_EVENTS) == dict.fromkeys(
-            PMU_EVENTS, 7.0
-        )
-
-    def test_a_zeroed_counter_is_a_counter(self):
-        # Zero é medição, não ausência: um comando trivial pode não gerar evento
-        # nenhum atribuído ao contador, e recusá-lo seria falso negativo.
-        values = dict.fromkeys(PMU_EVENTS, "0.000000")
-
-        assert perf_counter_values(perf_output(values), PMU_EVENTS) == dict.fromkeys(
-            PMU_EVENTS, 0.0
+        assert {event: counter.value for event, counter in counted(values).items()} == (
+            dict.fromkeys(PMU_EVENTS, 7.0)
         )
 
     def test_an_event_the_probe_did_not_ask_for_is_not_the_verdict(self):
-        values = every_event_counted() | {"duration_time": "<not supported>"}
+        values = every_event_counted() | {"duration_time": NOT_SUPPORTED}
 
-        assert len(perf_counter_values(perf_output(values), PMU_EVENTS)) == len(PMU_EVENTS)
+        assert len(counted(values)) == len(PMU_EVENTS)
+
+
+class TestTheMeasurementRegime:
+    def test_the_fraction_of_time_each_counter_ran_survives_the_reading(self):
+        measured = counted(every_event_counted(), pcnt_running=33.5)
+
+        assert {counter.pcnt_running for counter in measured.values()} == {33.5}
+
+    def test_a_counter_that_ran_a_fraction_of_the_time_is_not_a_refusal(self):
+        # Com os pares, fração abaixo de 100 é o regime **esperado** onde a PMU
+        # tem menos contadores que eventos: os dois membros do grupo veem a mesma
+        # janela, e a razão continua correta. É registro, não recusa.
+        assert len(counted(every_event_counted(), pcnt_running=12.0)) == len(PMU_EVENTS)
+
+    def test_a_perf_that_does_not_report_the_fraction_still_counts(self):
+        raw = "\n".join(
+            json.dumps({"counter-value": "7.000000", "event": event}) for event in PMU_EVENTS
+        )
+
+        assert all(
+            counter.pcnt_running is None for counter in perf_counters(raw, INSTRUMENTATION).values()
+        )
+
+
+class TestPlausibility:
+    @pytest.mark.parametrize("metric", METRICS, ids=lambda metric: metric.name)
+    def test_a_ratio_past_the_declared_ceiling_is_refused_naming_it(self, metric):
+        # O que separa "o contador respondeu" de "o contador mediu", e a única
+        # coisa que teria transformado os dois `passou` da primeira rodada em
+        # falhas honestas: os dois números existem, os dois são não-zero, e nenhum
+        # é string de erro.
+        values = every_event_counted() | {
+            metric.numerator: f"{1234567.0 * metric.max_ratio * 2:.6f}"
+        }
+
+        with pytest.raises(PreflightError, match=re.escape(metric.name)) as refusal:
+            counted(values)
+        assert metric.numerator in str(refusal.value)
+        assert metric.denominator in str(refusal.value)
+
+    @pytest.mark.parametrize("metric", METRICS, ids=lambda metric: metric.name)
+    def test_a_ratio_exactly_at_the_ceiling_passes(self, metric):
+        values = every_event_counted() | {metric.numerator: f"{1234567.0 * metric.max_ratio:.6f}"}
+
+        assert len(counted(values)) == len(PMU_EVENTS)
+
+    def test_the_counters_of_the_c7a_are_refused(self):
+        # Os números da primeira rodada, verbatim: IPC 18,6 e 942 % de desvios
+        # errados. O passo aprovou isto.
+        values = every_event_counted() | {
+            "cycles": "40210.000000",
+            "instructions": "746971.000000",
+            "cache-references": "82561.000000",
+            "cache-misses": "20657.000000",
+            "branch-instructions": "146708.000000",
+            "branch-misses": "1382176.000000",
+        }
+
+        with pytest.raises(PreflightError) as refusal:
+            counted(values)
+        assert "ipc" in str(refusal.value)
+        assert "branch_mispredict_rate" in str(refusal.value)
+
+    def test_every_violated_ratio_is_named_in_the_same_refusal(self):
+        values = every_event_counted() | {
+            metric.numerator: f"{1234567.0 * metric.max_ratio * 2:.6f}" for metric in METRICS
+        }
+
+        with pytest.raises(PreflightError) as refusal:
+            counted(values)
+        for metric in METRICS:
+            assert metric.name in str(refusal.value)
+
+    def test_a_counter_without_a_value_is_reported_before_any_ratio(self):
+        # Uma razão sobre um contador que não abriu não diz nada sobre
+        # plausibilidade, e o diagnóstico que importa é o do contador.
+        values = every_event_counted() | {METRICS[0].denominator: NOT_SUPPORTED}
+
+        with pytest.raises(PreflightError) as refusal:
+            counted(values)
+        assert METRICS[0].name not in str(refusal.value)
 
 
 class TestTheDetailOfThePerfStep:
     def test_the_line_lists_every_event_with_its_value(self):
-        detail = perf_detail(perf_counter_values(perf_output(every_event_counted()), PMU_EVENTS))
+        detail = perf_detail(counted(every_event_counted()))
 
         for event in PMU_EVENTS:
             assert f"{event} = 1234567" in detail
 
+    def test_the_line_carries_the_regime_next_to_each_value(self):
+        # Sem o `pcnt-running` ao lado, uma estimativa e uma contagem entram na
+        # mesma coluna indistinguíveis.
+        detail = perf_detail(counted(every_event_counted(), pcnt_running=42.0))
+
+        assert detail.count("pcnt-running 42%") == len(PMU_EVENTS)
+
     def test_the_line_survives_the_table(self):
-        detail = perf_detail(perf_counter_values(perf_output(every_event_counted()), PMU_EVENTS))
+        detail = perf_detail(counted(every_event_counted()))
         results = summarize([StepResult(Step.PERF, Outcome.PASSED, detail)])
 
         line = next(

@@ -28,6 +28,24 @@ pmu_events = [
   "page-faults",
 ]
 
+[[instrumentation.metric]]
+name = "ipc"
+numerator = "instructions"
+denominator = "cycles"
+max_ratio = 10.0
+
+[[instrumentation.metric]]
+name = "cache_miss_rate"
+numerator = "cache-misses"
+denominator = "cache-references"
+max_ratio = 1.0
+
+[[instrumentation.metric]]
+name = "branch_mispredict_rate"
+numerator = "branch-misses"
+denominator = "branch-instructions"
+max_ratio = 1.0
+
 [[codec]]
 slug = "libx264"
 codec = "h264"

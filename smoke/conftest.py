@@ -87,6 +87,13 @@ class ShimTrail:
     def bucket_dir(self) -> Path:
         return self.s3_root / BUCKET
 
+    def object_versions(self, key: str) -> list[bytes]:
+        """Cada versão daquele objeto, na ordem em que o shim as recebeu."""
+        versions = self.argv_dir / "versions" / key
+        if not versions.is_dir():
+            return []
+        return [path.read_bytes() for path in sorted(versions.iterdir())]
+
     def uploaded(self, run_dir: Path) -> Path:
         """Onde o shim do `aws` deixou a cópia de `runs/{run_id}/`."""
         return self.bucket_dir() / "runs" / run_dir.name

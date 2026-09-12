@@ -13,13 +13,22 @@ s3://<bucket>/
   masters/          # 6 masters + manifest.json (preparação, ADR-0014)
   scenarios/        # scenarios.json canônico + fatias por arch (ex.: canonical.json, c7g.json)
   runs/{run_id}/    # raw dirs das Execuções (ADR-0007), warm-ups inclusos
-  status/           # marcadores de término ({instance_type}_done, judge_done)
+  status/           # progresso e desfecho por Instância
+                    #   ({instance_type}_progress, {instance_type}_done, judge_done)
   quality/
     plan.json       # quality_plan.json gerado pelo triage (ADR-0014)
     results/        # resultados VMAF/SSIM do Juiz
 ```
 
 **Emenda: `masters/manifest.json` é objeto de contrato.** A preparação dos masters (ADR-0014) escreve, ao lado dos seis `.mkv`, um manifesto com nome, tamanho, sha256 e as propriedades observadas pelo `ffprobe` de cada um, mais as versões da imagem que os produziu. Ele tem dois leitores: o pesquisador, que o confere antes de aprovar a campanha (gate da ADR-0012), e o bootstrap de cada instância de encode, que valida o sha256 do master baixado contra ele antes do primeiro Cenário. Nome e caminho fixos porque quem lê recebe o path por argumento, como todo o resto deste layout.
+
+**Emenda: `status/` carrega progresso e desfecho, não presença.** São dois objetos por Instância de encode, os dois escritos pelo `run_all.sh` e lidos pelo Orquestrador no poll de vigilância.
+
+`status/{instance_type}_progress` é **sobrescrito depois de cada Execução**, entre runs — um `jq -n` e um `s3 cp` de poucos bytes, nunca durante um encode, pela mesma razão que o upload dos artefatos espera o fim do run. Carrega `instance_id`, `block_index` e `block_count`, `run_index` e `run_count` (os índices 1-based, com o total ao lado), o `scenario_id` da Execução que acabou, `runs_total`, `runs_failed`, `elapsed_seconds` e `written_at` em ISO-8601 com offset. O total da fatia contra o qual o Orquestrador o lê vem do plano que ele mesmo subiu para `scenarios/`.
+
+`status/{instance_type}_done` deixa de ser uma linha de `date` e passa a ser JSON com `instance_id`, `finished_at`, `runs_total`, `runs_failed`, `capped` (booleano) e `exit_status`. A chave não muda, o IAM não muda — o papel `encode` já tem `PutObject` em `status/*` (ADR-0016) —, e ele continua sendo o último objeto que a Instância escreve quando o laço termina, inclusive no caminho do teto da ADR-0012. Morto por sinal, o laço não escreve marcador nenhum: é por essa ausência que o Orquestrador distingue uma Instância que acabou de uma que morreu no meio de um run.
+
+O `instance_id` está nos dois porque o `DeleteObject` da matriz da ADR-0016 não alcança `status/`: numa retomada os objetos da tentativa anterior sobrevivem no bucket, e uma instância relançada pareceria pronta na hora zero. Presença deixa de ser sinal; identidade passa a ser. Duas alternativas foram rejeitadas: `tail` do log por SSH, que exige uma conexão por poll e parsing de texto livre, e contar objetos em `runs/`, que devolve chave e tamanho e não diz de qual arquitetura veio cada `runs/{run_id}/`.
 
 Os prefixos são **contrato**, não convenção: a matriz IAM (ADR-0016) escopa permissões por prefixo, e cada bootstrap recebe o path exato do que consome — a instância nunca decide path, coerente com "a seleção mora no lado inteligente" (ADR-0019). Dado de runtime (`scenarios.json`, `quality_plan.json`) viaja **sempre via S3 pro work dir** (ADR-0018), nunca por SCP — um mecanismo, dois consumidores (encode e Juiz).
 

@@ -55,6 +55,13 @@ VALID_META_JSON = """{
 # O mesmo arquivo, com o `warmup` escrito como string.
 INVALID_META_JSON = VALID_META_JSON.replace('"warmup": false', '"warmup": "false"')
 
+# E com o `commit` presente e vazio, que é o que `jq -r` escreve sobre uma chave
+# que o bash não conseguiu preencher: o `--exclude-commit` da retomada compara
+# esse campo, e um leitor que o aceitasse vazio casaria com nada em silêncio.
+EMPTY_COMMIT_JSON = VALID_META_JSON.replace(
+    '"commit": "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900"', '"commit": ""'
+)
+
 
 def test_the_valid_meta_is_accepted():
     assert check_meta(VALID_META_JSON)["warmup"] is False
@@ -63,3 +70,8 @@ def test_the_valid_meta_is_accepted():
 def test_the_invalid_meta_is_rejected():
     with pytest.raises(MetaError, match="warmup"):
         check_meta(INVALID_META_JSON)
+
+
+def test_the_empty_commit_is_rejected():
+    with pytest.raises(MetaError, match="commit"):
+        check_meta(EMPTY_COMMIT_JSON)

@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
-import string
 import sys
 import tomllib
 from collections.abc import Callable, Sequence
@@ -18,8 +16,6 @@ from command_output import OutputError
 from experiment_config import ConfigError, ExperimentConfig, validate_config
 from external import (
     ExternalCommandError,
-    cloud_init_status,
-    described_instance,
     git_rev_parse,
     run_instances,
     s3_cp,
@@ -32,23 +28,30 @@ from external import (
     terminate_instances,
 )
 from infra_config import InfraConfig, InfraError, parse_infra
-from instance_wait import (
-    BootstrapError,
-    WaitTimeout,
-    wait_for_bootstrap,
-    wait_for_instance_ready,
+from instance_launch import (
+    ENCODE_VOLUME_SIZE_GB,
+    IMDS_HOP_LIMIT,
+    REMOTE_REPO_DIR,
+    REMOTE_WORK_DIR,
+    EncodeTarget,
+    LaunchError,
+    encode_tags,
+    encode_target,
+    launch_encode,
+    orphan_hint,
+    render_user_data,
+    wait_for_bootstrapped_instance,
 )
+from instance_wait import BootstrapError, WaitTimeout
 from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
 from masters_plan import build_masters_plan
 from preflight import (
-    EncodeTarget,
     Outcome,
     PreflightError,
     Step,
     StepResult,
     encode_put_command,
-    encode_target,
     failed,
     perf_counter_values,
     perf_detail,
@@ -62,25 +65,12 @@ PROG = "orchestrator.py"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
-USER_DATA_TEMPLATE = REPO_ROOT / "orchestrator" / "user-data.sh"
-
-REPO_URL = "https://github.com/joaomadeira1208/transcoding-bench.git"
-
-# O caminho do clone é literal no `user-data.sh`, e não um placeholder: mudá-lo
-# lá sem mudá-lo aqui faz o `docker run` montar um diretório que não existe.
-REMOTE_REPO_DIR = "/home/ubuntu/transcoding-bench"
-REMOTE_WORK_DIR = "/home/ubuntu/work"
 
 MASTERS_ROLE = "masters"
 MASTERS_INSTANCE_TYPE = "c7g.xlarge"
 MASTERS_VOLUME_SIZE_GB = 100
 
-# O papel do bootstrap e o valor da tag `role`. A policy só autoriza o
-# `TerminateInstances` sobre `encode`, `judge` e `masters` (ADR-0016): uma tag
-# `preflight` deixaria a instância deste passo interminável por quem a lançou.
-ENCODE_ROLE = "encode"
 PREFLIGHT_INSTANCE_TYPE = "c7g.xlarge"
-PREFLIGHT_VOLUME_SIZE_GB = 200
 PREFLIGHT_NAME_TAG = "transcoding-bench-preflight"
 
 MASTERS_PREFIX = "masters/"
@@ -91,15 +81,6 @@ PREFLIGHT_PREFIX = "runs/preflight/"
 SELF_CHECK_PREFIX = f"{PREFLIGHT_PREFIX}self-check/"
 SELF_CHECK_OBJECT = "probe.txt"
 SELF_CHECK_CONTENT = "preflight\n"
-
-# O `aws s3 cp` da preparação roda dentro do container (ADR-0018).
-IMDS_HOP_LIMIT = 2
-
-READY_TIMEOUT_SECONDS = 600.0
-
-# O bootstrap dos papéis de medição termina no `docker build`, que compila o
-# FFmpeg da ADR-0008 (10 a 20 min, ADR-0013).
-BOOTSTRAP_TIMEOUT_SECONDS = 3600.0
 
 # Sem teto, o `curl` do `prepare.sh` que estola pendura o CLI para sempre, com a
 # instância faturando e indistinguível das ~2 h de silêncio do caso normal.
@@ -192,7 +173,7 @@ def prepare_masters(*, infra: InfraConfig, config: ExperimentConfig, work_dir: P
             security_group_id=infra.security_groups.ephemeral,
             instance_profile=infra.instance_profiles.masters,
             key_name=infra.key_pair_name,
-            user_data=_render_user_data(
+            user_data=render_user_data(
                 commit=commit,
                 role=MASTERS_ROLE,
                 role_args=["--work-dir", REMOTE_WORK_DIR],
@@ -208,7 +189,7 @@ def prepare_masters(*, infra: InfraConfig, config: ExperimentConfig, work_dir: P
     except OutputError as error:
         # O único caminho em que a instância pode ter subido sem um id que o
         # `finally` abaixo termine: a resposta do lançamento é que veio ilegível.
-        raise PreparationError(_orphan_hint(f"role={MASTERS_ROLE}", error)) from error
+        raise PreparationError(orphan_hint(f"role={MASTERS_ROLE}", error)) from error
 
     _report(f"{instance_id}: lançada no commit {commit}")
 
@@ -239,7 +220,7 @@ def _drive_preparation(
     campaign = infra.buckets.campaign
     pilot = infra.buckets.pilot
 
-    host = _wait_for_bootstrapped_instance(instance_id)
+    host = wait_for_bootstrapped_instance(instance_id, report=_report)
 
     _report(f"{instance_id}: preparando os Masters em s3://{campaign}/{MASTERS_PREFIX}")
     ssh_exec(
@@ -322,7 +303,11 @@ def preflight(
             detail=lambda launched: f"{launched} no commit {commit}, fatia em {slice_key}",
         )
 
-        host = _step(results, Step.BOOTSTRAP, lambda: _wait_for_bootstrapped_instance(instance_id))
+        host = _step(
+            results,
+            Step.BOOTSTRAP,
+            lambda: wait_for_bootstrapped_instance(instance_id, report=_report),
+        )
         events = config.instrumentation.pmu_events
         _step(
             results,
@@ -418,57 +403,17 @@ def _launch_encode(
     local.write_text(serialize_plan(plan), encoding="utf-8")
     s3_cp(str(local), f"s3://{bucket}/{slice_key}")
 
-    role_args = [
-        "--work-dir",
-        REMOTE_WORK_DIR,
-        "--bucket",
-        bucket,
-        "--plan-key",
-        slice_key,
-        "--manifest-key",
-        f"{MASTERS_PREFIX}{MANIFEST_NAME}",
-        "--masters-prefix",
-        MASTERS_PREFIX,
-    ]
-    try:
-        return run_instances(
-            instance_type=encode.instance.instance_type,
-            image_id=encode.image_id,
-            subnet_id=infra.subnet_id,
-            security_group_id=infra.security_groups.ephemeral,
-            instance_profile=infra.instance_profiles.encode,
-            key_name=infra.key_pair_name,
-            user_data=_render_user_data(commit=commit, role=ENCODE_ROLE, role_args=role_args),
-            volume_size_gb=PREFLIGHT_VOLUME_SIZE_GB,
-            imds_hop_limit=IMDS_HOP_LIMIT,
-            tags={"Name": PREFLIGHT_NAME_TAG, "role": ENCODE_ROLE, "commit": commit},
-        )
-    except OutputError as error:
-        raise PreflightError(_orphan_hint(f"Name={PREFLIGHT_NAME_TAG}", error)) from error
-
-
-def _orphan_hint(tag: str, error: Exception) -> str:
-    return (
-        f"o run-instances pode ter lançado uma instância que este passo não sabe nomear: "
-        f"procure por {tag} no describe-instances e termine-a à mão ({error})"
+    return launch_encode(
+        target=encode,
+        infra=infra,
+        commit=commit,
+        bucket=bucket,
+        slice_key=slice_key,
+        manifest_key=f"{MASTERS_PREFIX}{MANIFEST_NAME}",
+        masters_prefix=MASTERS_PREFIX,
+        volume_size_gb=ENCODE_VOLUME_SIZE_GB,
+        tags=encode_tags(name=PREFLIGHT_NAME_TAG, commit=commit),
     )
-
-
-def _wait_for_bootstrapped_instance(instance_id: str) -> str:
-    """Espera `running` com IP privado e depois o `cloud-init`, e devolve o host."""
-    instance = wait_for_instance_ready(
-        lambda: described_instance(instance_id),
-        instance_id=instance_id,
-        timeout=READY_TIMEOUT_SECONDS,
-    )
-    host = instance.private_ip
-    _report(f"{instance_id}: running em {host}, esperando o cloud-init")
-    wait_for_bootstrap(
-        lambda: cloud_init_status(host),
-        instance_id=instance_id,
-        timeout=BOOTSTRAP_TIMEOUT_SECONDS,
-    )
-    return host
 
 
 def _put_from_container(host: str, bucket: str, instance_id: str) -> str:
@@ -508,17 +453,6 @@ def _step[Observed](
     return value
 
 
-def _render_user_data(*, commit: str, role: str, role_args: Sequence[str]) -> str:
-    """O user-data fino de um papel (ADR-0013/0021), com os argumentos do bootstrap dele."""
-    template = string.Template(USER_DATA_TEMPLATE.read_text(encoding="utf-8"))
-    return template.substitute(
-        repo_url=REPO_URL,
-        commit=commit,
-        role=role,
-        role_args=shlex.join(role_args),
-    )
-
-
 def _load_infra(path: Path) -> InfraConfig:
     """O arquivo de infra validado, com o caminho em toda mensagem de erro."""
     try:
@@ -554,6 +488,7 @@ _FAILURES = (
     ConfigError,
     WaitTimeout,
     BootstrapError,
+    LaunchError,
     PreparationError,
     PreflightError,
     OSError,

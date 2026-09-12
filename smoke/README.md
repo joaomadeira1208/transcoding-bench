@@ -54,11 +54,16 @@ não entraria no histórico. Cada comportamento induzido é uma variável de amb
 (`SMOKE_FFMPEG_EXIT`, `SMOKE_FFMPEG_HANG`, `SMOKE_PERF_EXIT`,
 `SMOKE_PERF_UNSUPPORTED`, `SMOKE_ENCODER_INVISIBLE`, `SMOKE_BITSTREAM`,
 `SMOKE_AWS_EXIT`); `SMOKE_FFMPEG_NTH` restringe o do `ffmpeg` ao N-ésimo encode,
-que é como um run falha no meio de um bloco cujos vizinhos seguem bem.
+que é como um run falha no meio de um bloco cujos vizinhos seguem bem, e
+`SMOKE_AWS_FAIL_KEY` restringe o do `aws` a uma chave, que é como só o objeto de
+progresso deixa de subir.
 
 Todo shim registra o argv que recebeu em `$SMOKE_ARGV_DIR/<tool>.argv` e o seu
 nome em `$SMOKE_ARGV_DIR/sequence`, a linha do tempo comum entre ferramentas —
-é por ela que se vê o upload acontecendo **entre** runs.
+é por ela que se vê o upload acontecendo **entre** runs. O do `aws` guarda, além
+disso, toda versão de cada objeto subido avulso em
+`$SMOKE_ARGV_DIR/versions/<key>/`: o bucket falso conserva só a última, como o
+S3, e `status/{instance_type}_progress` é sobrescrito a cada Execução.
 
 O shim do `aws` traduz `s3 cp` — nos dois sentidos — e `s3api list-objects-v2`
 em operações sobre `$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que

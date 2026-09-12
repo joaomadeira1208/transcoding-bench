@@ -41,11 +41,14 @@ deixa se misturarem — `<clone>/encode` read-only em `/opt/encode`, o work dir 
 runtime em `/work` —, dá `--cap-add=PERFMON` e repassa ao `run_all.sh` os
 argumentos que recebeu. O `--plan` é o **nome** da fatia dentro do work dir: o
 caminho que o laço vê é o de dentro do container, e quem monta o work dir é quem
-sabe onde ele fica.
+sabe onde ele fica. Os dois timeouts da ADR-0012 são opcionais aqui e só viajam
+quando vêm — `--run-timeout` e `--total-timeout` chegam ao laço como chegaram, e
+na ausência valem os defaults dele.
 
     bash encode/launch_container.sh \
         --work-dir /home/ubuntu/work --plan c7g.json --bucket "$bucket" \
-        --commit "$sha" --instance-id "$id" --instance-type c7g.xlarge
+        --commit "$sha" --instance-id "$id" --instance-type c7g.xlarge \
+        --run-timeout 14400 --total-timeout 259200
 
 O work dir é o contrato entre os três: o `bootstrap.sh` deixa lá a fatia, o
 manifesto e `masters/`; o `launch_container.sh` os encontra por esses nomes, e o
@@ -72,8 +75,11 @@ falhar.
 O `run_all.sh` é o bloco, e a fatia inteira: percorre **todo** bloco do arquivo
 que recebeu, na ordem do arquivo e com o warm-up primeiro, sem predicado de
 seleção — a seleção por arquitetura já aconteceu no Python que pré-fatiou o
-plano (ADR-0019). Ao terminar escreve `s3://{bucket}/status/{instance_type}_done`,
-que é como o Orquestrador detecta o fim sem SSH interativo (ADR-0010/0011).
+plano (ADR-0019). Depois de cada Execução ele sobrescreve
+`s3://{bucket}/status/{instance_type}_progress`, e ao terminar escreve
+`s3://{bucket}/status/{instance_type}_done`: é por esses dois objetos que o
+Orquestrador sabe onde a Instância está e que ela acabou, sem SSH interativo
+(ADR-0010/0011).
 
     bash encode/run_all.sh \
         --plan /work/c7g.json \
@@ -85,10 +91,65 @@ nunca por consulta ao IMDS —, e o arquivo de versões vem da imagem
 (`VERSIONS_FILE`). É essa ausência de descoberta que torna o caminho rodável no
 Mac: não existe modo degradado, existe um argumento.
 
+## O contrato do `status/`
+
+Dois objetos por Instância, os dois escritos pelo `run_all.sh` e lidos pelo
+Orquestrador a cada 5 minutos. Os dois carregam o `instance_id` porque o
+`DeleteObject` da ADR-0016 não alcança `status/`: numa retomada os objetos da
+tentativa anterior continuam no bucket, e o que os torna inertes é a identidade,
+não a ausência.
+
+`status/{instance_type}_progress` é **sobrescrito depois de cada Execução**,
+entre runs e nunca durante um encode (ADR-0011) — um `jq -n` e um `s3 cp` de
+poucos bytes:
+
+| campo | tipo | o que é |
+|---|---|---|
+| `instance_id` | string | o que chegou por `--instance-id` |
+| `block_index` | número | o bloco em curso, 1-based |
+| `block_count` | número | blocos da fatia |
+| `run_index` | número | a Execução dentro do bloco, 1-based |
+| `run_count` | número | Execuções do bloco em curso |
+| `scenario_id` | string | o Cenário que **acabou** de rodar |
+| `runs_total` | número | Execuções já feitas na fatia inteira |
+| `runs_failed` | número | quantas delas com status não-zero |
+| `elapsed_seconds` | número | segundos desde o início do laço |
+| `written_at` | string | ISO-8601 **com offset** |
+
+Os índices são 1-based e viajam com o total ao lado para que a linha do
+Orquestrador seja `bloco {block_index}/{block_count}` sem aritmética do lado de
+quem lê. O total de runs da fatia contra o qual ele mostra `runs_total` vem do
+plano que ele mesmo subiu, não daqui. Um upload de progresso que falhe é
+registrado no log e o laço segue: telemetria não derruba medição.
+
+`status/{instance_type}_done` é o **último** objeto que a Instância escreve
+quando o laço termina, inclusive no caminho do teto. Morto por sinal, o laço não
+escreve marcador nenhum — é por essa ausência que o Orquestrador distingue uma
+Instância que acabou de uma que morreu no meio de um run:
+
+| campo | tipo | o que é |
+|---|---|---|
+| `instance_id` | string | o que chegou por `--instance-id` |
+| `finished_at` | string | ISO-8601 com offset |
+| `runs_total` | número | Execuções da fatia |
+| `runs_failed` | número | quantas com status não-zero |
+| `capped` | booleano | se o `--total-timeout` parou o laço |
+| `exit_status` | número | o status com que o `run_all.sh` sai |
+
+A chave dos dois não muda e o IAM não muda: o papel `encode` já tem `PutObject`
+em `status/*` (ADR-0016).
+
+A assimetria entre os dois uploads é de propósito. O do progresso é telemetria:
+falhou, fica o log e o laço segue. O do marcador não tem folga porque não é
+telemetria — é o único jeito de o Orquestrador saber que a fatia acabou, e uma
+Instância sem marcador é exatamente o que ele lê como morta. Um marcador que não
+sobe derruba o laço, e é o `resume.py` que recolhe o que já está em `runs/`.
+
 ## Salvaguardas
 
-As duas camadas locais da ADR-0012 são flags do `run_all.sh`, com os valores da
-ADR por default — são limite operacional, não desenho experimental, e por isso
+As duas camadas locais da ADR-0012 são flags do `run_all.sh`, repassadas pelo
+`launch_container.sh` quando o Orquestrador as declara, com os valores da ADR por
+default — são limite operacional, não desenho experimental, e por isso
 não viajam no plano:
 
 - `--run-timeout <segundos>` (4 h): cada Execução recebe SIGTERM ao estourar. O
@@ -96,7 +157,8 @@ não viajam no plano:
   `exit_code` 143 e sobe o que tem — um run morto no meio não some do
   `resume.py`.
 - `--total-timeout <segundos>` (72 h): conferido **antes de cada Cenário**; ao
-  estourar, o laço para, escreve o marcador de término e sai com status 1.
+  estourar, o laço para, escreve o marcador de término com `capped` verdadeiro e
+  sai com status 1.
 
 O timeout é um watchdog em bash, e não o `timeout` do coreutils: o Mac do
 pesquisador não o tem, e um shim dele seria um fake da própria salvaguarda.
@@ -109,7 +171,8 @@ de saída do `run_all.sh` (1 se algum run falhou ou o teto disparou, 0 se não)
 
 O upload acontece **entre** runs, nunca durante um encode (ADR-0011): é o
 `run_scenario.sh` que o faz, logo depois do `meta.json`, tanto no run
-bem-sucedido quanto no falho. O `meta.json` fecha o run antes da subida, e um
+bem-sucedido quanto no falho. O objeto de progresso do laço sobe na mesma
+janela, depois dele. O `meta.json` fecha o run antes da subida, e um
 upload que falhe não o reabre — a cópia local segue íntegra, e é o status de
 saída (72) que carrega a falha para o log do laço.
 

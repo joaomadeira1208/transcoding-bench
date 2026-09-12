@@ -51,10 +51,11 @@ abort() {
   exit "$1"
 }
 
-# Deixa em `run_status` em vez de devolver: chamada sob `||`, a função perderia
-# o `set -e` por dentro, e o `jq` falhando viraria um run sem `scenario_id`.
+# Deixa em `run_status` e `scenario_id` em vez de devolver: chamada sob `||`, a
+# função perderia o `set -e` por dentro, e o `jq` falhando viraria um objeto de
+# progresso anunciando o `scenario_id` da Execução anterior.
 execute_run() {
-  local run=$1 scenario_id started elapsed
+  local run=$1 started elapsed
   scenario_id=$(jq -r '.scenario_id' <<<"$run")
   started=$SECONDS
 
@@ -83,10 +84,58 @@ execute_run() {
   fi
 }
 
+write_progress() {
+  local block_index=$1 run_index=$2 payload
+  payload=$(mktemp)
+  jq -n \
+    --arg instance_id "$instance_id" \
+    --argjson block_index "$block_index" \
+    --argjson block_count "$block_count" \
+    --argjson run_index "$run_index" \
+    --argjson run_count "$run_count" \
+    --arg scenario_id "$scenario_id" \
+    --argjson runs_total "$runs_total" \
+    --argjson runs_failed "$runs_failed" \
+    --argjson elapsed_seconds "$SECONDS" \
+    --arg written_at "$(date -Iseconds)" \
+    '{
+      instance_id: $instance_id,
+      block_index: $block_index,
+      block_count: $block_count,
+      run_index: $run_index,
+      run_count: $run_count,
+      scenario_id: $scenario_id,
+      runs_total: $runs_total,
+      runs_failed: $runs_failed,
+      elapsed_seconds: $elapsed_seconds,
+      written_at: $written_at
+    }' >"$payload"
+  # Telemetria não derruba medição: sem o `if`, um `s3 cp` de poucos bytes que
+  # falhe aqui leva o `set -e` e a fatia inteira com ele.
+  if ! "$AWS_COMMAND" s3 cp "$payload" "s3://$bucket/status/${instance_type}_progress"; then
+    log "$scenario_id: o progresso não subiu"
+  fi
+  rm -f "$payload"
+}
+
 write_done_marker() {
   local marker
   marker=$(mktemp)
-  date -Iseconds >"$marker"
+  jq -n \
+    --arg instance_id "$instance_id" \
+    --arg finished_at "$(date -Iseconds)" \
+    --argjson runs_total "$runs_total" \
+    --argjson runs_failed "$runs_failed" \
+    --argjson capped "$capped" \
+    --argjson exit_status "$exit_status" \
+    '{
+      instance_id: $instance_id,
+      finished_at: $finished_at,
+      runs_total: $runs_total,
+      runs_failed: $runs_failed,
+      capped: $capped,
+      exit_status: $exit_status
+    }' >"$marker"
   "$AWS_COMMAND" s3 cp "$marker" "s3://$bucket/status/${instance_type}_done"
   rm -f "$marker"
 }
@@ -137,12 +186,12 @@ trap 'abort 130' INT
 block_count=$(jq '.blocks | length' "$plan")
 runs_total=0
 runs_failed=0
-capped=""
+capped=false
 
 for ((i = 0; i < block_count; i++)); do
   if ((SECONDS >= TOTAL_TIMEOUT_SECONDS)); then
     log "teto de ${TOTAL_TIMEOUT_SECONDS}s atingido antes do bloco $i: parando"
-    capped=1
+    capped=true
     break
   fi
   run_count=$(jq ".blocks[$i].runs | length" "$plan")
@@ -153,12 +202,16 @@ for ((i = 0; i < block_count; i++)); do
     if ((run_status != 0)); then
       runs_failed=$((runs_failed + 1))
     fi
+    write_progress "$((i + 1))" "$((j + 1))"
   done
 done
+
+exit_status=0
+if ((runs_failed > 0)) || [[ $capped == true ]]; then
+  exit_status=1
+fi
 
 write_done_marker
 log "$runs_total runs, $runs_failed com falha, ${SECONDS}s"
 
-if ((runs_failed > 0)) || [[ -n $capped ]]; then
-  exit 1
-fi
+exit "$exit_status"

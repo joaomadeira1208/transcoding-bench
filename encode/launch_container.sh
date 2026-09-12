@@ -14,7 +14,7 @@ EXIT_USAGE=2
 
 usage_error() {
   printf 'launch_container.sh: %s\n' "$*" >&2
-  printf 'uso: launch_container.sh --work-dir <dir> --plan <file> --bucket <name> --commit <sha> --instance-id <id> --instance-type <type>\n' >&2
+  printf 'uso: launch_container.sh --work-dir <dir> --plan <file> --bucket <name> --commit <sha> --instance-id <id> --instance-type <type> [--run-timeout <seconds>] [--total-timeout <seconds>]\n' >&2
   exit "$EXIT_USAGE"
 }
 
@@ -24,6 +24,8 @@ bucket=""
 commit=""
 instance_id=""
 instance_type=""
+run_timeout=""
+total_timeout=""
 
 while (($#)); do
   flag=$1
@@ -36,6 +38,8 @@ while (($#)); do
     --commit) commit=$value ;;
     --instance-id) instance_id=$value ;;
     --instance-type) instance_type=$value ;;
+    --run-timeout) run_timeout=$value ;;
+    --total-timeout) total_timeout=$value ;;
     *) usage_error "argumento desconhecido: $flag" ;;
   esac
   shift 2
@@ -48,6 +52,18 @@ done
 [[ $plan != */* ]] || usage_error "--plan é o nome da fatia dentro do work dir, não um caminho: $plan"
 [[ -r $work_dir/$plan ]] || usage_error "fatia ilegível: $work_dir/$plan"
 
+run_all_arguments=(
+  --plan "$WORK_MOUNT/$plan"
+  --masters-dir "$WORK_MOUNT/$MASTERS_DIR_NAME"
+  --runs-dir "$WORK_MOUNT/$RUNS_DIR_NAME"
+  --bucket "$bucket"
+  --commit "$commit"
+  --instance-id "$instance_id"
+  --instance-type "$instance_type"
+)
+[[ -z $run_timeout ]] || run_all_arguments+=(--run-timeout "$run_timeout")
+[[ -z $total_timeout ]] || run_all_arguments+=(--total-timeout "$total_timeout")
+
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 exec sudo docker run --rm \
@@ -56,10 +72,4 @@ exec sudo docker run --rm \
   -v "$work_dir:$WORK_MOUNT" \
   "$IMAGE_TAG" \
   bash "$SCRIPTS_MOUNT/run_all.sh" \
-  --plan "$WORK_MOUNT/$plan" \
-  --masters-dir "$WORK_MOUNT/$MASTERS_DIR_NAME" \
-  --runs-dir "$WORK_MOUNT/$RUNS_DIR_NAME" \
-  --bucket "$bucket" \
-  --commit "$commit" \
-  --instance-id "$instance_id" \
-  --instance-type "$instance_type"
+  "${run_all_arguments[@]}"

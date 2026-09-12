@@ -1,0 +1,5 @@
+{
+  "UserId": "AROAEXAMPLEID:i-0fedcba9876543210",
+  "Account": "123456789012",
+  "Arn": "arn:aws:sts::123456789012:assumed-role/transcoding-bench-orchestrator/i-0fedcba9876543210"
+}

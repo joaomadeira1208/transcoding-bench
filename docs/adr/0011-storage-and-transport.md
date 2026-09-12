@@ -22,7 +22,7 @@ s3://<bucket>/
 
 **Emenda: `masters/manifest.json` é objeto de contrato.** A preparação dos masters (ADR-0014) escreve, ao lado dos seis `.mkv`, um manifesto com nome, tamanho, sha256 e as propriedades observadas pelo `ffprobe` de cada um, mais as versões da imagem que os produziu. Ele tem dois leitores: o pesquisador, que o confere antes de aprovar a campanha (gate da ADR-0012), e o bootstrap de cada instância de encode, que valida o sha256 do master baixado contra ele antes do primeiro Cenário. Nome e caminho fixos porque quem lê recebe o path por argumento, como todo o resto deste layout.
 
-**Emenda: `status/` carrega progresso e desfecho, não presença.** São dois objetos por Instância de encode, os dois escritos pelo `run_all.sh` e lidos pelo Orquestrador a cada 5 minutos sem SSH (ADR-0010).
+**Emenda: `status/` carrega progresso e desfecho, não presença.** São dois objetos por Instância de encode, os dois escritos pelo `run_all.sh` e lidos pelo Orquestrador no poll de vigilância.
 
 `status/{instance_type}_progress` é **sobrescrito depois de cada Execução**, entre runs — um `jq -n` e um `s3 cp` de poucos bytes, nunca durante um encode, pela mesma razão que o upload dos artefatos espera o fim do run. Carrega `instance_id`, `block_index` e `block_count`, `run_index` e `run_count` (os índices 1-based, com o total ao lado), o `scenario_id` da Execução que acabou, `runs_total`, `runs_failed`, `elapsed_seconds` e `written_at` em ISO-8601 com offset. O total da fatia contra o qual o Orquestrador o lê vem do plano que ele mesmo subiu para `scenarios/`.
 

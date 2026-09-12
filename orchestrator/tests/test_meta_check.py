@@ -81,6 +81,22 @@ class TestRejects:
         with pytest.raises(MetaError, match="schema_version"):
             check_meta(make_meta_json(schema_version=ABSENT))
 
+    def test_empty_run_id(self):
+        with pytest.raises(MetaError, match="run_id"):
+            check_meta(make_meta_json(run_id=""))
+
+    def test_run_id_absent(self):
+        with pytest.raises(MetaError, match="run_id"):
+            check_meta(make_meta_json(run_id=ABSENT))
+
+    def test_empty_commit(self):
+        with pytest.raises(MetaError, match="commit"):
+            check_meta(make_meta_json(commit=""))
+
+    def test_commit_absent(self):
+        with pytest.raises(MetaError, match="commit"):
+            check_meta(make_meta_json(commit=ABSENT))
+
     def test_empty_scenario_id(self):
         with pytest.raises(MetaError, match="scenario_id"):
             check_meta(make_meta_json(scenario_id=""))

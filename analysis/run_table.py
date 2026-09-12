@@ -197,11 +197,6 @@ def _perf_column(event: str) -> str:
 
 
 def _pcnt_column(event: str) -> str:
-    """Uma coluna por evento ao lado do valor dele.
-
-    É o que permite ao artigo dizer se o número é contagem ou estimativa, e se as
-    três arquiteturas estão no mesmo regime de medição.
-    """
     return f"{_perf_column(event)}_pcnt_running"
 
 

@@ -40,13 +40,7 @@ class TimeMetrics(BaseModel):
 
 @dataclass(frozen=True)
 class PerfCounter:
-    """Um contador do `perf stat -j`: o valor e o regime em que ele foi obtido.
-
-    O `pcnt-running` é a fração do tempo em que o contador esteve rodando; abaixo
-    de 100 o valor é estimativa extrapolada, não contagem. Sem ele, a estimativa
-    de uma arquitetura e a contagem de outra entram na mesma coluna do Parquet
-    indistinguíveis, e a comparação cross-arch fica sem base (ADR-0006).
-    """
+    """Um contador do `perf stat -j`: o valor e a fração do tempo em que ele rodou."""
 
     value: float | None
     pcnt_running: float | None
@@ -80,7 +74,7 @@ def parse_perf(raw: str) -> dict[str, PerfCounter]:
         record = _json_object(line)
         if record is None or "event" not in record or "counter-value" not in record:
             continue
-        counters[str(record["event"])] = PerfCounter(
+        counters[_event_name(record["event"])] = PerfCounter(
             value=_optional_float(record["counter-value"]),
             pcnt_running=_optional_float(record.get("pcnt-running")),
         )
@@ -151,6 +145,15 @@ def _json_object(line: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return record if isinstance(record, dict) else None
+
+
+def _event_name(reported: Any) -> str:
+    """O nome sem o modificador que o `perf` ecoa (`cycles:u`).
+
+    As duas guardas do `perf.json` já o descartam: mantê-lo aqui faria a coluna
+    daquele evento sair nula num run que as duas aprovaram.
+    """
+    return str(reported).split(":")[0]
 
 
 def _optional_float(value: Any) -> float | None:

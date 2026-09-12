@@ -140,6 +140,14 @@ class TestPerf:
 
         assert counters["cycles"].value is None
 
+    def test_the_modifier_perf_appends_to_the_event_still_names_the_column(self):
+        # `perf` ecoa o evento com o modificador que aplicou, e as duas guardas do
+        # `run_scenario.sh` e do `preflight` já o descartam: mantê-lo aqui faria a
+        # coluna daquele evento sair nula num run que as duas aprovaram.
+        counters = parse_perf(make_perf_json({"cycles:u": 4e9}))
+
+        assert counters["cycles"].value == 4_000_000_000.0
+
     def test_a_counter_that_never_ran_comes_out_absent_not_zero(self):
         # `<not counted>` é o segundo modo de falha, e o `perf` também não falha
         # nele: o contador abriu e o kernel nunca o escalonou.

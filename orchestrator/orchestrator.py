@@ -94,7 +94,11 @@ PREPARE_TIMEOUT_SECONDS = 10800.0
 # O probe do `perf` encoda segundos de um Master de verdade, e no pior par do
 # plano isso é 4K num encoder lento: o teto é generoso porque o que ele compra é
 # a instância ser terminada sozinha se o comando travar, não cortar um encode.
-PROBE_TIMEOUT_SECONDS = 1800.0
+PERF_PROBE_TIMEOUT_SECONDS = 1800.0
+
+# O do `s3 cp` de nove bytes continua curto: o que leva minutos ali é o container
+# subindo, e um teto de meia hora faria um cp pendurado faturar meia hora.
+ENCODE_PUT_TIMEOUT_SECONDS = 300.0
 
 PROBE_STDOUT_NAME = "perf.json"
 PROBE_STDERR_NAME = "perf.stderr.txt"
@@ -400,12 +404,7 @@ def _sync_between_buckets(infra: InfraConfig, work_dir: Path) -> str:
 
 @dataclass(frozen=True)
 class LaunchedEncode:
-    """A instância que subiu e o run que o probe do `perf` vai encodar nela.
-
-    O run sai da **fatia que acabou de subir**, e não de parâmetros próprios: o
-    Master que o probe abre é um dos que o `bootstrap.sh` daquela instância
-    baixou, e o encode é o de um Cenário de verdade.
-    """
+    """A instância que subiu e o run, da fatia dela, que o probe do `perf` vai encodar."""
 
     instance_id: str
     probe_run: dict[str, Any]
@@ -457,9 +456,8 @@ def _probe_perf(
 ) -> dict[str, Counter]:
     """Roda o probe, **guarda a saída crua** e só então julga o que ela diz.
 
-    Nessa ordem porque a evidência do passo que reprova é a que vale: a primeira
-    rodada guardou só a tabela, e com ela não se separa multiplexação de PMU
-    virtual contando errado.
+    Nessa ordem: julgar antes faria o passo que reprova — o único cuja saída
+    interessa — ser o único a não deixar saída nenhuma.
     """
     probe = ssh_capture(
         host,
@@ -469,7 +467,7 @@ def _probe_perf(
             repo_dir=REMOTE_REPO_DIR,
             work_dir=REMOTE_WORK_DIR,
         ),
-        timeout=PROBE_TIMEOUT_SECONDS,
+        timeout=PERF_PROBE_TIMEOUT_SECONDS,
     )
     _keep_probe_evidence(probe, bucket=bucket, instance_id=instance_id, work_dir=work_dir)
     if probe.returncode != 0:
@@ -485,8 +483,8 @@ def _keep_probe_evidence(
 ) -> None:
     """As duas saídas do probe no log do Orquestrador e no bucket, **sem apagar**.
 
-    Ao contrário dos dois objetos de prova do passo, que somem: o deles é prova de
-    permissão, e este é dado.
+    Sem o `s3_rm` que fecha os outros dois objetos de prova deste passo: o deles é
+    prova de permissão e some, e este é o dado que o próximo diagnóstico lê.
     """
     local = work_dir / "preflight" / instance_id
     local.mkdir(parents=True, exist_ok=True)
@@ -502,7 +500,7 @@ def _keep_probe_evidence(
 def _put_from_container(host: str, bucket: str, instance_id: str) -> str:
     """O `PutObject` do papel `encode` pelo caminho real, e a limpeza pelo Orquestrador."""
     key = f"{PREFLIGHT_PREFIX}{instance_id}.txt"
-    ssh_exec(host, encode_put_command(bucket=bucket, key=key), timeout=PROBE_TIMEOUT_SECONDS)
+    ssh_exec(host, encode_put_command(bucket=bucket, key=key), timeout=ENCODE_PUT_TIMEOUT_SECONDS)
 
     written = s3_list_prefix(bucket, key)
     if not written:

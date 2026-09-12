@@ -86,12 +86,9 @@ def perf_probe_command(
 ) -> list[str]:
     """O `perf stat` sobre um encode curto de um Master real, pelo caminho da campanha.
 
-    `-vv` porque o `perf` despeja no stderr o `perf_event_attr` de cada evento,
-    com o `config` nativo que o nome genérico resolveu naquela arquitetura: é o
-    que diz se `cache-references` é L1D, LLC ou L2 nos três guests.
-
-    O `-o` é o stdout e o dump do `-vv` é o stderr, de modo que as duas saídas
-    cheguem separadas a quem as guarda.
+    O `-o` é o stdout e o dump do `-vv` é o stderr: apontar o `-o` para um
+    arquivo faria as duas saídas chegarem juntas a quem as guarda, e o
+    `perf stat -j` deixaria de ser parseável linha a linha.
     """
     return [
         "sudo",
@@ -118,11 +115,7 @@ def perf_probe_command(
 
 
 def probe_encode_argv(run: Mapping[str, Any]) -> list[str]:
-    """O encode do probe: o argv do Cenário, truncado e sem output.
-
-    Do objeto de run, e não de parâmetros próprios: o probe tem de gerar o
-    trabalho que a campanha gera, e um encode inventado aqui mediria outra coisa.
-    """
+    """O encode do probe: o argv do Cenário que o objeto de run descreve, truncado."""
     argv = [
         "ffmpeg",
         "-nostdin",
@@ -172,11 +165,9 @@ def encode_put_command(*, bucket: str, key: str) -> list[str]:
 def perf_counters(raw: str, instrumentation: Instrumentation) -> dict[str, Counter]:
     """O que o `perf stat -j` mediu por evento, ou a recusa que nomeia o que não mediu.
 
-    Duas fases, e cada uma relata **tudo** o que reprovou: uma execução do passo
-    é uma instância, e parar no primeiro faria o pesquisador descobrir o segundo
-    defeito daquela arquitetura na instância seguinte. A segunda fase só corre
-    quando a primeira passou — uma razão sobre um contador que não abriu não diz
-    nada sobre plausibilidade.
+    Cada fase relata **tudo** o que reprovou: parar no primeiro evento faria o
+    pesquisador descobrir o segundo defeito daquela arquitetura na instância
+    seguinte, que é o que uma execução do passo custa.
     """
     reported = _reported(raw)
     hardware = set(instrumentation.hardware_events)
@@ -207,12 +198,7 @@ def perf_counters(raw: str, instrumentation: Instrumentation) -> dict[str, Count
 
 
 def perf_detail(counted: Mapping[str, Counter]) -> str:
-    """A linha da tabela do passo: cada evento com o valor **e** o regime em que ele saiu.
-
-    O `pcnt-running` ao lado do valor porque abaixo de 100 o número é estimativa
-    e não contagem — não é recusa, e sem ele uma estimativa e uma contagem entram
-    na mesma coluna do Parquet indistinguíveis.
-    """
+    """A linha da tabela do passo: cada evento com o valor **e** o `pcnt-running` dele."""
     return "dentro do container: " + ", ".join(
         f"{event} = {counter.value:.0f} ({counter.regime})" for event, counter in counted.items()
     )
@@ -220,7 +206,7 @@ def perf_detail(counted: Mapping[str, Counter]) -> str:
 
 @dataclass(frozen=True)
 class Counter:
-    """Um contador que abriu: o valor e a fração do tempo em que ele rodou."""
+    """Um contador que abriu: o valor e a fração do tempo em que ele rodou (ADR-0006)."""
 
     value: float
     pcnt_running: float | None
@@ -262,12 +248,7 @@ def _counter(reported: Mapping[str, _Reported], event: str, *, hardware: bool) -
 
 
 def _implausible(metric: MetricRecord, counted: Mapping[str, Counter]) -> str | None:
-    """Coerência interna da razão, sem depender de arquitetura.
-
-    É o que teria transformado os dois `passou` da primeira rodada em falhas
-    honestas: `branch-misses` e `branch-instructions` eram os dois números, os
-    dois não-zero, e nenhum era string de erro.
-    """
+    """Coerência interna da razão, sem depender de arquitetura (ADR-0006)."""
     numerator = counted[metric.numerator].value
     denominator = counted[metric.denominator].value
     if not metric.exceeds(numerator, denominator):
@@ -324,9 +305,8 @@ class _Reported:
 def _reported(raw: str) -> dict[str, _Reported]:
     """O que a saída trouxe por evento, ignorando o cabeçalho que varia com a versão.
 
-    A chave descarta o modificador que o `perf` ecoa (`cycles:u`): comparação
-    exata recusaria um contador que abriu. A primeira ocorrência vence — evento
-    repetido é recusado pelo validador da spec, muito antes daqui.
+    A chave descarta o modificador que o `perf` ecoa (`cycles:u`): comparar o
+    nome inteiro recusaria um contador que abriu.
     """
     reported: dict[str, _Reported] = {}
     for record in map(_json_object, raw.splitlines()):

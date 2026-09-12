@@ -270,16 +270,11 @@ def ssh_capture(
     key_path: Path = SSH_KEY_PATH,
     timeout: float | None = None,
 ) -> CommandOutput:
-    """O mesmo que o `ssh_exec`, entregando as duas saídas em vez de só o `stdout`.
+    """O mesmo que o `ssh_exec`, entregando as duas saídas e o status em vez do `stdout`.
 
-    O probe do `preflight` escreve o `perf stat -j` no stdout e o dump do `-vv` no
-    stderr, e descartar o segundo é o que fez a primeira rodada não poder
-    distinguir multiplexação de PMU virtual contando errado.
-
-    O status do comando remoto é devolvido, e não levantado: as duas saídas do
-    comando que **falhou** são justamente a evidência que este passo existe para
-    guardar. Só a falha do próprio `ssh` continua sendo exceção — dela não há
-    saída nenhuma a preservar.
+    O status é devolvido e não levantado: fazê-lo levantar descartaria as saídas
+    do comando que **falhou**, que são a evidência que o chamador guarda. Só a
+    falha do próprio `ssh` continua sendo exceção — dela não há saída a preservar.
     """
     completed = _run_capture(
         _ssh_argv(host, command, key_path=key_path),

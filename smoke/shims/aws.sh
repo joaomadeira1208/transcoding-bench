@@ -30,8 +30,22 @@ object_path() {
   printf '%s\n' "$SMOKE_S3_ROOT/${1#s3://}"
 }
 
+object_key() {
+  local without_scheme=${1#s3://}
+  printf '%s\n' "${without_scheme#*/}"
+}
+
+# Toda versão do objeto, e não só a última: o `status/{type}_progress` é
+# sobrescrito a cada run, e um `run_index` gravado sempre como `run_count`
+# passaria pela asserção sobre o objeto que ficou no bucket.
+record_version() {
+  local dir=$SMOKE_ARGV_DIR/versions/$1
+  mkdir -p "$dir"
+  cp "$2" "$(printf '%s/%04d' "$dir" "$(find "$dir" -type f | wc -l)")"
+}
+
 s3_cp() {
-  local recursive="" source="" destination=""
+  local recursive="" source="" destination="" key
   while (($#)); do
     case $1 in
       --recursive) recursive=1 ;;
@@ -60,6 +74,8 @@ s3_cp() {
     return
   fi
 
+  key=$(object_key "$destination")
+  [[ $key != "${SMOKE_AWS_FAIL_KEY:-}" ]] || fail "falha induzida no objeto $key"
   destination=$(object_path "$destination")
 
   if [[ -n $recursive ]]; then
@@ -76,6 +92,7 @@ s3_cp() {
     [[ -f $source ]] || fail "origem não é arquivo: $source"
     mkdir -p "$(dirname "$destination")"
     cp "$source" "$destination"
+    record_version "$key" "$source"
     printf 'upload: %s to %s\n' "$source" "$destination"
   fi
 }

@@ -354,12 +354,13 @@ se o próprio lançamento o tivesse posto.
 
 O que ganha teste é o núcleo do `preflight.py`: o veredito sobre a saída do
 `perf` — função pura sobre o texto parseado, e sobre a lista que a configuração
-real declara, não sobre uma cópia dela no teste —,
-a montagem da tabela — inclusive o passo que **não** rodou, porque uma capacidade
-que ninguém provou não pode sair do relatório como silêncio — e a escolha da AMI
-pela arquitetura do tipo pedido, que é onde o `x86_64` do `experiment.toml` e o
-`amd64` do arquivo de infra se encontram. O laço e os dois `docker run` são
-escritos direto (ADR-0022).
+real declara, nunca sobre uma cópia dela escrita no teste —, a lista de eventos
+que o argv do `perf stat` carrega — desenho experimental, e não argv de sistema,
+que é o que a ADR-0022 deixa sem teste —, a montagem da tabela
+— inclusive o passo que **não** rodou, porque uma capacidade que ninguém provou
+não pode sair do relatório como silêncio — e a escolha da AMI pela arquitetura do
+tipo pedido, que é onde o `x86_64` do `experiment.toml` e o `amd64` do arquivo de
+infra se encontram. O laço e os dois `docker run` são escritos direto (ADR-0022).
 
 **O primeiro preflight real é a hora de capturar os payloads da AWS CLI.** As
 fixtures do adaptador em `conftest.py` — `run-instances`, `describe-instances`,

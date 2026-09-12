@@ -8,6 +8,7 @@ unicidade do plano, shuffle com seed, fatiamento, formação da `scenario_id`,
 completude por bloco, filtro `warmup == false`, a guarda de subconjunto entre as
 duas definições de `config/`, a checagem do `meta.json` e do
 `masters/manifest.json` que o bash escreve à mão, e o núcleo do `preflight` (o
-veredito sobre o `perf stat`, a tabela e a AMI da arquitetura pedida).
+veredito sobre o `perf stat`, a lista de eventos que ele pede, a tabela e a AMI
+da arquitetura pedida).
 Invariantes escritas à mão como default; golden inline no `.py` só onde congelar
 *é* o requisito.

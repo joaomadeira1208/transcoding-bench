@@ -14,8 +14,8 @@ import pytest
 from conftest import make_infra, real_config
 from experiment_config import InstanceRecord
 from infra_config import parse_infra
-from masters_launch import IMAGE_TAG
 from preflight import (
+    NOT_SUPPORTED,
     STEPS,
     Outcome,
     PreflightError,
@@ -57,15 +57,12 @@ def every_event_counted() -> dict[str, str]:
 
 class TestThePerfProbe:
     def test_the_probe_asks_for_the_events_the_configuration_declares(self):
-        # A lista sai da configuração validada: transcrever os dez no código faria
-        # trocar um evento no TOML mudar o que a campanha mede e não o que o
-        # preflight confere, que é o próprio ponto do passo.
+        # O resto deste argv é argv de sistema e fica sem teste (ADR-0022); a
+        # lista, não: transcrevê-la aqui faria trocar um evento no TOML mudar o
+        # que a campanha mede sem mudar o que o preflight confere.
         argv = perf_probe_command(PMU_EVENTS)
 
         assert argv[argv.index("-e") + 1] == ",".join(PMU_EVENTS)
-
-    def test_the_probe_runs_inside_the_image_the_execution_uses(self):
-        assert IMAGE_TAG in perf_probe_command(PMU_EVENTS)
 
 
 class TestThePerfCounters:
@@ -75,35 +72,49 @@ class TestThePerfCounters:
         assert list(counted) == list(PMU_EVENTS)
         assert set(counted.values()) == {1234567.0}
 
-    def test_not_supported_is_refused_naming_the_event(self):
+    @pytest.mark.parametrize("event", PMU_EVENTS)
+    def test_not_supported_is_refused_naming_the_event(self, event):
         # O modo de falha inteiro do passo: `perf stat` **não** sai não-zero
         # quando o evento não existe naquela PMU (ADR-0006), então quem só olha o
         # código de saída dá o contador por aberto.
-        for event in PMU_EVENTS:
-            values = every_event_counted() | {event: "<not supported>"}
+        values = every_event_counted() | {event: NOT_SUPPORTED}
 
-            with pytest.raises(PreflightError, match=re.escape(event)) as refusal:
-                perf_counter_values(perf_output(values), PMU_EVENTS)
-            assert "not supported" in str(refusal.value)
+        with pytest.raises(PreflightError, match=re.escape(event)) as refusal:
+            perf_counter_values(perf_output(values), PMU_EVENTS)
+        assert "not supported" in str(refusal.value)
 
-    def test_an_event_absent_from_the_output_is_refused_naming_it(self):
-        for event in PMU_EVENTS:
-            values = every_event_counted()
-            del values[event]
+    @pytest.mark.parametrize("event", PMU_EVENTS)
+    def test_an_event_absent_from_the_output_is_refused_naming_it(self, event):
+        values = every_event_counted()
+        del values[event]
 
-            with pytest.raises(PreflightError, match=re.escape(event)):
-                perf_counter_values(perf_output(values), PMU_EVENTS)
+        with pytest.raises(PreflightError, match=re.escape(event)):
+            perf_counter_values(perf_output(values), PMU_EVENTS)
 
-    def test_an_empty_output_is_refused(self):
-        with pytest.raises(PreflightError, match=re.escape(PMU_EVENTS[0])):
+    @pytest.mark.parametrize("event", PMU_EVENTS)
+    def test_a_counter_value_that_is_not_a_number_is_refused_naming_the_event(self, event):
+        values = every_event_counted() | {event: ""}
+
+        with pytest.raises(PreflightError, match=re.escape(event)):
+            perf_counter_values(perf_output(values), PMU_EVENTS)
+
+    def test_every_event_without_a_counter_is_named_in_the_same_refusal(self):
+        # Uma execução do passo é uma instância: recusar no primeiro evento faria
+        # o pesquisador descobrir o segundo evento indisponível daquela
+        # arquitetura na instância seguinte.
+        values = every_event_counted() | dict.fromkeys(PMU_EVENTS[:3], NOT_SUPPORTED)
+
+        with pytest.raises(PreflightError) as refusal:
+            perf_counter_values(perf_output(values), PMU_EVENTS)
+        for event in PMU_EVENTS[:3]:
+            assert event in str(refusal.value)
+
+    def test_an_empty_output_is_refused_naming_every_event(self):
+        with pytest.raises(PreflightError) as refusal:
             perf_counter_values("", PMU_EVENTS)
 
-    def test_a_counter_value_that_is_not_a_number_is_refused_naming_the_event(self):
         for event in PMU_EVENTS:
-            values = every_event_counted() | {event: ""}
-
-            with pytest.raises(PreflightError, match=re.escape(event)):
-                perf_counter_values(perf_output(values), PMU_EVENTS)
+            assert event in str(refusal.value)
 
     def test_the_header_the_perf_version_prints_is_ignored(self):
         output = "\n".join(

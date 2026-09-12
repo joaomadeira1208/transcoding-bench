@@ -1,19 +1,13 @@
-# O núcleo puro do `preflight`. Os três alvos falham em silêncio, e os três
+# O núcleo puro do `preflight`. Os dois alvos falham em silêncio, e os dois
 # custam uma instância faturando: um `perf stat` que não abriu contador passa por
-# "rodou" se ninguém olhar o valor, um passo que some da tabela é uma capacidade
-# que ninguém provou e o pesquisador acha que sim, e a AMI da arquitetura errada
-# sobe um binário que a instância recusa sem que o tipo pedido tenha mudado.
+# "rodou" se ninguém olhar o valor, e um passo que some da tabela é uma capacidade
+# que ninguém provou e o pesquisador acha que sim.
 
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import replace
 
 import pytest
-from conftest import make_infra, real_config
-from experiment_config import InstanceRecord
-from infra_config import parse_infra
 from preflight import (
     PERF_EVENT,
     STEPS,
@@ -21,7 +15,6 @@ from preflight import (
     PreflightError,
     Step,
     StepResult,
-    encode_target,
     failed,
     perf_counter_value,
     render_table,
@@ -92,47 +85,6 @@ class TestThePerfCounter:
         # Zero é medição, não ausência: um comando trivial pode não gerar ciclo
         # nenhum atribuído ao contador, e recusá-lo seria falso negativo.
         assert perf_counter_value(counter_line(PERF_EVENT, "0.000000"), PERF_EVENT) == 0.0
-
-
-def amis():
-    return parse_infra(make_infra()).amis
-
-
-class TestTheAmiOfTheRequestedType:
-    def test_the_arm_type_gets_the_arm_image(self):
-        target = encode_target(real_config(), amis(), "c7g.xlarge")
-
-        assert target.instance.arch == "arm64"
-        assert target.image_id == amis().encode_arm64
-
-    def test_the_two_x86_types_get_the_x86_image(self):
-        # `x86_64` no `experiment.toml` e `amd64` no arquivo de infra: são dois
-        # vocabulários, e a tradução entre eles mora nesta função.
-        for instance_type in ("c7i.xlarge", "c7a.xlarge"):
-            target = encode_target(real_config(), amis(), instance_type)
-
-            assert target.instance.arch == "x86_64"
-            assert target.image_id == amis().encode_amd64
-
-    def test_the_slice_is_named_by_the_short_id_of_the_type(self):
-        # A fatia que o bootstrap baixa é `scenarios/{id}.json`: derivar o id do
-        # tipo em vez de lê-lo do TOML daria um `plan-key` que não existe.
-        assert encode_target(real_config(), amis(), "c7g.xlarge").instance.id == "c7g"
-
-    def test_every_declared_instance_type_resolves_to_an_image(self):
-        for instance in real_config().instances:
-            assert encode_target(real_config(), amis(), instance.instance_type).image_id
-
-    def test_a_type_the_toml_does_not_declare_is_refused_naming_the_declared_ones(self):
-        with pytest.raises(PreflightError, match=re.escape("c7g.xlarge")):
-            encode_target(real_config(), amis(), "c7q.xlarge")
-
-    def test_an_arch_with_no_ami_is_refused_naming_the_arch(self):
-        strange = InstanceRecord(id="c7x", instance_type="c7x.xlarge", arch="riscv")
-        config = replace(real_config(), instances=(strange,))
-
-        with pytest.raises(PreflightError, match="riscv"):
-            encode_target(config, amis(), "c7x.xlarge")
 
 
 def passed(step: Step, detail: str = "") -> StepResult:

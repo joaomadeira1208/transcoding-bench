@@ -1,9 +1,10 @@
-"""O núcleo puro do `preflight`: a AMI do tipo pedido, o veredito do `perf` e a tabela.
+"""O núcleo puro do `preflight`: o veredito sobre o `perf` e a tabela do passo.
 
-As funções recebem dado já buscado e devolvem dado — quem lança a instância, abre
-o SSH e lista o bucket é o `orchestrator.py`, sobre o `external.py`. Os dois
-`docker run` daqui são argv, e como o resto do argv do sistema ficam sem teste
-(ADR-0022): o que ganha teste é a decisão que se toma sobre a saída deles.
+As funções recebem dado já buscado e devolvem dado — quem lança a instância é o
+`instance_launch.py`, e quem abre o SSH e lista o bucket é o `orchestrator.py`,
+sobre o `external.py`. Os dois `docker run` daqui são argv, e como o resto do
+argv do sistema ficam sem teste (ADR-0022): o que ganha teste é a decisão que se
+toma sobre a saída deles.
 """
 
 from __future__ import annotations
@@ -13,8 +14,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from experiment_config import ExperimentConfig, InstanceRecord
-from infra_config import Amis
 from masters_launch import IMAGE_TAG
 
 PERF_EVENT = "cycles"
@@ -59,34 +58,6 @@ class StepResult:
     step: Step
     outcome: Outcome
     detail: str
-
-
-@dataclass(frozen=True)
-class EncodeTarget:
-    """O que o lançamento precisa saber do tipo pedido: o registro e a AMI dele."""
-
-    instance: InstanceRecord
-    image_id: str
-
-
-def encode_target(config: ExperimentConfig, amis: Amis, instance_type: str) -> EncodeTarget:
-    """Resolve o tipo pedido contra a spec: nenhuma arquitetura é derivada do nome."""
-    declared = {instance.instance_type: instance for instance in config.instances}
-    instance = declared.get(instance_type)
-    if instance is None:
-        raise PreflightError(
-            f"{instance_type} não é um tipo declarado no experiment.toml "
-            f"(declarados: {', '.join(sorted(declared))})"
-        )
-
-    images = {"arm64": amis.encode_arm64, "x86_64": amis.encode_amd64}
-    image_id = images.get(instance.arch)
-    if image_id is None:
-        raise PreflightError(
-            f"{instance_type}: o arquivo de infra não tem AMI para a arquitetura "
-            f"'{instance.arch}' (tem: {', '.join(sorted(images))})"
-        )
-    return EncodeTarget(instance=instance, image_id=image_id)
 
 
 def perf_probe_command() -> list[str]:

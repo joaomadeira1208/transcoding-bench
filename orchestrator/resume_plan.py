@@ -60,9 +60,6 @@ def resume(
     winners = _winners(metas)
     excluded = frozenset(excluded_commits)
 
-    # `setdefault` sobre um dict, e não um agrupamento por conjunto: a ordem das
-    # arquiteturas e a dos blocos dentro de cada uma são a do canônico, e é dela
-    # que a fatia reduzida herda a ordem.
     verdicts: dict[str, list[tuple[str, Pending | None]]] = {}
     for block in plan["blocks"]:
         verdicts.setdefault(block["instance"], []).append(

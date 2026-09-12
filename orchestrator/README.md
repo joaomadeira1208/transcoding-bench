@@ -436,7 +436,11 @@ que interessam. Os blocos voltam **inteiros**, warm-up e as cinco Replicações,
 `run_id` são cunhados na instância e retomar só as Replicações faltantes rodaria
 a frio (ADR-0003/0012). Arquitetura sem pendência não ganha arquivo, e uma
 campanha inteira completa é status zero com diretório vazio: "não há o que
-retomar" é um resultado. Status 1 é `meta.json` recusado, e 2, configuração
+retomar" é um resultado. Por isso o `--out` tem de ser um diretório novo a cada
+retomada, e o CLI recusa um que já contenha fatias antes de sincronizar coisa
+alguma: quem lê o diretório é o `run --slices`, que sobe toda arquitetura
+presente nele, e a fatia da retomada anterior mandaria refazer os 54 blocos de
+uma arquitetura que desta vez saiu completa. Status 1 é `meta.json` recusado, e 2, configuração
 ilegível ou AWS CLI falhando. O comando **não lança instância nenhuma** — quem executa
 a fatia reduzida é o `orchestrator.py run --slices`, e o humano entre os dois é o
 gate.

@@ -50,6 +50,24 @@ def excluded_commit(value: str) -> str:
     return value
 
 
+def fresh_out_dir(value: str) -> Path:
+    """Um `--out` que já tem fatias é recusado, e recusado antes do `s3 sync`.
+
+    O diretório é a interface com o `run --slices`, que sobe **toda** arquitetura
+    presente nele. Reusar o `--out` da retomada anterior deixaria lá a fatia de
+    uma arquitetura que desta vez saiu completa, e o `run` seguinte refaria os 54
+    blocos dela — com o relatório ao lado dizendo que não há o que retomar.
+    """
+    out = Path(value)
+    existing = sorted(path.name for path in out.glob(SLICE_FILENAME.format(instance="*")))
+    if existing:
+        raise argparse.ArgumentTypeError(
+            f"{out} já contém {', '.join(existing)}: cada retomada escreve num "
+            f"diretório novo, porque o 'run --slices' sobe toda fatia que estiver lá"
+        )
+    return out
+
+
 def read_metas(runs: Path) -> tuple[list[dict[str, Any]], list[str]]:
     """Os `meta.json` da árvore sincronizada, com um aviso por Execução sem o seu.
 
@@ -93,8 +111,11 @@ def main() -> int:
     parser.add_argument(
         "--out",
         required=True,
-        type=Path,
-        help="diretório onde as fatias reduzidas são escritas (criado se não existir)",
+        type=fresh_out_dir,
+        help=(
+            "diretório onde as fatias reduzidas são escritas (criado se não "
+            "existir; recusado se já contiver fatias)"
+        ),
     )
     parser.add_argument(
         "--exclude-commit",

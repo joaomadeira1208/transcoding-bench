@@ -146,6 +146,17 @@ O probe da prontidão tem a sua própria tradução, pela mesma razão: o id que
 propaga qualquer outro erro — um `AccessDenied` continua matando o passo em vez
 de virar espera até o timeout.
 
+O `instance_launch.py` é a casca que junta as duas metades para subir uma
+Instância de encode: a AMI pela `arch` que o registro `[[instance]]` declara — é
+ali que o `x86_64` do `experiment.toml` e o `amd64` do arquivo de infra se
+encontram —, o user-data fino com o SHA, o `run-instances` com o perfil `encode`,
+200 GB gp3 e hop limit 2, e a espera por `running` mais `cloud-init`. Registro,
+bucket, chave da fatia, volume e tags são argumentos, de modo que subir uma
+instância e subir uma por arquitetura sejam a mesma chamada repetida. A escolha
+da AMI e as três tags são funções puras, e é nelas que os testes batem — a tag
+`role=encode` porque é ela que torna a instância terminável pela policy da
+ADR-0016, e o `Name` porque é ele que separa as três numa listagem de órfãos.
+
 O `ssh_exec` é bloqueante, recebe o comando remoto como argv e o entrega ao shell
 da instância já citado por `shlex.join`, que é o que faz um JSON no argv
 sobreviver (ADR-0018). Ele leva `ConnectTimeout` e keep-alive de servidor porque
@@ -340,12 +351,11 @@ O que o preflight **não** apaga é a fatia. Os dois objetos de prova vivem sob
 piloto sobrescreve essa chave, e ninguém deve ler um objeto já presente nela como
 se o próprio lançamento o tivesse posto.
 
-O que ganha teste é o núcleo do `preflight.py`: a decisão sobre a saída do `perf`,
-a montagem da tabela — inclusive o passo que **não** rodou, porque uma capacidade
-que ninguém provou não pode sair do relatório como silêncio — e a escolha da AMI
-pela arquitetura do tipo pedido, que é onde o `x86_64` do `experiment.toml` e o
-`amd64` do arquivo de infra se encontram. O laço e os dois `docker run` são
-escritos direto (ADR-0022).
+O que ganha teste é o núcleo do `preflight.py` — a decisão sobre a saída do
+`perf` e a montagem da tabela, inclusive o passo que **não** rodou, porque uma
+capacidade que ninguém provou não pode sair do relatório como silêncio — mais as
+funções puras do `instance_launch.py`. O laço e os dois `docker run` são escritos
+direto (ADR-0022).
 
 **O primeiro preflight real é a hora de capturar os payloads da AWS CLI.** As
 fixtures do adaptador em `conftest.py` — `run-instances`, `describe-instances`,

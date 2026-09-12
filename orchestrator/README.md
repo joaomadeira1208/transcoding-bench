@@ -248,11 +248,13 @@ junto. São dois:
         --instance-type c7g.xlarge
 
 A escada em que eles se encaixam, cada degrau disparado pelo pesquisador
-(ADR-0022): preparação dos Masters → **gate humano** sobre o manifesto → preflight
-→ smoke AWS → piloto → campanha. O `prepare-masters` é o primeiro exercício real
-de `PassRole`, condição de tipo e chave via SSM; o preflight prova o resto do
+(ADR-0022): smoke local → aceite com Docker → preparação dos Masters → **gate
+humano** sobre o manifesto → preflight nos três tipos → piloto e **gate humano**
+sobre o relatório → campanha. O `prepare-masters` é o primeiro exercício real de
+`PassRole`, condição de tipo e chave via SSM; o preflight prova o resto do
 caminho do encode, incluindo a validação dos Masters, que só existe com Masters
-no bucket.
+no bucket. Não há degrau entre o preflight e o piloto: o smoke AWS saiu da
+escada, e a primeira Execução real do projeto é o primeiro bloco do piloto.
 
 Nada é descoberto por tag (ADR-0019): a subnet, o security group das efêmeras, o
 perfil, a AMI e os dois buckets saem do `--infra`, e o SHA que as instâncias
@@ -296,9 +298,11 @@ pesquisador.
 
 O segundo subcomando prova, antes de haver uma instância faturando por dois dias,
 que `PassRole`, condição de tipo, chave via SSM, hop limit, clone no SHA, build,
-fatia, Masters validados, `perf` dentro do container e o `PutObject` do encode
-funcionam **juntos**. Ele não mede nada: os dez eventos de PMU nas três
-arquiteturas seguem sendo o smoke AWS (ADR-0022).
+fatia, Masters validados, os dez eventos de PMU dentro do container e o
+`PutObject` do encode funcionam **juntos**. Ele não mede nada — conferir que um
+contador abre não é medi-lo —, e é ele que responde à pergunta que custa mais
+caro do que qualquer outra: se cada evento da definição existe **naquela**
+arquitetura (ADR-0006, ADR-0022).
 
 Cada execução é uma instância descartável de poucos minutos, e o tipo é
 argumento — `--instance-type c7i.xlarge` roda o mesmo caminho no x86, sem código
@@ -327,11 +331,19 @@ corrida de ~2 h já paga. Aqui ele copia um objeto de poucos bytes entre os dois
 buckets, pela mesma função do adaptador, e o apaga dos dois em seguida — o objeto
 vive sob `runs/preflight/`, que é onde o `DeleteObject` da ADR-0016 alcança.
 
-O `perf stat` do passo 4 decide sobre o **valor**, não sobre o código de saída:
-um evento indisponível naquela PMU não faz o `perf` falhar (ADR-0006), ele
-reporta `<not supported>` e segue. O objeto que o container escreve em
-`runs/preflight/` é listado e apagado pelo Orquestrador, o que fecha `PutObject`
-do encode, `ListBucket` e `DeleteObject` no mesmo passo.
+O `perf stat` do passo 4 pede os `pmu_events` da definição validada — os dez
+juntos, nunca uma lista transcrita no código, porque trocar um evento no
+`config/experiment.toml` tem de mudar o que o preflight confere — e decide sobre
+o **valor**, não sobre o código de saída: um evento indisponível naquela PMU não
+faz o `perf` falhar (ADR-0006), ele reporta `<not supported>` e segue. Cada um
+dos dez tem de vir com valor numérico; o que falta, volta `<not supported>` ou
+não é número derruba o passo **nomeando o evento**, e é esse nome que o
+pesquisador lê na tabela para decidir, antes do piloto, entre trocar o evento na
+definição e registrar a coluna ausente. Passando, a linha lista os dez valores.
+
+O objeto que o container escreve em `runs/preflight/` é listado e apagado pelo
+Orquestrador, o que fecha `PutObject` do encode, `ListBucket` e `DeleteObject` no
+mesmo passo.
 
 O que o preflight **não** apaga é a fatia. Os dois objetos de prova vivem sob
 `runs/preflight/` e somem; `scenarios/{id}.json` fica no bucket, e o
@@ -340,7 +352,9 @@ O que o preflight **não** apaga é a fatia. Os dois objetos de prova vivem sob
 piloto sobrescreve essa chave, e ninguém deve ler um objeto já presente nela como
 se o próprio lançamento o tivesse posto.
 
-O que ganha teste é o núcleo do `preflight.py`: a decisão sobre a saída do `perf`,
+O que ganha teste é o núcleo do `preflight.py`: o veredito sobre a saída do
+`perf` — função pura sobre o texto parseado, e sobre a lista que a configuração
+real declara, não sobre uma cópia dela no teste —,
 a montagem da tabela — inclusive o passo que **não** rodou, porque uma capacidade
 que ninguém provou não pode sair do relatório como silêncio — e a escolha da AMI
 pela arquitetura do tipo pedido, que é onde o `x86_64` do `experiment.toml` e o

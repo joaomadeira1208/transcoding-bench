@@ -17,8 +17,6 @@ from experiment_config import ExperimentConfig, InstanceRecord
 from infra_config import Amis
 from masters_launch import IMAGE_TAG
 
-PERF_EVENT = "cycles"
-
 NOT_SUPPORTED = "<not supported>"
 
 PROBE_CONTENT = "preflight"
@@ -89,7 +87,7 @@ def encode_target(config: ExperimentConfig, amis: Amis, instance_type: str) -> E
     return EncodeTarget(instance=instance, image_id=image_id)
 
 
-def perf_probe_command() -> list[str]:
+def perf_probe_command(events: Sequence[str]) -> list[str]:
     """O `perf stat` sobre um comando trivial, dentro da imagem que a Execução usa."""
     return [
         "sudo",
@@ -102,7 +100,7 @@ def perf_probe_command() -> list[str]:
         "stat",
         "-j",
         "-e",
-        PERF_EVENT,
+        ",".join(events),
         "-o",
         "/dev/stdout",
         "--",
@@ -125,9 +123,25 @@ def encode_put_command(*, bucket: str, key: str) -> list[str]:
     ]
 
 
-def perf_counter_value(raw: str, event: str) -> float:
-    """O valor que o `perf stat -j` abriu para o evento, ou a recusa que o nomeia."""
+def perf_counter_values(raw: str, events: Sequence[str]) -> dict[str, float]:
+    """O valor que o `perf stat -j` abriu para cada evento pedido, ou a recusa que o nomeia.
+
+    A lista vem de quem chamou — do `pmu_events` da configuração validada —, e o
+    veredito é por evento: um único `<not supported>` entre os dez é uma coluna
+    vazia para aquela arquitetura inteira, e é aqui que ele para.
+    """
     counters = _counters(raw)
+    return {event: _counter_value(counters, event) for event in events}
+
+
+def perf_detail(counted: Mapping[str, float]) -> str:
+    """A linha da tabela do passo: os eventos que abriram contador, com o valor de cada um."""
+    return "dentro do container: " + ", ".join(
+        f"{event} = {value:.0f}" for event, value in counted.items()
+    )
+
+
+def _counter_value(counters: Sequence[tuple[str, str]], event: str) -> float:
     reported = [value for name, value in counters if name == event or name.startswith(f"{event}:")]
     if not reported:
         raise PreflightError(

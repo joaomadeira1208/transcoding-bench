@@ -42,7 +42,6 @@ from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
 from masters_plan import build_masters_plan
 from preflight import (
-    PERF_EVENT,
     EncodeTarget,
     Outcome,
     PreflightError,
@@ -51,7 +50,8 @@ from preflight import (
     encode_put_command,
     encode_target,
     failed,
-    perf_counter_value,
+    perf_counter_values,
+    perf_detail,
     perf_probe_command,
     render_table,
     summarize,
@@ -323,13 +323,14 @@ def preflight(
         )
 
         host = _step(results, Step.BOOTSTRAP, lambda: _wait_for_bootstrapped_instance(instance_id))
+        events = config.instrumentation.pmu_events
         _step(
             results,
             Step.PERF,
-            lambda: perf_counter_value(
-                ssh_exec(host, perf_probe_command(), timeout=PROBE_TIMEOUT_SECONDS), PERF_EVENT
+            lambda: perf_counter_values(
+                ssh_exec(host, perf_probe_command(events), timeout=PROBE_TIMEOUT_SECONDS), events
             ),
-            detail=lambda counted: f"{PERF_EVENT} = {counted:.0f} dentro do container",
+            detail=perf_detail,
         )
         _step(results, Step.ENCODE_PUT, lambda: _put_from_container(host, target, instance_id))
     except _Aborted:
@@ -344,7 +345,10 @@ def preflight(
     if failed(table):
         return EXIT_FAILURE
 
-    _report("o preflight passou; o degrau seguinte da escada é o smoke AWS (ADR-0022)")
+    _report(
+        "o preflight passou; o degrau seguinte da escada é o primeiro bloco do piloto, "
+        "que é a primeira Execução real (ADR-0022)"
+    )
     return EXIT_OK
 
 

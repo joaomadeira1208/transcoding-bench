@@ -163,6 +163,10 @@ O passo 2 não é opcional e não é redundante com o passo 1. A ADR-0006 regist
 
 Sequenciamento: smoke local verde → aceite manual com Docker → smoke AWS → a fixture-âncora sai do `meta.json` do c7g → campanha. **Emenda:** o "até o smoke AWS existir, roda só contra a factory" vale só para a âncora do **`meta.json` de campanha**; as âncoras dos parsers de instrumentação chegam antes, com o aceite manual.
 
+**Emenda: a camada AWS é o `preflight`, e a verificação dos dez eventos mora nele.** Os dois passos acima viram um subcomando só do Orquestrador, rodado uma vez por tipo com `--instance-type`: `perf stat -j -e` com os `pmu_events` da definição validada, sobre um comando trivial dentro da imagem que a Execução usa, e o veredito por evento — ausente, `<not supported>` ou `counter-value` não numérico falha nomeando o evento. A lista não é transcrita no código: trocar um evento no `config/experiment.toml` tem de mudar o que o degrau confere, ou o que se está conferindo não é o experimento que vai rodar.
+
+**E a "Execução real na `c7g` sobre um clip de 30 s" sai da escada.** O clip não existe: os Masters são os vídeos inteiros (ADR-0004), e produzir um exigiria preparação, manifesto e definição próprios — código e mais um gate humano — para provar em minutos o que o **primeiro bloco do piloto** prova sozinho, sobre vídeo real. A primeira Execução real passa a ser esse bloco. Onde as linhas acima dizem "smoke AWS", leia-se `preflight`, com uma consequência a registrar: o par 2160p → 2160p fica sem Execução real antes da campanha, coberto pelo manifesto (ADR-0014) e pelo fato de a geometria de saída não ter ramo próprio no `run_scenario.sh`.
+
 ### Camada piloto — a campanha em escopo menor
 
 **Emenda: entre o smoke AWS e a campanha roda um piloto.** O smoke AWS prova que o caminho roda e que a PMU responde; ele não mede nada, e é por desenho — clip de 30 s, 2 runs. O que só aparece com dados e volume reais fica sem verificação até a hora 40 da campanha: o filtro de warm-up e a dedup sobre blocos inteiros, as três arquiteturas em paralelo, o triage hash-first com grupos reais, o Juiz sobre outputs reais, a tabela com números plausíveis, e quanto tempo e dinheiro a campanha custa de fato. O piloto é isso: **a campanha, em escopo menor**. Roda um piloto.
@@ -187,7 +191,11 @@ O resultado da checklist, com o SHA que rodou, o nome do bucket e os tempos medi
 
 **O que não muda.** A fixture-âncora do `meta.json` continua saindo do smoke AWS: ela vem antes, é escrita pelo mesmo bash na mesma instância, e o que ela protege é o contrato cross-language, não o volume.
 
+**Emenda: a âncora sai do primeiro bloco do piloto.** Sem o smoke AWS não há Execução antes dele, e é o piloto que escreve o primeiro `meta.json` de campanha — mesmo bash, mesma instância, e ainda antes da campanha, que é o que a âncora precisa ser. O hotfix de classe 2 da ADR-0021, que repetia "só o smoke AWS", repete o `preflight`.
+
 A escada inteira, cada degrau disparado pelo pesquisador: smoke local → aceite manual com Docker → preparação dos masters e aprovação do manifesto (ADR-0014) → validação de fumaça do IAM (ADR-0016) → smoke AWS → **piloto** e aprovação do relatório → campanha.
+
+**Emenda: são seis degraus, e o do smoke AWS não está entre eles.** A validação de fumaça do IAM e o smoke AWS eram dois pela ordem em que foram decididos, não por provarem coisas diferentes: o `preflight` é um degrau só e cobre os dois. A escada, cada degrau disparado pelo pesquisador: smoke local → aceite manual com Docker → preparação dos Masters e aprovação do manifesto (ADR-0014) → **`preflight` nos três tipos** (ADR-0016), com os dez eventos abrindo contador em cada um → **piloto** e aprovação do relatório → campanha.
 
 
 ## Verificação das camadas não-Python

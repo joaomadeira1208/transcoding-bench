@@ -14,8 +14,8 @@ import pytest
 from conftest import make_infra, real_config
 from experiment_config import InstanceRecord
 from infra_config import parse_infra
+from masters_launch import IMAGE_TAG
 from preflight import (
-    PERF_EVENT,
     STEPS,
     Outcome,
     PreflightError,
@@ -23,10 +23,14 @@ from preflight import (
     StepResult,
     encode_target,
     failed,
-    perf_counter_value,
+    perf_counter_values,
+    perf_detail,
+    perf_probe_command,
     render_table,
     summarize,
 )
+
+PMU_EVENTS = real_config().instrumentation.pmu_events
 
 
 def counter_line(event: str, value: str) -> str:
@@ -43,55 +47,111 @@ def counter_line(event: str, value: str) -> str:
     )
 
 
-class TestThePerfCounter:
-    def test_a_numeric_counter_value_is_the_measurement(self):
-        output = counter_line(PERF_EVENT, "1234567.000000")
+def perf_output(values: dict[str, str]) -> str:
+    return "\n".join(counter_line(event, value) for event, value in values.items())
 
-        assert perf_counter_value(output, PERF_EVENT) == 1234567.0
+
+def every_event_counted() -> dict[str, str]:
+    return {event: "1234567.000000" for event in PMU_EVENTS}
+
+
+class TestThePerfProbe:
+    def test_the_probe_asks_for_the_events_the_configuration_declares(self):
+        # A lista sai da configuração validada: transcrever os dez no código faria
+        # trocar um evento no TOML mudar o que a campanha mede e não o que o
+        # preflight confere, que é o próprio ponto do passo.
+        argv = perf_probe_command(PMU_EVENTS)
+
+        assert argv[argv.index("-e") + 1] == ",".join(PMU_EVENTS)
+
+    def test_the_probe_runs_inside_the_image_the_execution_uses(self):
+        assert IMAGE_TAG in perf_probe_command(PMU_EVENTS)
+
+
+class TestThePerfCounters:
+    def test_the_ten_events_with_a_numeric_value_are_the_measurement(self):
+        counted = perf_counter_values(perf_output(every_event_counted()), PMU_EVENTS)
+
+        assert list(counted) == list(PMU_EVENTS)
+        assert set(counted.values()) == {1234567.0}
 
     def test_not_supported_is_refused_naming_the_event(self):
         # O modo de falha inteiro do passo: `perf stat` **não** sai não-zero
         # quando o evento não existe naquela PMU (ADR-0006), então quem só olha o
         # código de saída dá o contador por aberto.
-        output = counter_line(PERF_EVENT, "<not supported>")
+        for event in PMU_EVENTS:
+            values = every_event_counted() | {event: "<not supported>"}
 
-        with pytest.raises(PreflightError, match="not supported"):
-            perf_counter_value(output, PERF_EVENT)
+            with pytest.raises(PreflightError, match=re.escape(event)) as refusal:
+                perf_counter_values(perf_output(values), PMU_EVENTS)
+            assert "not supported" in str(refusal.value)
 
-    def test_an_event_absent_from_the_output_is_refused(self):
-        output = counter_line("instructions", "42.000000")
+    def test_an_event_absent_from_the_output_is_refused_naming_it(self):
+        for event in PMU_EVENTS:
+            values = every_event_counted()
+            del values[event]
 
-        with pytest.raises(PreflightError, match=PERF_EVENT):
-            perf_counter_value(output, PERF_EVENT)
+            with pytest.raises(PreflightError, match=re.escape(event)):
+                perf_counter_values(perf_output(values), PMU_EVENTS)
 
     def test_an_empty_output_is_refused(self):
-        with pytest.raises(PreflightError, match=PERF_EVENT):
-            perf_counter_value("", PERF_EVENT)
+        with pytest.raises(PreflightError, match=re.escape(PMU_EVENTS[0])):
+            perf_counter_values("", PMU_EVENTS)
+
+    def test_a_counter_value_that_is_not_a_number_is_refused_naming_the_event(self):
+        for event in PMU_EVENTS:
+            values = every_event_counted() | {event: ""}
+
+            with pytest.raises(PreflightError, match=re.escape(event)):
+                perf_counter_values(perf_output(values), PMU_EVENTS)
 
     def test_the_header_the_perf_version_prints_is_ignored(self):
         output = "\n".join(
-            ["# started on Fri Sep 11 18:00:00 2026", "", counter_line(PERF_EVENT, "99.000000")]
+            ["# started on Fri Sep 11 18:00:00 2026", "", perf_output(every_event_counted())]
         )
 
-        assert perf_counter_value(output, PERF_EVENT) == 99.0
+        assert len(perf_counter_values(output, PMU_EVENTS)) == len(PMU_EVENTS)
 
     def test_the_modifier_perf_appends_to_the_event_still_counts(self):
         # `perf` ecoa o evento com o modificador que aplicou (`cycles:u`), e uma
         # comparação exata recusaria um contador que abriu.
-        output = counter_line(f"{PERF_EVENT}:u", "7.000000")
+        values = {f"{event}:u": "7.000000" for event in PMU_EVENTS}
 
-        assert perf_counter_value(output, PERF_EVENT) == 7.0
-
-    def test_a_counter_value_that_is_not_a_number_is_refused(self):
-        output = counter_line(PERF_EVENT, "")
-
-        with pytest.raises(PreflightError, match=PERF_EVENT):
-            perf_counter_value(output, PERF_EVENT)
+        assert perf_counter_values(perf_output(values), PMU_EVENTS) == dict.fromkeys(
+            PMU_EVENTS, 7.0
+        )
 
     def test_a_zeroed_counter_is_a_counter(self):
-        # Zero é medição, não ausência: um comando trivial pode não gerar ciclo
+        # Zero é medição, não ausência: um comando trivial pode não gerar evento
         # nenhum atribuído ao contador, e recusá-lo seria falso negativo.
-        assert perf_counter_value(counter_line(PERF_EVENT, "0.000000"), PERF_EVENT) == 0.0
+        values = dict.fromkeys(PMU_EVENTS, "0.000000")
+
+        assert perf_counter_values(perf_output(values), PMU_EVENTS) == dict.fromkeys(
+            PMU_EVENTS, 0.0
+        )
+
+    def test_an_event_the_probe_did_not_ask_for_is_not_the_verdict(self):
+        values = every_event_counted() | {"duration_time": "<not supported>"}
+
+        assert len(perf_counter_values(perf_output(values), PMU_EVENTS)) == len(PMU_EVENTS)
+
+
+class TestTheDetailOfThePerfStep:
+    def test_the_line_lists_every_event_with_its_value(self):
+        detail = perf_detail(perf_counter_values(perf_output(every_event_counted()), PMU_EVENTS))
+
+        for event in PMU_EVENTS:
+            assert f"{event} = 1234567" in detail
+
+    def test_the_line_survives_the_table(self):
+        detail = perf_detail(perf_counter_values(perf_output(every_event_counted()), PMU_EVENTS))
+        results = summarize([StepResult(Step.PERF, Outcome.PASSED, detail)])
+
+        line = next(
+            line for line in render_table(results).splitlines() if line.startswith(Step.PERF.value)
+        )
+        for event in PMU_EVENTS:
+            assert event in line
 
 
 def amis():

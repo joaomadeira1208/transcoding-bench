@@ -126,12 +126,7 @@ def encode_put_command(*, bucket: str, key: str) -> list[str]:
 
 
 def perf_counter_values(raw: str, events: Sequence[str]) -> dict[str, float]:
-    """O valor que o `perf stat -j` abriu para cada evento pedido, ou a recusa que os nomeia.
-
-    A recusa junta **todos** os eventos sem contador, e não só o primeiro: cada
-    execução deste passo custa uma instância, e quem lê a tabela decide ali entre
-    trocar o evento na definição e registrar a coluna ausente.
-    """
+    """O valor que o `perf stat -j` abriu para cada evento pedido, ou a recusa que os nomeia."""
     counters = _counters(raw)
     counted: dict[str, float] = {}
     refused: list[str] = []

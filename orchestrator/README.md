@@ -337,9 +337,11 @@ juntos, nunca uma lista transcrita no código, porque trocar um evento no
 o **valor**, não sobre o código de saída: um evento indisponível naquela PMU não
 faz o `perf` falhar (ADR-0006), ele reporta `<not supported>` e segue. Cada um
 dos dez tem de vir com valor numérico; o que falta, volta `<not supported>` ou
-não é número derruba o passo **nomeando o evento**, e é esse nome que o
-pesquisador lê na tabela para decidir, antes do piloto, entre trocar o evento na
-definição e registrar a coluna ausente. Passando, a linha lista os dez valores.
+não é número derruba o passo **nomeando o evento** — e a recusa junta **todos**
+os que ficaram sem contador, não só o primeiro, porque a próxima tentativa custa
+outra instância. É esse nome que o pesquisador lê na tabela para decidir, antes
+do piloto, entre trocar o evento na definição e registrar a coluna ausente.
+Passando, a linha lista os dez valores.
 
 O objeto que o container escreve em `runs/preflight/` é listado e apagado pelo
 Orquestrador, o que fecha `PutObject` do encode, `ListBucket` e `DeleteObject` no

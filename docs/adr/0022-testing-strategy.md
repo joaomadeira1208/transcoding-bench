@@ -53,6 +53,8 @@ Híbrido, porque as duas formas têm trabalhos diferentes:
 - **Factory em código** (`make_meta(**overrides)` no `conftest.py` do papel) pro grosso dos testes — gerar 40 variações de completude/dedup sem 40 arquivos.
 - **Um `meta.json` real, capturado do smoke AWS, commitado em `tests/fixtures/`**, como âncora do contrato do modelo pydantic.
 
+**Emenda: a âncora do `meta.json` sai do primeiro bloco do piloto.** O smoke AWS saiu da escada, e o `preflight` que tomou o lugar dele não escreve `meta.json` nenhum — roda `perf stat` sobre um comando trivial. A primeira Execução real passa a ser o primeiro bloco do piloto, e é de lá que a âncora vem; o registro está na camada piloto, adiante.
+
 A factory tem um vício fatal justamente no `meta.json`: é escrita em Python, pelo mesmo raciocínio que escreveu o modelo pydantic, então valida o Python contra o Python. O `meta.json` é contrato **cross-language** — bash escreve, Python lê (ADR-0019) — e a única coisa que pega drift é um arquivo que o bash de verdade produziu.
 
 **Emenda: os parsers de instrumentação ganham âncora própria, e antes.** O vício da factory não é exclusivo do `meta.json` — o `time.json`, o `perf.json`, a `pidstat.txt` e o `ffmpeg.log` também são texto que nasce fora do Python, e uma factory deles é o autor do parser adivinhando o que a ferramenta emite. A captura vem da camada de aceite manual, que não precisa de AWS: os casos felizes desses quatro parsers passam a rodar contra o texto real, e a factory fica com o que só ela sabe fazer — a chave renomeada, o evento `<not supported>`, o `%CPU` deslocado de coluna.
@@ -144,13 +146,13 @@ Entra então um passo **opt-in, fora do CI**, morando em `smoke/` (o diretório 
 
 O argv, o format string e as flags do `pidstat` **não são transcritos** no passo de aceite: saem do rastro que os shims registraram na camada de baixo, na mesma sessão. Transcrevê-los faria a captura concordar com o teste enquanto divergia do `run_scenario.sh` que a campanha roda — que é exatamente a falha que o aceite existe pra pegar.
 
-O `perf` entra na cadeia, e não pelo motivo que se esperaria. O PMU não é exposto ao guest do Docker no Mac, então nenhum contador de hardware volta com valor — mas `perf stat` **recusa um nome de evento que não conhece**, e é isso que torna a lista de `pmu_events` do `config/experiment.toml` verificável localmente. Se cada evento *retorna valor* naquela arquitetura continua sendo pergunta do smoke AWS, e continua sendo o modo de falha mais caro do projeto.
+O `perf` entra na cadeia, e não pelo motivo que se esperaria. O PMU não é exposto ao guest do Docker no Mac, então nenhum contador de hardware volta com valor — mas `perf stat` **recusa um nome de evento que não conhece**, e é isso que torna a lista de `pmu_events` do `config/experiment.toml` verificável localmente. Se cada evento *retorna valor* naquela arquitetura continua sendo pergunta do `preflight`, que a faz nos três tipos antes do piloto, e continua sendo o modo de falha mais caro do projeto.
 
 Não se está medindo nada aqui: o `run_scenario.sh` não é invocado, não há modo degradado a inventar, e o `-march=native` ser o do M-series é irrelevante para saber se o `libsvtav1` aceita um parâmetro.
 
 E o passo **captura as saídas cruas como fixtures commitadas**, que passam a alimentar os testes dos parsers do `analysis/` no lugar da factory. É a mesma justificativa pela qual o `meta.json` real é âncora, um degrau abaixo: um parser testado contra texto que o próprio autor digitou valida o Python contra o Python. A emenda de allowlist que isso exige está na ADR-0017.
 
-### Camada AWS — caminho completo, vídeo curto
+### Camada AWS — o `preflight` nos três tipos
 
 Amplia a validação de fumaça da ADR-0016 (que já era pré-requisito operacional) e da ADR-0021 (que já mandou incluir o caminho do clone):
 

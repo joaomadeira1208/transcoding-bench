@@ -1,9 +1,10 @@
 """O núcleo puro do `preflight`: o veredito sobre o `perf` e a tabela do passo.
 
-As funções recebem dado já buscado e devolvem dado — quem lança a instância, abre
-o SSH e lista o bucket é o `orchestrator.py`, sobre o `external.py`. Os dois
-`docker run` daqui são argv, e como o resto do argv do sistema ficam sem teste
-(ADR-0022): o que ganha teste é a decisão que se toma sobre a saída deles.
+As funções recebem dado já buscado e devolvem dado — quem lança a instância é o
+`instance_launch.py`, e quem abre o SSH e lista o bucket é o `orchestrator.py`,
+sobre o `external.py`. Os dois `docker run` daqui são argv, e como o resto do
+argv do sistema ficam sem teste (ADR-0022): o que ganha teste é a decisão que se
+toma sobre a saída deles.
 """
 
 from __future__ import annotations

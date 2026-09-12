@@ -59,8 +59,6 @@ class TestTheAmiOfTheRequestedType:
 
 class TestTheTagsOfALaunchedInstance:
     def test_the_role_is_the_one_the_terminate_policy_authorizes(self):
-        # A policy da ADR-0016 condiciona o `TerminateInstances` a `role=encode`:
-        # qualquer outro valor sobe uma instância que quem a lançou não derruba.
         assert encode_tags(name="qualquer", commit="abc1234")["role"] == ENCODE_ROLE
 
     def test_the_commit_is_the_sha_the_instance_clones(self):

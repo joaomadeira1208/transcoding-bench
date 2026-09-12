@@ -17,7 +17,7 @@ uma saída mudar de forma.
 Os contadores de hardware do `perf.json` vêm `<not supported>`: quem captura é o
 Mac, e o Docker não expõe a PMU ao guest. É o texto real de um evento
 indisponível, que é justamente o que o parser precisa atravessar; se cada evento
-retorna valor em cada arquitetura é pergunta do smoke AWS.
+retorna valor em cada arquitetura é pergunta do `preflight` (ADR-0022).
 
 A allowlist do `.gitignore` admite `.json`, `.txt` e `.log` sob um diretório
 `fixtures/` (ADR-0017), e é por isso que o `output.mkv` da mesma captura não está

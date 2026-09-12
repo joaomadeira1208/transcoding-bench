@@ -53,6 +53,8 @@ Híbrido, porque as duas formas têm trabalhos diferentes:
 - **Factory em código** (`make_meta(**overrides)` no `conftest.py` do papel) pro grosso dos testes — gerar 40 variações de completude/dedup sem 40 arquivos.
 - **Um `meta.json` real, capturado do smoke AWS, commitado em `tests/fixtures/`**, como âncora do contrato do modelo pydantic.
 
+**Emenda: a âncora do `meta.json` sai do primeiro bloco do piloto.** O smoke AWS saiu da escada, e o `preflight` que tomou o lugar dele não escreve `meta.json` nenhum — roda `perf stat` sobre um comando trivial. A primeira Execução real passa a ser o primeiro bloco do piloto, e é de lá que a âncora vem; o registro está na camada piloto, adiante.
+
 A factory tem um vício fatal justamente no `meta.json`: é escrita em Python, pelo mesmo raciocínio que escreveu o modelo pydantic, então valida o Python contra o Python. O `meta.json` é contrato **cross-language** — bash escreve, Python lê (ADR-0019) — e a única coisa que pega drift é um arquivo que o bash de verdade produziu.
 
 **Emenda: os parsers de instrumentação ganham âncora própria, e antes.** O vício da factory não é exclusivo do `meta.json` — o `time.json`, o `perf.json`, a `pidstat.txt` e o `ffmpeg.log` também são texto que nasce fora do Python, e uma factory deles é o autor do parser adivinhando o que a ferramenta emite. A captura vem da camada de aceite manual, que não precisa de AWS: os casos felizes desses quatro parsers passam a rodar contra o texto real, e a factory fica com o que só ela sabe fazer — a chave renomeada, o evento `<not supported>`, o `%CPU` deslocado de coluna.
@@ -144,13 +146,13 @@ Entra então um passo **opt-in, fora do CI**, morando em `smoke/` (o diretório 
 
 O argv, o format string e as flags do `pidstat` **não são transcritos** no passo de aceite: saem do rastro que os shims registraram na camada de baixo, na mesma sessão. Transcrevê-los faria a captura concordar com o teste enquanto divergia do `run_scenario.sh` que a campanha roda — que é exatamente a falha que o aceite existe pra pegar.
 
-O `perf` entra na cadeia, e não pelo motivo que se esperaria. O PMU não é exposto ao guest do Docker no Mac, então nenhum contador de hardware volta com valor — mas `perf stat` **recusa um nome de evento que não conhece**, e é isso que torna a lista de `pmu_events` do `config/experiment.toml` verificável localmente. Se cada evento *retorna valor* naquela arquitetura continua sendo pergunta do smoke AWS, e continua sendo o modo de falha mais caro do projeto.
+O `perf` entra na cadeia, e não pelo motivo que se esperaria. O PMU não é exposto ao guest do Docker no Mac, então nenhum contador de hardware volta com valor — mas `perf stat` **recusa um nome de evento que não conhece**, e é isso que torna a lista de `pmu_events` do `config/experiment.toml` verificável localmente. Se cada evento *retorna valor* naquela arquitetura continua sendo pergunta do `preflight`, que a faz nos três tipos antes do piloto, e continua sendo o modo de falha mais caro do projeto.
 
 Não se está medindo nada aqui: o `run_scenario.sh` não é invocado, não há modo degradado a inventar, e o `-march=native` ser o do M-series é irrelevante para saber se o `libsvtav1` aceita um parâmetro.
 
 E o passo **captura as saídas cruas como fixtures commitadas**, que passam a alimentar os testes dos parsers do `analysis/` no lugar da factory. É a mesma justificativa pela qual o `meta.json` real é âncora, um degrau abaixo: um parser testado contra texto que o próprio autor digitou valida o Python contra o Python. A emenda de allowlist que isso exige está na ADR-0017.
 
-### Camada AWS — caminho completo, vídeo curto
+### Camada AWS — o `preflight` nos três tipos
 
 Amplia a validação de fumaça da ADR-0016 (que já era pré-requisito operacional) e da ADR-0021 (que já mandou incluir o caminho do clone):
 
@@ -162,6 +164,10 @@ Amplia a validação de fumaça da ADR-0016 (que já era pré-requisito operacio
 O passo 2 não é opcional e não é redundante com o passo 1. A ADR-0006 registra que os IDs de evento PMU diferem entre Neoverse-V1 e Sapphire Rapids/EPYC; se um evento não estiver disponível numa arquitetura, **`perf stat` não falha** — reporta o evento como não suportado e segue. O resultado seria uma coluna de IPC/cache/branch vazia para uma arquitetura inteira, descoberta no `consolidate.py` depois da campanha terminar. É falha silenciosa, arquitetura-específica, e nenhum teste unitário ou smoke local pode alcançá-la.
 
 Sequenciamento: smoke local verde → aceite manual com Docker → smoke AWS → a fixture-âncora sai do `meta.json` do c7g → campanha. **Emenda:** o "até o smoke AWS existir, roda só contra a factory" vale só para a âncora do **`meta.json` de campanha**; as âncoras dos parsers de instrumentação chegam antes, com o aceite manual.
+
+**Emenda: a camada AWS é o `preflight`, e a verificação dos dez eventos mora nele.** Os dois passos acima viram um subcomando só do Orquestrador, rodado uma vez por tipo com `--instance-type`: `perf stat -j -e` com os `pmu_events` da definição validada, sobre um comando trivial dentro da imagem que a Execução usa, e o veredito por evento — ausente, `<not supported>` ou `counter-value` não numérico falha nomeando o evento. A lista não é transcrita no código: trocar um evento no `config/experiment.toml` tem de mudar o que o degrau confere, ou o que se está conferindo não é o experimento que vai rodar.
+
+**E a "Execução real na `c7g` sobre um clip de 30 s" sai da escada.** O clip não existe: os Masters são os vídeos inteiros (ADR-0004), e produzir um exigiria preparação, manifesto e definição próprios — código e mais um gate humano — para provar em minutos o que o **primeiro bloco do piloto** prova sozinho, sobre vídeo real. A primeira Execução real passa a ser esse bloco. Onde este ADR diz "smoke AWS" — aqui, no escopo do piloto, nas opções consideradas e nas consequências —, leia-se `preflight`, com uma consequência a registrar: o par 2160p → 2160p fica sem Execução real antes da campanha, coberto pelo manifesto (ADR-0014) e pelo fato de a geometria de saída não ter ramo próprio no `run_scenario.sh`.
 
 ### Camada piloto — a campanha em escopo menor
 
@@ -187,7 +193,11 @@ O resultado da checklist, com o SHA que rodou, o nome do bucket e os tempos medi
 
 **O que não muda.** A fixture-âncora do `meta.json` continua saindo do smoke AWS: ela vem antes, é escrita pelo mesmo bash na mesma instância, e o que ela protege é o contrato cross-language, não o volume.
 
+**Emenda: a âncora sai do primeiro bloco do piloto.** Sem o smoke AWS não há Execução antes dele, e é o piloto que escreve o primeiro `meta.json` de campanha — mesmo bash, mesma instância, e ainda antes da campanha, que é o que a âncora precisa ser. O hotfix de classe 2 da ADR-0021, que repetia "só o smoke AWS", repete o `preflight`.
+
 A escada inteira, cada degrau disparado pelo pesquisador: smoke local → aceite manual com Docker → preparação dos masters e aprovação do manifesto (ADR-0014) → validação de fumaça do IAM (ADR-0016) → smoke AWS → **piloto** e aprovação do relatório → campanha.
+
+**Emenda: são seis degraus, e o do smoke AWS não está entre eles.** A validação de fumaça do IAM e o smoke AWS eram dois pela ordem em que foram decididos, não por provarem coisas diferentes: o `preflight` é um degrau só e cobre os dois. A escada, cada degrau disparado pelo pesquisador: smoke local → aceite manual com Docker → preparação dos Masters e aprovação do manifesto (ADR-0014) → **`preflight` nos três tipos** (ADR-0016), com os dez eventos abrindo contador em cada um → **piloto** e aprovação do relatório → campanha.
 
 
 ## Verificação das camadas não-Python
@@ -241,7 +251,7 @@ Escrever teste-primeiro pro módulo de seam é teatro: não há asserção a faz
 
   **Emenda: são quatro jobs, não três.** "Pytest por papel" contava como um; o workflow materializa um job por papel Python — `orchestrator/` e `analysis/`, cada um em venv próprio instalando só o seu `requirements-dev.txt` — porque é o isolamento por job que faz um `import` sem dependência declarada quebrar no CI em vez de passar porque o outro papel tinha o pacote. Os quatro: `pre-commit`, pytest do `orchestrator/`, pytest do `analysis/` e o smoke local.
 - A ADR-0019 afirmava que "o único leitor programático é o `consolidate.py`"; são três, e dois deles são stdlib-only. Corrigido lá.
-- A fixture-âncora do modelo pydantic só existe depois do primeiro smoke AWS — é sequenciamento de desenvolvimento, não detalhe.
+- A fixture-âncora do modelo pydantic só existe depois do primeiro smoke AWS — é sequenciamento de desenvolvimento, não detalhe. **Emenda:** depois do **primeiro bloco do piloto**, que é o degrau que tomou o lugar dele.
 - Os shims são a única superfície de manutenção nova que pode envelhecer mal (fake que diverge do real). A mitigação passa a ser a camada de aceite manual primeiro — que é onde o fake e o real se encontram sem custo de AWS — e o smoke AWS depois; se a estratégia precisar encolher algum dia, é por aí que se começa — nunca pela verificação de PMU.
 - A camada de aceite é manual, então nada a roda sozinha: ela envelhece em silêncio, e o sintoma é o primeiro `pytest smoke/ --docker` depois de meses quebrar. É aceito de propósito — o alternativo é o build no CI —, e o momento em que ela precisa estar verde é antes de qualquer instância subir.
 - As fixtures dos quatro artefatos de instrumentação deixam de ser inventadas: passam a ser captura de ferramenta real, ao custo da emenda de allowlist da ADR-0017 e de as regenerar quando um pin do `docker/Dockerfile` mudar.

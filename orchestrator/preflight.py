@@ -4,7 +4,8 @@ As funções recebem dado já buscado e devolvem dado — quem lança a instânc
 `instance_launch.py`, e quem abre o SSH e lista o bucket é o `orchestrator.py`,
 sobre o `external.py`. Os dois `docker run` daqui são argv, e como o resto do
 argv do sistema ficam sem teste (ADR-0022): o que ganha teste é a decisão que se
-toma sobre a saída deles.
+toma sobre a saída deles — e a lista de eventos que o `perf stat` carrega, que é
+desenho experimental (ADR-0006) e não argv de sistema.
 """
 
 from __future__ import annotations
@@ -15,8 +16,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 from masters_launch import IMAGE_TAG
-
-PERF_EVENT = "cycles"
 
 NOT_SUPPORTED = "<not supported>"
 
@@ -60,7 +59,7 @@ class StepResult:
     detail: str
 
 
-def perf_probe_command() -> list[str]:
+def perf_probe_command(events: Sequence[str]) -> list[str]:
     """O `perf stat` sobre um comando trivial, dentro da imagem que a Execução usa."""
     return [
         "sudo",
@@ -73,7 +72,7 @@ def perf_probe_command() -> list[str]:
         "stat",
         "-j",
         "-e",
-        PERF_EVENT,
+        ",".join(events),
         "-o",
         "/dev/stdout",
         "--",
@@ -96,19 +95,41 @@ def encode_put_command(*, bucket: str, key: str) -> list[str]:
     ]
 
 
-def perf_counter_value(raw: str, event: str) -> float:
-    """O valor que o `perf stat -j` abriu para o evento, ou a recusa que o nomeia."""
+def perf_counter_values(raw: str, events: Sequence[str]) -> dict[str, float]:
+    """O valor que o `perf stat -j` abriu para cada evento pedido, ou a recusa que os nomeia."""
     counters = _counters(raw)
+    counted: dict[str, float] = {}
+    refused: list[str] = []
+    for event in events:
+        try:
+            counted[event] = _counter_value(counters, event)
+        except PreflightError as error:
+            refused.append(str(error))
+
+    if refused:
+        raise PreflightError(
+            f"{len(refused)} de {len(events)} eventos sem contador dentro do container: "
+            f"{'; '.join(refused)} "
+            f"(o perf stat abriu: {', '.join(name for name, _ in counters) or 'nada'})"
+        )
+    return counted
+
+
+def perf_detail(counted: Mapping[str, float]) -> str:
+    """A linha da tabela do passo: os eventos que abriram contador, com o valor de cada um."""
+    return "dentro do container: " + ", ".join(
+        f"{event} = {value:.0f}" for event, value in counted.items()
+    )
+
+
+def _counter_value(counters: Sequence[tuple[str, str]], event: str) -> float:
     reported = [value for name, value in counters if name == event or name.startswith(f"{event}:")]
     if not reported:
-        raise PreflightError(
-            f"{event}: nenhum contador com esse nome na saída do perf stat "
-            f"(veio: {', '.join(name for name, _ in counters) or 'nada'})"
-        )
+        raise PreflightError(f"{event}: nenhum contador com esse nome")
 
     value = reported[0]
     if value.strip() == NOT_SUPPORTED:
-        raise PreflightError(f"{event}: o perf stat voltou {NOT_SUPPORTED} dentro do container")
+        raise PreflightError(f"{event}: o perf stat voltou {NOT_SUPPORTED}")
     try:
         return float(value)
     except ValueError as error:

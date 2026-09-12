@@ -113,8 +113,8 @@ concordar com o teste enquanto divergia do `run_scenario.sh` que a campanha roda
 
 O que continua fora de alcance é o **PMU**: o Docker no Mac não o expõe ao guest,
 então todo contador de hardware volta `<not supported>`. Se cada evento retorna
-valor em cada arquitetura é pergunta do smoke AWS, e é o modo de falha mais caro
-do projeto.
+valor em cada arquitetura é pergunta do `preflight`, que a faz nos três tipos
+antes do piloto (ADR-0022), e é o modo de falha mais caro do projeto.
 
 O `run_scenario.sh` **não** é invocado: não se está medindo nada, e um harness que
 o chamasse precisaria de um modo degradado sem `perf` — a alavanca que a campanha

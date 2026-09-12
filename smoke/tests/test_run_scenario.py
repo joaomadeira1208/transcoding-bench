@@ -24,6 +24,7 @@ from conftest import (
     INSTANCE_TYPE,
     VERSIONS,
     Execution,
+    check_with_preflight,
     check_with_stdlib_checker,
     validate_with_cli,
 )
@@ -150,7 +151,35 @@ def perf_failure(plan, execute) -> Execution:
 
 @pytest.fixture(scope="session")
 def unsupported_event(plan, execute) -> Execution:
-    return execute(replication(plan["blocks"][0]), SMOKE_PERF_UNSUPPORTED="cache-misses")
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cache-misses=<not supported>")
+
+
+@pytest.fixture(scope="session")
+def uncounted_event(plan, execute) -> Execution:
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cycles=<not counted>")
+
+
+@pytest.fixture(scope="session")
+def zeroed_hardware_event(plan, execute) -> Execution:
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cache-references=0.000000")
+
+
+@pytest.fixture(scope="session")
+def zeroed_software_events(plan, execute) -> Execution:
+    return execute(
+        replication(plan["blocks"][0]),
+        SMOKE_PERF_VALUES="context-switches=0.000000,cpu-migrations=0.000000",
+    )
+
+
+@pytest.fixture(scope="session")
+def implausible_pair(plan, execute) -> Execution:
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="branch-misses=9876543.000000")
+
+
+@pytest.fixture(scope="session")
+def multiplexed_counters(plan, execute) -> Execution:
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_PCNT="33.33")
 
 
 @pytest.fixture(scope="session")
@@ -232,10 +261,23 @@ class TestInstrumentation:
 
         assert time_argv[time_argv.index("perf") :] == ["perf", *perf_argv]
 
-    def test_perf_receives_the_pmu_events_of_the_spec(self, execution):
+    def test_perf_receives_the_event_argument_the_plan_carries(self, execution):
+        # Copiado, e não remontado no `jq`: as chaves são o que faz o `perf`
+        # escalonar cada par de forma atômica, e sem elas as três razões da
+        # ADR-0006 voltam a dividir janelas diferentes de execução.
         events = value_after(execution.argv("perf")[0], "-e")
 
-        assert events.split(",") == EXPERIMENT["instrumentation"]["pmu_events"]
+        assert events == execution.run["perf_event_spec"]
+
+    def test_the_event_argument_carries_the_pmu_events_of_the_spec(self, execution):
+        # A cadeia inteira `experiment.toml` → gerador → plano → `jq` → argv: um
+        # evento perdido aqui é uma coluna vazia para a campanha inteira.
+        events = value_after(execution.argv("perf")[0], "-e")
+
+        assert (
+            events.replace("{", "").replace("}", "").split(",")
+            == (EXPERIMENT["instrumentation"]["pmu_events"])
+        )
 
     def test_pidstat_follows_the_ffmpeg_process(self, execution):
         # Apontar para o wrapper daria um `pidstat.txt` de processo ocioso e um
@@ -433,6 +475,40 @@ class TestInstrumentationFailure:
         assert unsupported_event.returncode != 0
         assert unsupported_event.meta()["exit_code"] != 0
 
+    def test_a_counter_that_never_ran_fails_the_run(self, uncounted_event):
+        # `<not counted>` foi o c7g, e não tem a forma de `not supported`: a
+        # guarda escrita contra a primeira string o deixava passar.
+        assert uncounted_event.returncode != 0
+        assert uncounted_event.meta()["exit_code"] != 0
+
+    def test_a_zeroed_hardware_counter_fails_the_run(self, zeroed_hardware_event):
+        # Foi o c7i, e é o pior dos três: zero é número válido, passa por
+        # qualquer guarda de string e vira `cache_miss_rate` nulo para uma
+        # arquitetura inteira, descoberto só no `consolidate.py`.
+        assert zeroed_hardware_event.returncode != 0
+        assert zeroed_hardware_event.meta()["exit_code"] != 0
+
+    def test_a_zeroed_software_counter_does_not_fail_the_run(self, zeroed_software_events):
+        # `context-switches = 0` e `cpu-migrations = 0` são resultados legítimos
+        # e desejáveis: a regra do zero é só dos eventos de hardware.
+        assert zeroed_software_events.returncode == 0, zeroed_software_events.stderr
+        assert zeroed_software_events.meta()["exit_code"] == 0
+
+    def test_a_pair_that_answered_without_measuring_fails_the_run(self, implausible_pair):
+        # Mais desvios errados do que desvios executados: os dois são números, os
+        # dois são não-zero, e nenhum é string de erro — nada além da
+        # plausibilidade pega isto.
+        assert implausible_pair.returncode != 0
+        assert implausible_pair.meta()["exit_code"] != 0
+
+    def test_counters_that_ran_a_fraction_of_the_time_do_not_fail_the_run(
+        self, multiplexed_counters
+    ):
+        # Com os pares, `pcnt-running` abaixo de 100 é o regime esperado onde a
+        # PMU tem menos contadores que eventos, e a razão continua correta.
+        assert multiplexed_counters.returncode == 0, multiplexed_counters.stderr
+        assert multiplexed_counters.meta()["exit_code"] == 0
+
     def test_an_unresolved_encoder_pid_fails_the_run(self, unresolved_pid):
         # O `pidstat` sequer chega a ser lançado — é o que distingue este
         # caminho do da instrumentação que falhou depois.
@@ -445,3 +521,41 @@ class TestInstrumentationFailure:
 
         assert validate_with_cli(meta).returncode == 0
         assert check_with_stdlib_checker(meta).returncode == 0
+
+
+def readers(execution: Execution) -> tuple[bool, bool]:
+    """Se o bash recusou a Execução, e se o leitor do `preflight` recusa o mesmo arquivo."""
+    refused_by_preflight = check_with_preflight(execution.run_dir / "perf.json").returncode != 0
+    return execution.returncode != 0, refused_by_preflight
+
+
+class TestTheTwoReadersOfThePerfJson:
+    # A regra é duplicada de propósito — bash no container, Python no Orquestrador
+    # (ADR-0019/0022) —, e o que a duplicação compra só vale se os dois
+    # concordarem: um degrau que aprove o que a campanha rejeita não é degrau, e
+    # uma campanha que rejeite o que o degrau aprovou queima dois dias de
+    # instância. Aqui os dois leem o **mesmo** arquivo.
+
+    def test_they_agree_on_a_healthy_perf_json(self, execution):
+        assert readers(execution) == (False, False)
+
+    def test_they_agree_on_an_unsupported_event(self, unsupported_event):
+        assert readers(unsupported_event) == (True, True)
+
+    def test_they_agree_on_a_counter_that_never_ran(self, uncounted_event):
+        assert readers(uncounted_event) == (True, True)
+
+    def test_they_agree_on_a_zeroed_hardware_counter(self, zeroed_hardware_event):
+        assert readers(zeroed_hardware_event) == (True, True)
+
+    def test_they_agree_on_a_zeroed_software_counter(self, zeroed_software_events):
+        assert readers(zeroed_software_events) == (False, False)
+
+    def test_they_agree_on_an_absent_counter(self, omitted_event):
+        assert readers(omitted_event) == (True, True)
+
+    def test_they_agree_on_a_pair_that_answered_without_measuring(self, implausible_pair):
+        assert readers(implausible_pair) == (True, True)
+
+    def test_they_agree_that_a_fraction_of_the_time_is_not_a_refusal(self, multiplexed_counters):
+        assert readers(multiplexed_counters) == (False, False)

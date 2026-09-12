@@ -346,17 +346,51 @@ corrida de ~2 h já paga. Aqui ele copia um objeto de poucos bytes entre os dois
 buckets, pela mesma função do adaptador, e o apaga dos dois em seguida — o objeto
 vive sob `runs/preflight/`, que é onde o `DeleteObject` da ADR-0016 alcança.
 
-O `perf stat` do passo 4 pede os `pmu_events` da definição validada — os dez
-juntos, nunca uma lista transcrita no código, porque trocar um evento no
-`config/experiment.toml` tem de mudar o que o preflight confere — e decide sobre
-o **valor**, não sobre o código de saída: um evento indisponível naquela PMU não
-faz o `perf` falhar (ADR-0006), ele reporta `<not supported>` e segue. Cada um
-dos dez tem de vir com valor numérico; o que falta, volta `<not supported>` ou
-não é número derruba o passo **nomeando o evento** — e a recusa junta **todos**
-os que ficaram sem contador, não só o primeiro, porque a próxima tentativa custa
-outra instância. É esse nome que o pesquisador lê na tabela para decidir, antes
-do piloto, entre trocar o evento na definição e registrar a coluna ausente.
-Passando, a linha lista os dez valores.
+O `perf stat` do passo 4 é um **encode curto de um Master real**, com o FFmpeg da
+própria imagem e no container invocado com os mesmos mounts e a mesma capability
+do `launch_container.sh`: o degrau só prova o que roda pelo caminho da campanha, e
+um `-- true` que termina em microssegundos não dá tempo de o rodízio da PMU girar
+uma volta nem de um contador que responde zero provar coisa alguma (ADR-0006). O
+Master, o encoder e a geometria saem do **primeiro run da fatia que o passo acabou
+de subir**, truncados a poucos segundos de vídeo e sem output.
+
+O `-e` vem pronto da definição validada, com os pares entre chaves
+(`{cycles,instructions},...`) — nunca uma lista transcrita no código, porque trocar
+um par no `config/experiment.toml` tem de mudar o que o preflight confere. O
+agrupamento é o que faz o `perf` escalonar cada par de forma atômica: mesmo que o
+par só veja um terço da execução, os dois membros veem **o mesmo** terço, e a razão
+que o artigo reporta continua correta.
+
+O probe roda com `-vv`, e o passo **guarda a saída crua**: o stdout (o
+`perf stat -j` inteiro) e o stderr (o dump do `perf_event_attr` de cada evento, com
+o `config` nativo que o nome genérico resolveu naquela arquitetura) vão para o log
+do Orquestrador e para `runs/preflight/<instance-id>/`, sem apagar — ao contrário
+dos dois objetos de prova, que somem, porque o deles é prova de permissão e este é
+dado. A saída é guardada **antes** de o veredito ser tomado: a evidência do passo
+que reprova é a que importa.
+
+O veredito é sobre o **valor**, não sobre o código de saída: um evento indisponível
+naquela PMU não faz o `perf` falhar (ADR-0006), ele reporta e segue. São três
+recusas distintas, cada uma nomeando o evento, porque cada uma pede uma decisão
+diferente — `<not supported>` (o evento não existe na PMU), `<not counted>` (o
+contador abriu e nunca rodou) e **zero em evento de hardware** (o contador respondeu
+e não contou). Os quatro eventos de software ficam fora da regra do zero:
+`context-switches = 0` é resultado legítimo. Junto vêm as três checagens de
+plausibilidade, uma por métrica da ADR-0006, contra o `max_ratio` que o TOML
+declara — é o que separa "o contador respondeu" de "o contador mediu", e o que
+teria reprovado o c7a da primeira rodada. A recusa junta **todos** os eventos sem
+medição, não só o primeiro, porque a próxima tentativa custa outra instância.
+
+Passando, a linha lista os dez valores **com o `pcnt-running` de cada um** — a
+fração do tempo em que aquele contador esteve rodando. Abaixo de 100 **não é
+recusa**: com os pares, é o regime esperado onde a PMU tem menos contadores que
+eventos. É o que o pesquisador lê para saber se o número é contagem ou estimativa,
+e se as três arquiteturas estão no mesmo regime.
+
+**Não há dispensa por arquitetura.** Um evento de hardware zerado, uma
+plausibilidade reprovada com contador a 100%, ou um par de cache que o `-vv` mostre
+não ser o mesmo nível nas três arquiteturas é decisão de desenho experimental sobre
+a ADR-0006, tomada antes do piloto — nunca uma exceção na guarda.
 
 O objeto que o container escreve em `runs/preflight/` é listado e apagado pelo
 Orquestrador, o que fecha `PutObject` do encode, `ListBucket` e `DeleteObject` no
@@ -370,13 +404,16 @@ piloto sobrescreve essa chave, e ninguém deve ler um objeto já presente nela c
 se o próprio lançamento o tivesse posto.
 
 O que ganha teste é o núcleo do `preflight.py`: o veredito sobre a saída do
-`perf` — função pura sobre o texto parseado, e sobre a lista que a configuração
-real declara, nunca sobre uma cópia dela escrita no teste —, a lista de eventos
-que o argv do `perf stat` carrega — desenho experimental, e não argv de sistema,
-que é o que a ADR-0022 deixa sem teste — e a montagem da tabela, inclusive o
-passo que **não** rodou, porque uma capacidade que ninguém provou não pode sair
-do relatório como silêncio; mais as funções puras do `instance_launch.py`. O laço
-e os dois `docker run` são escritos direto (ADR-0022).
+`perf` — função pura sobre o texto parseado, e sobre a definição que a
+configuração real declara, nunca sobre uma cópia dela escrita no teste, com as
+três recusas exercidas evento a evento e as três plausibilidades métrica a
+métrica —, o `-e` que o argv do `perf stat` carrega e o encode que o probe roda
+— desenho experimental, e não argv de sistema, que é o que a ADR-0022 deixa sem
+teste — e a montagem da tabela, inclusive o passo que **não** rodou, porque uma
+capacidade que ninguém provou não pode sair do relatório como silêncio; mais as
+funções puras do `instance_launch.py`. O laço e os dois `docker run` são escritos
+direto (ADR-0022). Que o leitor daqui e o do `run_scenario.sh` concordam sobre o
+mesmo `perf.json` é asserção do `smoke/`.
 
 **O primeiro preflight real é a hora de capturar os payloads da AWS CLI.** As
 fixtures do adaptador em `conftest.py` — `run-instances`, `describe-instances`,

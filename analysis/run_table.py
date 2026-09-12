@@ -5,7 +5,7 @@ Núcleo puro — recebe as Execuções com os artefatos já lidos e devolve a ta
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -13,6 +13,7 @@ from typing import Any
 import pyarrow as pa
 from run_artifacts import (
     ArtifactError,
+    PerfCounter,
     TimeMetrics,
     parse_ffmpeg_log,
     parse_perf,
@@ -141,14 +142,17 @@ def _row(run: RawRun) -> tuple[dict[str, Any], list[str]]:
             f"time_{field}": getattr(time, field) if time else None
             for field in TimeMetrics.model_fields
         },
-        **{_perf_column(event): counters.get(event) for event in PMU_EVENTS},
+        **{_perf_column(event): _counted(counters, event) for event in PMU_EVENTS},
+        **{_pcnt_column(event): _pcnt_running(counters, event) for event in PMU_EVENTS},
         "ffmpeg_frames": ffmpeg.frames if ffmpeg else None,
         "ffmpeg_fps": ffmpeg.fps if ffmpeg else None,
         "ffmpeg_bitrate_kbps": ffmpeg.bitrate_kbps if ffmpeg else None,
-        "ipc": ratio(counters.get("instructions"), counters.get("cycles")),
-        "cache_miss_rate": ratio(counters.get("cache-misses"), counters.get("cache-references")),
+        "ipc": ratio(_counted(counters, "instructions"), _counted(counters, "cycles")),
+        "cache_miss_rate": ratio(
+            _counted(counters, "cache-misses"), _counted(counters, "cache-references")
+        ),
         "branch_mispredict_rate": ratio(
-            counters.get("branch-misses"), counters.get("branch-instructions")
+            _counted(counters, "branch-misses"), _counted(counters, "branch-instructions")
         ),
         "cpu_pct_avg": mean(cpu_pct),
     }
@@ -178,8 +182,27 @@ def _parsed[T](
         return None
 
 
+def _counted(counters: Mapping[str, PerfCounter], event: str) -> float | None:
+    counter = counters.get(event)
+    return counter.value if counter else None
+
+
+def _pcnt_running(counters: Mapping[str, PerfCounter], event: str) -> float | None:
+    counter = counters.get(event)
+    return counter.pcnt_running if counter else None
+
+
 def _perf_column(event: str) -> str:
     return f"perf_{event.replace('-', '_')}"
+
+
+def _pcnt_column(event: str) -> str:
+    """Uma coluna por evento ao lado do valor dele.
+
+    É o que permite ao artigo dizer se o número é contagem ou estimativa, e se as
+    três arquiteturas estão no mesmo regime de medição.
+    """
+    return f"{_perf_column(event)}_pcnt_running"
 
 
 def _table(rows: list[dict[str, Any]]) -> pa.Table:
@@ -240,6 +263,7 @@ TABLE_SCHEMA = pa.schema(
         ("output_sha256", pa.string()),
         *_TIME_COLUMNS,
         *((_perf_column(event), pa.float64()) for event in PMU_EVENTS),
+        *((_pcnt_column(event), pa.float64()) for event in PMU_EVENTS),
         ("ffmpeg_frames", pa.int64()),
         ("ffmpeg_fps", pa.float64()),
         ("ffmpeg_bitrate_kbps", pa.float64()),

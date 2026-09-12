@@ -43,20 +43,26 @@ status=0
 "$@" || status=$?
 
 : >"$output"
-IFS=, read -r -a requested <<<"$events"
+# As chaves do `-e` são a sintaxe de grupo do `perf`; o JSON de saída traz cada
+# membro do grupo como uma linha própria, com o nome do evento sem elas.
+IFS=, read -r -a requested <<<"${events//[\{\}]/}"
 for event in "${requested[@]}"; do
   # Omitir é diferente de reportar `<not supported>`: o contador não aparece, e é
   # esse o caso que um casamento por substring deixaria passar.
   if [[ $event == "${SMOKE_PERF_OMIT:-}" ]]; then
     continue
   fi
-  if [[ $event == "${SMOKE_PERF_UNSUPPORTED:-}" ]]; then
-    value='"<not supported>"'
-  else
-    value='"1234567.000000"'
-  fi
-  printf '{"counter-value" : %s, "unit" : "", "event" : "%s", "event-runtime" : 1000000, "pcnt-running" : 100.00}\n' \
-    "$value" "$event" >>"$output"
+  # `SMOKE_PERF_VALUES=evento=valor,evento=valor`: o valor entra literal, o que
+  # cobre num mecanismo só o `<not supported>`, o `<not counted>`, o zero mudo e
+  # o par que responde e não mede.
+  value="1234567.000000"
+  for override in ${SMOKE_PERF_VALUES:+${SMOKE_PERF_VALUES//,/ }}; do
+    if [[ $event == "${override%%=*}" ]]; then
+      value=${override#*=}
+    fi
+  done
+  printf '{"counter-value" : "%s", "unit" : "", "event" : "%s", "event-runtime" : 1000000, "pcnt-running" : %s}\n' \
+    "$value" "$event" "${SMOKE_PERF_PCNT:-100.00}" >>"$output"
 done
 
 exit "$status"

@@ -12,6 +12,7 @@ from experiment_config import (
     CodecRecord,
     ExperimentConfig,
     InstanceRecord,
+    MetricRecord,
     PairRecord,
     VideoRecord,
 )
@@ -159,6 +160,20 @@ def _run(config: ExperimentConfig, scenario: Scenario, suffix: str) -> dict[str,
         "scale_flags": encode.scale_flags,
         "bitstream_muxer": codec.bitstream_muxer,
         "pmu_events": list(config.instrumentation.pmu_events),
+        # Montado aqui e copiado lá: derivar o `-e` no `jq` faria o agrupamento
+        # que mantém as razões corretas ser reescrito em bash (ADR-0019).
+        "perf_event_spec": config.instrumentation.event_spec,
+        "pmu_hardware_events": list(config.instrumentation.hardware_events),
+        "pmu_metrics": [_metric(metric) for metric in config.instrumentation.metrics],
+    }
+
+
+def _metric(metric: MetricRecord) -> dict[str, Any]:
+    return {
+        "name": metric.name,
+        "numerator": metric.numerator,
+        "denominator": metric.denominator,
+        "max_ratio": metric.max_ratio,
     }
 
 

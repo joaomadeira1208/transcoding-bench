@@ -59,7 +59,19 @@ _MINIMAL: dict[str, Any] = {
             "bitstream_muxer": "h264",
         }
     ],
-    "instrumentation": {"pmu_events": ["cycles", "instructions"]},
+    # Um evento de software entre os de hardware: é o que faz o mínimo exercitar
+    # a regra do zero, que vale para uns e não para os outros.
+    "instrumentation": {
+        "pmu_events": ["cycles", "instructions", "context-switches"],
+        "metric": [
+            {
+                "name": "ipc",
+                "numerator": "instructions",
+                "denominator": "cycles",
+                "max_ratio": 10.0,
+            }
+        ],
+    },
     "pair": [
         {"input_res": "1080p", "output_res": "1080p"},
         {"input_res": "1080p", "output_res": "720p"},
@@ -217,6 +229,10 @@ def make_encode(**overrides: Any) -> dict[str, Any]:
 
 def make_instrumentation(**overrides: Any) -> dict[str, Any]:
     return {**copy.deepcopy(_MINIMAL["instrumentation"]), **overrides}
+
+
+def make_metric(**overrides: Any) -> dict[str, Any]:
+    return {**copy.deepcopy(_MINIMAL["instrumentation"]["metric"][0]), **overrides}
 
 
 @pytest.fixture

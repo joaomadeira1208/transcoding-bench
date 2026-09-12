@@ -118,6 +118,20 @@ class TestDerived:
 
         assert row["ipc"] is None
 
+    def test_the_regime_of_each_counter_is_a_column_of_its_own(self):
+        # Ao lado do valor, e por evento: é o que diz se o número é contagem ou
+        # estimativa, e se as três arquiteturas estão no mesmo regime (ADR-0006).
+        row = single(perf=make_perf_json(pcnt_running=25.5))
+
+        assert row["perf_cycles_pcnt_running"] == 25.5
+        assert row["perf_page_faults_pcnt_running"] == 25.5
+
+    def test_a_counter_without_a_regime_is_an_explicit_null(self):
+        row = single(perf=make_perf_json(pcnt_running=None))
+
+        assert row["perf_cycles"] == 4_000_000_000.0
+        assert row["perf_cycles_pcnt_running"] is None
+
     def test_a_pidstat_without_samples_is_an_explicit_null(self):
         row = single(pidstat=make_pidstat(cpu_pct=()))
 
@@ -152,6 +166,7 @@ class TestColumns:
         assert row["scenario_id"] == "libx264_2160p_1080p_bbb_c7g_rep1"
         assert row["time_elapsed_s"] is None
         assert row["perf_cycles"] is None
+        assert row["perf_cycles_pcnt_running"] is None
         assert row["ffmpeg_frames"] is None
         assert row["cpu_pct_avg"] is None
         assert row["output_sha256"] is None

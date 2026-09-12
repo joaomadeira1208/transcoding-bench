@@ -240,9 +240,11 @@ class TestInstrumentation:
         assert all(isinstance(value, int | float) for value in time.values())
 
     def test_the_perf_echoes_back_every_event_the_spec_declares(self, captured):
-        # `perf stat` recusa um nome de evento que não conhece, então isto é o que
-        # verifica a lista do `config/experiment.toml` sem PMU. Se cada evento
-        # retorna valor é outra pergunta, e é do `preflight`.
+        # `perf stat` recusa um nome de evento que não conhece **e** uma sintaxe de
+        # grupo malformada, então isto é o que verifica o `-e` do
+        # `config/experiment.toml` sem PMU. Se cada evento retorna valor, em que
+        # regime, e o que o nome genérico resolveu naquela arquitetura são outras
+        # perguntas, e são do `preflight`.
         events = [
             json.loads(line)["event"]
             for line in captured.artifact("perf.json").splitlines()

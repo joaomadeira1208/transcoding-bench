@@ -4,8 +4,8 @@ As funções recebem dado já buscado e devolvem dado — quem lança a instânc
 `instance_launch.py`, e quem abre o SSH e lista o bucket é o `orchestrator.py`,
 sobre o `external.py`. Os dois `docker run` daqui são argv, e como o resto do
 argv do sistema ficam sem teste (ADR-0022): o que ganha teste é a decisão que se
-toma sobre a saída deles — e a lista de eventos que o `perf stat` carrega, que é
-desenho experimental (ADR-0006) e não argv de sistema.
+toma sobre a saída deles — e o que o `perf stat` carrega no `-e`, que é desenho
+experimental (ADR-0006) e não argv de sistema.
 """
 
 from __future__ import annotations
@@ -14,13 +14,31 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
+from experiment_config import Instrumentation, MetricRecord
 from masters_launch import IMAGE_TAG
 
+# Os três modos de falha que a primeira rodada mostrou, e que pedem decisões
+# opostas: o evento não existe na PMU, o contador abriu e nunca rodou, e o
+# contador respondeu zero. Só o primeiro era conhecido.
 NOT_SUPPORTED = "<not supported>"
+NOT_COUNTED = "<not counted>"
 
 PROBE_CONTENT = "preflight"
 PROBE_PATH = "/tmp/preflight"
+
+# Os mesmos do `encode/launch_container.sh`: o probe só prova o que roda pelo
+# caminho da campanha, e um mount a menos aqui mede outro container.
+SCRIPTS_MOUNT = "/opt/encode"
+WORK_MOUNT = "/work"
+MASTERS_DIR_NAME = "masters"
+
+# Segundos de vídeo, não de encode: o rodízio da PMU gira milhares de vezes nesta
+# janela, e é o que transforma um contador zerado de prova ausente em prova.
+PROBE_SECONDS = 5
+
+PERF_STDOUT = "/dev/stdout"
 
 HEADER = ("passo", "resultado", "detalhe")
 
@@ -59,25 +77,81 @@ class StepResult:
     detail: str
 
 
-def perf_probe_command(events: Sequence[str]) -> list[str]:
-    """O `perf stat` sobre um comando trivial, dentro da imagem que a Execução usa."""
+def perf_probe_command(
+    *,
+    run: Mapping[str, Any],
+    event_spec: str,
+    repo_dir: str,
+    work_dir: str,
+) -> list[str]:
+    """O `perf stat` sobre um encode curto de um Master real, pelo caminho da campanha.
+
+    `-vv` porque o `perf` despeja no stderr o `perf_event_attr` de cada evento,
+    com o `config` nativo que o nome genérico resolveu naquela arquitetura: é o
+    que diz se `cache-references` é L1D, LLC ou L2 nos três guests.
+
+    O `-o` é o stdout e o dump do `-vv` é o stderr, de modo que as duas saídas
+    cheguem separadas a quem as guarda.
+    """
     return [
         "sudo",
         "docker",
         "run",
         "--rm",
         "--cap-add=PERFMON",
+        "-v",
+        f"{repo_dir}/encode:{SCRIPTS_MOUNT}:ro",
+        "-v",
+        f"{work_dir}:{WORK_MOUNT}",
         IMAGE_TAG,
         "perf",
         "stat",
+        "-vv",
         "-j",
         "-e",
-        ",".join(events),
+        event_spec,
         "-o",
-        "/dev/stdout",
+        PERF_STDOUT,
         "--",
-        "true",
+        *probe_encode_argv(run),
     ]
+
+
+def probe_encode_argv(run: Mapping[str, Any]) -> list[str]:
+    """O encode do probe: o argv do Cenário, truncado e sem output.
+
+    Do objeto de run, e não de parâmetros próprios: o probe tem de gerar o
+    trabalho que a campanha gera, e um encode inventado aqui mediria outra coisa.
+    """
+    argv = [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-t",
+        str(PROBE_SECONDS),
+        "-i",
+        f"{WORK_MOUNT}/{MASTERS_DIR_NAME}/{run['master']}",
+        "-vf",
+        f"scale={run['output_width']}:{run['output_height']}:flags={run['scale_flags']}",
+        "-c:v",
+        str(run["encoder"]),
+        "-preset",
+        str(run["preset"]),
+        "-crf",
+        str(run["crf"]),
+        *(str(argument) for argument in run["encoder_args"]),
+        "-g",
+        str(run["gop_size"]),
+        "-pix_fmt",
+        str(run["pix_fmt"]),
+        "-threads",
+        str(run["threads"]),
+    ]
+    if run["strip_audio"]:
+        argv.append("-an")
+    # O muxer `null` descarta os pacotes depois de o encoder os produzir: o
+    # trabalho que a PMU conta é o mesmo, sem gastar disco da instância.
+    return [*argv, "-f", "null", "/dev/null"]
 
 
 def encode_put_command(*, bucket: str, key: str) -> list[str]:
@@ -95,45 +169,113 @@ def encode_put_command(*, bucket: str, key: str) -> list[str]:
     ]
 
 
-def perf_counter_values(raw: str, events: Sequence[str]) -> dict[str, float]:
-    """O valor que o `perf stat -j` abriu para cada evento pedido, ou a recusa que os nomeia."""
-    counters = _counters(raw)
-    counted: dict[str, float] = {}
+def perf_counters(raw: str, instrumentation: Instrumentation) -> dict[str, Counter]:
+    """O que o `perf stat -j` mediu por evento, ou a recusa que nomeia o que não mediu.
+
+    Duas fases, e cada uma relata **tudo** o que reprovou: uma execução do passo
+    é uma instância, e parar no primeiro faria o pesquisador descobrir o segundo
+    defeito daquela arquitetura na instância seguinte. A segunda fase só corre
+    quando a primeira passou — uma razão sobre um contador que não abriu não diz
+    nada sobre plausibilidade.
+    """
+    reported = _reported(raw)
+    hardware = set(instrumentation.hardware_events)
+
+    counted: dict[str, Counter] = {}
     refused: list[str] = []
-    for event in events:
+    for event in instrumentation.pmu_events:
         try:
-            counted[event] = _counter_value(counters, event)
+            counted[event] = _counter(reported, event, hardware=event in hardware)
         except PreflightError as error:
             refused.append(str(error))
 
     if refused:
         raise PreflightError(
-            f"{len(refused)} de {len(events)} eventos sem contador dentro do container: "
-            f"{'; '.join(refused)} "
-            f"(o perf stat abriu: {', '.join(name for name, _ in counters) or 'nada'})"
+            f"{len(refused)} de {len(instrumentation.pmu_events)} eventos sem medição dentro do "
+            f"container: {'; '.join(refused)} "
+            f"(o perf stat abriu: {', '.join(reported) or 'nada'})"
         )
+
+    implausible = [
+        message
+        for metric in instrumentation.metrics
+        if (message := _implausible(metric, counted)) is not None
+    ]
+    if implausible:
+        raise PreflightError(f"os contadores responderam e não mediram: {'; '.join(implausible)}")
     return counted
 
 
-def perf_detail(counted: Mapping[str, float]) -> str:
-    """A linha da tabela do passo: os eventos que abriram contador, com o valor de cada um."""
+def perf_detail(counted: Mapping[str, Counter]) -> str:
+    """A linha da tabela do passo: cada evento com o valor **e** o regime em que ele saiu.
+
+    O `pcnt-running` ao lado do valor porque abaixo de 100 o número é estimativa
+    e não contagem — não é recusa, e sem ele uma estimativa e uma contagem entram
+    na mesma coluna do Parquet indistinguíveis.
+    """
     return "dentro do container: " + ", ".join(
-        f"{event} = {value:.0f}" for event, value in counted.items()
+        f"{event} = {counter.value:.0f} ({counter.regime})" for event, counter in counted.items()
     )
 
 
-def _counter_value(counters: Sequence[tuple[str, str]], event: str) -> float:
-    reported = [value for name, value in counters if name == event or name.startswith(f"{event}:")]
-    if not reported:
+@dataclass(frozen=True)
+class Counter:
+    """Um contador que abriu: o valor e a fração do tempo em que ele rodou."""
+
+    value: float
+    pcnt_running: float | None
+
+    @property
+    def regime(self) -> str:
+        if self.pcnt_running is None:
+            return "pcnt-running ausente"
+        return f"pcnt-running {self.pcnt_running:.0f}%"
+
+
+def _counter(reported: Mapping[str, _Reported], event: str, *, hardware: bool) -> Counter:
+    found = reported.get(event)
+    if found is None:
         raise PreflightError(f"{event}: nenhum contador com esse nome")
 
-    value = reported[0]
-    if value.strip() == NOT_SUPPORTED:
-        raise PreflightError(f"{event}: o perf stat voltou {NOT_SUPPORTED}")
+    value = found.value.strip()
+    if value == NOT_SUPPORTED:
+        raise PreflightError(
+            f"{event}: {NOT_SUPPORTED} — o evento não existe na PMU desta arquitetura"
+        )
+    if value == NOT_COUNTED:
+        raise PreflightError(
+            f"{event}: {NOT_COUNTED} — o contador abriu e nunca rodou nesta arquitetura"
+        )
     try:
-        return float(value)
+        measured = float(value)
     except ValueError as error:
         raise PreflightError(f"{event}: counter-value não é um número: {value!r}") from error
+
+    # Zero é medição legítima nos quatro eventos de software — `cpu-migrations = 0`
+    # é o resultado desejável —, e é contador que não conta nos seis de hardware:
+    # um encode não executa zero ciclo nem toca zero linha de cache.
+    if hardware and measured == 0:
+        raise PreflightError(
+            f"{event}: zero — o contador de hardware respondeu e não contou nada neste guest"
+        )
+    return Counter(value=measured, pcnt_running=found.pcnt_running)
+
+
+def _implausible(metric: MetricRecord, counted: Mapping[str, Counter]) -> str | None:
+    """Coerência interna da razão, sem depender de arquitetura.
+
+    É o que teria transformado os dois `passou` da primeira rodada em falhas
+    honestas: `branch-misses` e `branch-instructions` eram os dois números, os
+    dois não-zero, e nenhum era string de erro.
+    """
+    numerator = counted[metric.numerator].value
+    denominator = counted[metric.denominator].value
+    if not metric.exceeds(numerator, denominator):
+        return None
+    return (
+        f"{metric.name}: {metric.numerator} = {numerator:.0f} passa de {metric.max_ratio:g} x "
+        f"{metric.denominator} = {denominator:.0f}"
+    )
 
 
 def summarize(observed: Sequence[StepResult]) -> tuple[StepResult, ...]:
@@ -173,13 +315,39 @@ def _single_line(detail: str) -> str:
     return " ".join(detail.split())
 
 
-def _counters(raw: str) -> list[tuple[str, str]]:
-    """Os pares evento/valor da saída, ignorando o cabeçalho que varia com a versão."""
-    return [
-        (str(line["event"]), str(line["counter-value"]))
-        for line in map(_json_object, raw.splitlines())
-        if line is not None and "event" in line and "counter-value" in line
-    ]
+@dataclass(frozen=True)
+class _Reported:
+    value: str
+    pcnt_running: float | None
+
+
+def _reported(raw: str) -> dict[str, _Reported]:
+    """O que a saída trouxe por evento, ignorando o cabeçalho que varia com a versão.
+
+    A chave descarta o modificador que o `perf` ecoa (`cycles:u`): comparação
+    exata recusaria um contador que abriu. A primeira ocorrência vence — evento
+    repetido é recusado pelo validador da spec, muito antes daqui.
+    """
+    reported: dict[str, _Reported] = {}
+    for record in map(_json_object, raw.splitlines()):
+        if record is None or "event" not in record or "counter-value" not in record:
+            continue
+        event = str(record["event"]).split(":")[0]
+        reported.setdefault(
+            event,
+            _Reported(
+                value=str(record["counter-value"]),
+                pcnt_running=_optional_float(record.get("pcnt-running")),
+            ),
+        )
+    return reported
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def _json_object(line: str) -> Mapping[str, object] | None:

@@ -39,6 +39,20 @@ class TimeMetrics(BaseModel):
 
 
 @dataclass(frozen=True)
+class PerfCounter:
+    """Um contador do `perf stat -j`: o valor e o regime em que ele foi obtido.
+
+    O `pcnt-running` é a fração do tempo em que o contador esteve rodando; abaixo
+    de 100 o valor é estimativa extrapolada, não contagem. Sem ele, a estimativa
+    de uma arquitetura e a contagem de outra entram na mesma coluna do Parquet
+    indistinguíveis, e a comparação cross-arch fica sem base (ADR-0006).
+    """
+
+    value: float | None
+    pcnt_running: float | None
+
+
+@dataclass(frozen=True)
 class FfmpegStats:
     """Os parseados do `-stats` no stderr do FFmpeg (ADR-0006)."""
 
@@ -55,18 +69,21 @@ def parse_time(raw: str | bytes) -> TimeMetrics:
         raise ArtifactError("; ".join(offending_fields(error))) from error
 
 
-def parse_perf(raw: str) -> dict[str, float | None]:
+def parse_perf(raw: str) -> dict[str, PerfCounter]:
     """Os contadores de um `perf stat -j`, por evento.
 
-    Evento indisponível sai como `None`, nunca como zero — que entraria na razão
-    como medição.
+    Evento indisponível sai com valor `None`, nunca como zero — que entraria na
+    razão como medição.
     """
-    counters: dict[str, float | None] = {}
+    counters: dict[str, PerfCounter] = {}
     for line in raw.splitlines():
         record = _json_object(line)
         if record is None or "event" not in record or "counter-value" not in record:
             continue
-        counters[str(record["event"])] = _optional_float(record["counter-value"])
+        counters[str(record["event"])] = PerfCounter(
+            value=_optional_float(record["counter-value"]),
+            pcnt_running=_optional_float(record.get("pcnt-running")),
+        )
 
     if not counters:
         raise ArtifactError("nenhum contador de perf stat -j")

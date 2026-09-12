@@ -9,12 +9,15 @@ import sys
 import tomllib
 from collections.abc import Callable, Sequence
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from command_output import OutputError
 from experiment_config import ConfigError, ExperimentConfig, validate_config
 from external import (
+    CommandOutput,
     ExternalCommandError,
     git_rev_parse,
     run_instances,
@@ -22,6 +25,7 @@ from external import (
     s3_list_prefix,
     s3_rm,
     s3_sync,
+    ssh_capture,
     ssh_exec,
     ssm_get_parameter,
     sts_caller_identity,
@@ -47,13 +51,14 @@ from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
 from masters_plan import build_masters_plan
 from preflight import (
+    Counter,
     Outcome,
     PreflightError,
     Step,
     StepResult,
     encode_put_command,
     failed,
-    perf_counter_values,
+    perf_counters,
     perf_detail,
     perf_probe_command,
     render_table,
@@ -86,9 +91,13 @@ SELF_CHECK_CONTENT = "preflight\n"
 # instância faturando e indistinguível das ~2 h de silêncio do caso normal.
 PREPARE_TIMEOUT_SECONDS = 10800.0
 
-# Os dois `docker run` do preflight são o `perf stat` sobre um comando trivial e
-# um `s3 cp` de nove bytes: o que leva minutos ali é o container subindo.
-PROBE_TIMEOUT_SECONDS = 300.0
+# O probe do `perf` encoda segundos de um Master de verdade, e no pior par do
+# plano isso é 4K num encoder lento: o teto é generoso porque o que ele compra é
+# a instância ser terminada sozinha se o comando travar, não cortar um encode.
+PROBE_TIMEOUT_SECONDS = 1800.0
+
+PROBE_STDOUT_NAME = "perf.json"
+PROBE_STDERR_NAME = "perf.stderr.txt"
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -288,7 +297,7 @@ def preflight(
             detail=lambda chosen: f"{instance_type} ({chosen.instance.arch}): {chosen.image_id}",
         )
         slice_key = f"{SCENARIOS_PREFIX}{encode.instance.id}.json"
-        instance_id = _step(
+        launched = _step(
             results,
             Step.LAUNCH,
             lambda: _launch_encode(
@@ -300,20 +309,27 @@ def preflight(
                 slice_key=slice_key,
                 work_dir=work_dir,
             ),
-            detail=lambda launched: f"{launched} no commit {commit}, fatia em {slice_key}",
+            detail=lambda started: (
+                f"{started.instance_id} no commit {commit}, fatia em {slice_key}"
+            ),
         )
+        instance_id = launched.instance_id
 
         host = _step(
             results,
             Step.BOOTSTRAP,
             lambda: wait_for_bootstrapped_instance(instance_id, report=_report),
         )
-        events = config.instrumentation.pmu_events
         _step(
             results,
             Step.PERF,
-            lambda: perf_counter_values(
-                ssh_exec(host, perf_probe_command(events), timeout=PROBE_TIMEOUT_SECONDS), events
+            lambda: _probe_perf(
+                host=host,
+                run=launched.probe_run,
+                config=config,
+                bucket=target,
+                instance_id=launched.instance_id,
+                work_dir=work_dir,
             ),
             detail=perf_detail,
         )
@@ -382,6 +398,19 @@ def _sync_between_buckets(infra: InfraConfig, work_dir: Path) -> str:
     return f"{key}: copiado de {campaign} para {pilot} e apagado dos dois"
 
 
+@dataclass(frozen=True)
+class LaunchedEncode:
+    """A instância que subiu e o run que o probe do `perf` vai encodar nela.
+
+    O run sai da **fatia que acabou de subir**, e não de parâmetros próprios: o
+    Master que o probe abre é um dos que o `bootstrap.sh` daquela instância
+    baixou, e o encode é o de um Cenário de verdade.
+    """
+
+    instance_id: str
+    probe_run: dict[str, Any]
+
+
 def _launch_encode(
     *,
     encode: EncodeTarget,
@@ -391,7 +420,7 @@ def _launch_encode(
     bucket: str,
     slice_key: str,
     work_dir: Path,
-) -> str:
+) -> LaunchedEncode:
     """Sobe a fatia daquela arquitetura e lança a instância que vai consumi-la."""
     plan = build_instance_slices(build_canonical_plan(config)).get(encode.instance.id)
     if plan is None:
@@ -403,7 +432,7 @@ def _launch_encode(
     local.write_text(serialize_plan(plan), encoding="utf-8")
     s3_cp(str(local), f"s3://{bucket}/{slice_key}")
 
-    return launch_encode(
+    instance_id = launch_encode(
         target=encode,
         infra=infra,
         commit=commit,
@@ -414,6 +443,60 @@ def _launch_encode(
         volume_size_gb=ENCODE_VOLUME_SIZE_GB,
         tags=encode_tags(name=PREFLIGHT_NAME_TAG, commit=commit),
     )
+    return LaunchedEncode(instance_id=instance_id, probe_run=plan["blocks"][0]["runs"][0])
+
+
+def _probe_perf(
+    *,
+    host: str,
+    run: dict[str, Any],
+    config: ExperimentConfig,
+    bucket: str,
+    instance_id: str,
+    work_dir: Path,
+) -> dict[str, Counter]:
+    """Roda o probe, **guarda a saída crua** e só então julga o que ela diz.
+
+    Nessa ordem porque a evidência do passo que reprova é a que vale: a primeira
+    rodada guardou só a tabela, e com ela não se separa multiplexação de PMU
+    virtual contando errado.
+    """
+    probe = ssh_capture(
+        host,
+        perf_probe_command(
+            run=run,
+            event_spec=config.instrumentation.event_spec,
+            repo_dir=REMOTE_REPO_DIR,
+            work_dir=REMOTE_WORK_DIR,
+        ),
+        timeout=PROBE_TIMEOUT_SECONDS,
+    )
+    _keep_probe_evidence(probe, bucket=bucket, instance_id=instance_id, work_dir=work_dir)
+    if probe.returncode != 0:
+        raise PreflightError(
+            f"o probe do perf saiu com status {probe.returncode}; a saída crua está em "
+            f"s3://{bucket}/{PREFLIGHT_PREFIX}{instance_id}/"
+        )
+    return perf_counters(probe.stdout, config.instrumentation)
+
+
+def _keep_probe_evidence(
+    probe: CommandOutput, *, bucket: str, instance_id: str, work_dir: Path
+) -> None:
+    """As duas saídas do probe no log do Orquestrador e no bucket, **sem apagar**.
+
+    Ao contrário dos dois objetos de prova do passo, que somem: o deles é prova de
+    permissão, e este é dado.
+    """
+    local = work_dir / "preflight" / instance_id
+    local.mkdir(parents=True, exist_ok=True)
+    for name, text in ((PROBE_STDOUT_NAME, probe.stdout), (PROBE_STDERR_NAME, probe.stderr)):
+        path = local / name
+        path.write_text(text, encoding="utf-8")
+        key = f"{PREFLIGHT_PREFIX}{instance_id}/{name}"
+        s3_cp(str(path), f"s3://{bucket}/{key}")
+        _report(f"{key}: guardado em {path}")
+        print(text, file=sys.stderr)
 
 
 def _put_from_container(host: str, bucket: str, instance_id: str) -> str:

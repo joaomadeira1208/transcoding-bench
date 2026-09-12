@@ -41,6 +41,27 @@ Quando algo falha (instância morre, cenários falham), a retomada é **semi-aut
 
 Intervenção humana é necessária pra avaliar se o erro é transitório (vale retentar) ou permanente (precisa investigar). Isso é intencional — evita retry loops automáticos que repetem o mesmo erro.
 
+**Emenda: a forma da retomada.** O passo 1 acima dizia "lista `s3://bucket/runs/`", e a listagem é justamente o que a retomada não faz: o `runs/` de uma campanha passa de mil objetos, e o parser do `list-objects-v2` recusa páginas truncadas por desenho (ADR-0019). No lugar dela, um `aws s3 sync` bucket→disco filtrado em `*/meta.json` baixa todos os `meta.json` de uma vez, e **o diretório sincronizado é a enumeração**. Cada arquivo passa pelo checador do `meta.json` do Orquestrador antes de entrar na decisão, e um inválido derruba a retomada nomeando a chave no bucket — deixar passar um `warmup` mal escrito faria um warm-up entrar como Replicação, e um `exit_code` mal escrito faria uma falha contar como sucesso (ADR-0019/0022).
+
+A Execução cujo upload a morte da instância interrompeu antes do `meta.json` **não aparece**: o filtro não traz os outros artefatos dela, e sem arquivo nenhum não há diretório local. Isso não é perda, e sim a decisão certa tomada de graça — uma Execução sem `meta.json` não pode estar completa, e o bloco dela já cai em pendente por ausência. O que o leitor ainda faz, quando encontra um diretório de run sem o arquivo, é ignorá-lo com um aviso em vez de estourar: a alternativa é a árvore inteira virar erro de leitura por causa de um objeto que não decide nada.
+
+**A retomada decide; ela não executa.** São dois comandos, e a separação é o gate humano:
+
+```
+python orchestrator/resume.py --config config/experiment.toml \
+    --bucket <campanha> --out ~/work/resume [--exclude-commit <sha>]...
+python orchestrator/orchestrator.py --infra ~/work/infra.json run \
+    --config config/experiment.toml --bucket <campanha> --slices ~/work/resume
+```
+
+O primeiro imprime, por arquitetura, os blocos completos e os pendentes com o motivo — **ausente**, **parcial**, **com falha**, **excluído por commit** — e escreve em `--out` uma fatia reduzida por arquitetura com pendência. Arquitetura sem pendência não ganha arquivo, e nada pendente é status zero com diretório vazio: "não há o que retomar" é um resultado, não um erro. Isso faz do `--out` um diretório novo a cada retomada, e o CLI recusa um que já contenha fatias: o segundo comando sobe toda arquitetura presente no diretório, e a fatia deixada pela retomada anterior mandaria refazer justamente a arquitetura que desta vez saiu completa — com o relatório ao lado dizendo que não há o que retomar. Ele **não lança nada** — entre saber o que falta e pagar por isso há um humano lendo o relatório, pelo mesmo instinto do gate do manifesto e do gate do piloto.
+
+**`--exclude-commit` é a porta do hotfix classe 1.** O `meta.json` registra o SHA de cada Execução, e a ADR-0021 define que um fix que toca o caminho de medição contamina o que já rodou nele. A flag, repetível, torna pendente todo bloco com qualquer Replicação **vencedora** naquele commit. Sem ela, invalidar blocos depois de um hotfix seria apagar objetos à mão no console — o que apaga também a evidência forense de que eles existiram.
+
+O valor tem de ser o SHA **completo**, os 40 dígitos que o `meta.json` registra, e o CLI recusa qualquer outra coisa antes de sincronizar. A comparação é de igualdade sobre aquele campo, e a abreviação de sete dígitos que o `git log --oneline` mostra — que é de onde o pesquisador copia o SHA — não casaria com Execução nenhuma: a retomada sairia com status zero declarando completos exatamente os blocos que o hotfix contaminou. Recusar alto o argumento é a única janela em que esse erro é detectável.
+
+**A fatia reduzida sobrescreve `scenarios/{id}.json`, e o `canonical.json` não é tocado.** A fatia significa "o que esta arquitetura deve rodar agora", e é exatamente isso que a retomada recalcula; o registro do Experimento é o canônico, e reescrevê-lo apagaria a matriz contra a qual a completude é medida. Nomes por tentativa (`{id}-resume-2.json`) foram rejeitados: o `meta.json` de cada Execução já carrega o que rodou e em que commit, e um nome novo por retomada só compraria um `--plan-key` variável para o bash da instância.
+
 ## Considered Options
 
 - **Sem retomada** — rejeitado: 2 dias de experimento sem rede de segurança é arriscado. Refazer tudo por causa de uma falha no cenário 30 é desperdício.

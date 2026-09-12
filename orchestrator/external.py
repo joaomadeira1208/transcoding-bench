@@ -34,6 +34,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # ADR-0016 não concede.
 COPY_PROPS = "metadata-directive"
 
+RUNS_PREFIX = "runs/"
+
+RUN_META_FILENAME = "meta.json"
+
 SSH_USER = "ubuntu"
 
 SSH_KEY_PATH = Path.home() / ".ssh" / "transcoding-bench.pem"
@@ -187,6 +191,24 @@ def s3_sync(source: str, destination: str) -> None:
             COPY_PROPS,
             source,
             destination,
+        ]
+    )
+
+
+def s3_sync_run_metas(bucket: str, destination: Path) -> None:
+    """Baixa todo `runs/*/meta.json` do bucket de uma vez, e nada mais (ADR-0012)."""
+    _run(
+        [
+            "aws",
+            "s3",
+            "sync",
+            "--only-show-errors",
+            "--exclude",
+            "*",
+            "--include",
+            f"*/{RUN_META_FILENAME}",
+            f"s3://{bucket}/{RUNS_PREFIX}",
+            str(destination),
         ]
     )
 

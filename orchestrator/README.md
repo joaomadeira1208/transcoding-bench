@@ -16,7 +16,11 @@ O `meta_check.py` é o segundo leitor do `meta.json`: `resume.py` e
 pydantic do `analysis/` sem custar a invariante stdlib-only. É regra duplicada,
 não código compartilhado (ADR-0019/0022) — e o `tests/test_meta_agreement.py`,
 que mora igual nos dois papéis, é o que impede os dois leitores de divergirem
-sobre o que é um arquivo válido.
+sobre o que é um arquivo válido. Ele cobre os campos sobre os quais o papel
+decide, e não o arquivo inteiro: `schema_version`, `scenario_id`, `warmup`,
+`exit_code`, `run_id`, `started_at` e `commit` — os dois últimos entraram com a
+retomada, que desempata a dedup pelo `run_id` e compara o `commit` com o
+`--exclude-commit`.
 
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano
@@ -387,3 +391,74 @@ a instância instala (`aws-cli/2.36.40`) são `none`, `metadata-directive` e
 `default`, e a flag **só se aplica a cópia S3→S3**: o `s3 cp` local↔S3 do resto
 do sistema não vê diferença. O argv fica sem teste, como o resto do adaptador
 (ADR-0022).
+
+## A retomada: `resume.py`
+
+O outro CLI do papel, e o único que **decide sem executar** (ADR-0012). Roda na
+instância do Orquestrador, depois de uma campanha que morreu no meio:
+
+    python orchestrator/resume.py --config config/experiment.toml \
+        --bucket <campanha> --out ~/work/resume [--exclude-commit <sha>]...
+
+O `--config` é o TOML que gerou o plano daquela campanha — o mesmo par
+`--config`/`--bucket` do `run`, pela mesma razão: a completude é medida contra a
+matriz que a campanha prometeu rodar, e conferir o bucket do piloto contra o
+`experiment.toml` acusaria como pendente tudo o que o piloto nunca teve.
+
+**A entrada é um `s3 sync` filtrado, não uma listagem.** O `s3_sync_run_metas` do
+adaptador baixa `runs/*/meta.json` de uma vez para um diretório temporário, e
+esse diretório **é** a enumeração das Execuções: o `runs/` de uma campanha passa
+de mil objetos e o parser do `list-objects-v2` recusa páginas truncadas por
+desenho. Cada arquivo passa pelo `meta_check`, e um inválido derruba a retomada
+nomeando a chave no bucket — decidir sobre um `meta.json` é decidir sobre um
+bloco, e um `warmup` escrito como string faria um warm-up entrar como
+Replicação.
+
+A Execução cujo upload morreu antes do `meta.json` simplesmente não aparece: o
+filtro não traz os outros artefatos dela, e sem arquivo nenhum não há diretório
+local. É a decisão certa de graça — ela não podia estar completa, e o bloco dela
+já cai em pendente por ausência. Diretório de run sem o arquivo, quando aparece,
+é ignorado com um aviso no `stderr` em vez de estourar a leitura da árvore
+inteira.
+
+**A decisão é por bloco, sobre as Replicações vencedoras.** Dentro de cada
+`scenario_id` com `warmup == false` vence o maior `started_at` **comparado como
+instante**, com o `run_id` desempatando — a mesma regra do `analysis/`, reescrita
+no `resume_plan.py` porque este papel é stdlib-only e não importa o modelo
+pydantic de lá. Um bloco é completo quando as suas cinco `scenario_id` de
+Replicação têm vencedora, todas com `exit_code == 0`, e nenhuma delas veio de um
+commit excluído. O `--exclude-commit` exige o SHA **completo** e recusa qualquer
+outra coisa antes de sincronizar: a comparação é de igualdade sobre o campo
+`commit`, e a abreviação que o `git log --oneline` mostra sairia com status zero
+declarando completos justamente os blocos contaminados. Todo o resto é pendente, com um motivo — `ausente`, `parcial`,
+`com falha`, `excluído por commit` —, avaliados nessa ordem, que é o que decide o
+rótulo de um bloco que satisfaz mais de um.
+
+**A saída é o relatório e as fatias.** No `stdout`, uma linha por arquitetura com
+a contagem de blocos completos e uma linha por bloco pendente com o motivo. Em
+`--out`, uma fatia por arquitetura com pendência, com o mesmo nome
+(`{id}.json`, vindo da constante do `generate_scenarios` e não de uma cópia
+própria) e a mesma forma de topo da fatia original — é a chave
+`scenarios/{id}.json` que ela vai sobrescrever, e o `canonical.json` não é
+tocado. O relatório **conta** os blocos completos e **nomeia** os pendentes: são
+54 blocos por arquitetura na campanha, e listar os completos enterraria os dois
+que interessam. Os blocos voltam **inteiros**, warm-up e as cinco Replicações, porque os
+`run_id` são cunhados na instância e retomar só as Replicações faltantes rodaria
+a frio (ADR-0003/0012). Arquitetura sem pendência não ganha arquivo, e uma
+campanha inteira completa é status zero com diretório vazio: "não há o que
+retomar" é um resultado. Por isso o `--out` tem de ser um diretório novo a cada
+retomada, e o CLI recusa um que já contenha fatias antes de sincronizar coisa
+alguma: quem lê o diretório é o `run --slices`, que sobe toda arquitetura
+presente nele, e a fatia da retomada anterior mandaria refazer os 54 blocos de
+uma arquitetura que desta vez saiu completa. Status 1 é `meta.json` recusado, e 2, configuração
+ilegível ou AWS CLI falhando. O comando **não lança instância nenhuma** — quem executa
+a fatia reduzida é o `orchestrator.py run --slices`, e o humano entre os dois é o
+gate.
+
+A fatia reduzida é projetada pela **mesma** função que gerou a original
+(`build_instance_slices`), e não por uma montagem própria: é isso que faz a
+retomada de um bucket sem nenhum `meta.json` devolver a fatia original byte a
+byte, e é o teste que o afirma sobre os dois planos reais. O `s3_sync_run_metas`
+é argv e fica sem teste, como o resto do adaptador; a prova de que a completude é
+decidida sobre `meta.json` que o bash de verdade escreveu é a caixa-preta do
+`smoke/`.

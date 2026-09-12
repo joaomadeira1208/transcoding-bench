@@ -1,7 +1,7 @@
 """Checagem do `meta.json` em stdlib pura — o leitor do orquestrador (ADR-0022).
 
-Cobre os cinco campos sobre os quais este papel decide, e não o arquivo inteiro:
-é regra duplicada em relação ao modelo pydantic do `analysis/`, não código
+Cobre os campos sobre os quais este papel decide, e não o arquivo inteiro: é
+regra duplicada em relação ao modelo pydantic do `analysis/`, não código
 compartilhado, e `test_meta_agreement.py` é o que impede os dois de divergirem.
 """
 
@@ -87,5 +87,7 @@ _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "scenario_id": _check_non_empty_str,
     "warmup": _check_bool,
     "exit_code": _check_int,
+    "run_id": _check_non_empty_str,
     "started_at": _check_aware_timestamp,
+    "commit": _check_non_empty_str,
 }

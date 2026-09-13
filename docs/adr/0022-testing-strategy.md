@@ -312,6 +312,17 @@ software e `pcnt-running` abaixo de 100.
 continua fora do alcance do Mac —, mas de graça: `perf stat` recusa uma sintaxe de
 grupo malformada do mesmo jeito que recusa um nome de evento que não conhece, então
 o `-e` com chaves é verificado lá antes de qualquer instância subir.
+**Emenda: não é.** Um evento solto que o kernel não abre volta `<not supported>`;
+um **líder de grupo** que não abre é fatal (`The cycles event is not supported.`,
+sem `perf.json`), e sem PMU no guest os três pares têm líder indisponível — a
+primeira corrida do aceite depois desta emenda caiu antes de o FFmpeg nascer. O
+aceite passa a receber o `-e` **sem as chaves**: a mesma lista, na mesma ordem,
+cada evento solto. É a única transcrição que o aceite faz sobre a cadeia, e é
+deliberada: o que ele verifica são os nomes e o parser; os grupos só abrem onde há
+PMU, e é o `preflight` que os confere. As alternativas — a cadeia da campanha
+sondar a PMU e cair para eventos soltos, ou o aceite parar de rodar o `perf` —
+foram rejeitadas: a primeira é o modo degradado que esta ADR recusa para a
+campanha, a segunda perde a âncora do parser do `perf.json`.
 
 **O `preflight` passa a guardar a saída crua do probe.** Stdout (`perf stat -j`) e
 stderr (o dump dos `perf_event_attr` do `-vv`) vão para o log do Orquestrador e

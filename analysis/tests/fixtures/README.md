@@ -17,14 +17,9 @@ uma saída mudar de forma.
 Os contadores de hardware do `perf.json` vêm `<not supported>`: quem captura é o
 Mac, e o Docker não expõe a PMU ao guest. É o texto real de um evento
 indisponível, que é justamente o que o parser precisa atravessar; se cada evento
-retorna valor em cada arquitetura é pergunta do `preflight` (ADR-0022).
-
-**Duas linhas do `perf.json` foram editadas à mão**, e não capturadas: os nomes
-`L1-dcache-loads` e `L1-dcache-load-misses`, que a ADR-0006 emendada pôs no lugar
-de `cache-references` e `cache-misses`. O campo `event` do `perf stat -j` é eco do
-que o `-e` pediu, e o resto da linha — o `<not supported>`, o `event-runtime`, o
-`pcnt-running` — segue como a ferramenta o escreveu. A regeneração pela camada de
-aceite está bloqueada pelo #85, e é lá que esta nota é removida.
+retorna valor em cada arquitetura, e se os pares abrem em grupo, é pergunta do
+`preflight` (ADR-0022) — o aceite passa os eventos soltos, porque um grupo cujo
+líder não abre é fatal para o `perf stat`.
 
 A allowlist do `.gitignore` admite `.json`, `.txt` e `.log` sob um diretório
 `fixtures/` (ADR-0017), e é por isso que o `output.mkv` da mesma captura não está

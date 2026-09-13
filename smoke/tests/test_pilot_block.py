@@ -24,7 +24,7 @@ BLOCK_SUFFIXES = ["_warmup", "_rep1", "_rep2", "_rep3", "_rep4", "_rep5"]
 
 PILOT_PAIR = "1080p_720p"
 
-PMU_EVENT_COUNT = 10
+PMU_EVENT_COUNT = 8
 
 
 def codec_record(encoder: str) -> dict[str, Any]:
@@ -183,7 +183,7 @@ class TestConsolidation:
         assert "0 artefatos ilegíveis" in result.stdout
         assert result.stderr == ""
 
-    def test_the_ten_pmu_events_of_the_pilot_become_filled_columns(self, pilot_consolidation):
+    def test_the_eight_pmu_events_of_the_pilot_become_filled_columns(self, pilot_consolidation):
         _, table = pilot_consolidation
         events = PILOT["instrumentation"]["pmu_events"]
 

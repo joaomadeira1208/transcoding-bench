@@ -22,14 +22,12 @@ from run_artifacts import (
 )
 from run_meta import RunMeta
 
-# Os dez eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
+# Os oito eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
 # a coluna existe mesmo quando o contador falta, e é assim que um evento
 # indisponível numa arquitetura aparece como nulo em vez de sumir do schema.
 PMU_EVENTS = (
     "cycles",
     "instructions",
-    "cache-references",
-    "cache-misses",
     "branch-instructions",
     "branch-misses",
     "task-clock",
@@ -37,6 +35,11 @@ PMU_EVENTS = (
     "cpu-migrations",
     "page-faults",
 )
+
+METRIC_OPERANDS: dict[str, tuple[str, str]] = {
+    "ipc": ("instructions", "cycles"),
+    "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
+}
 
 
 @dataclass(frozen=True)
@@ -147,13 +150,10 @@ def _row(run: RawRun) -> tuple[dict[str, Any], list[str]]:
         "ffmpeg_frames": ffmpeg.frames if ffmpeg else None,
         "ffmpeg_fps": ffmpeg.fps if ffmpeg else None,
         "ffmpeg_bitrate_kbps": ffmpeg.bitrate_kbps if ffmpeg else None,
-        "ipc": ratio(_counted(counters, "instructions"), _counted(counters, "cycles")),
-        "cache_miss_rate": ratio(
-            _counted(counters, "cache-misses"), _counted(counters, "cache-references")
-        ),
-        "branch_mispredict_rate": ratio(
-            _counted(counters, "branch-misses"), _counted(counters, "branch-instructions")
-        ),
+        **{
+            name: ratio(_counted(counters, numerator), _counted(counters, denominator))
+            for name, (numerator, denominator) in METRIC_OPERANDS.items()
+        },
         "cpu_pct_avg": mean(cpu_pct),
     }
     return row, unreadable
@@ -193,7 +193,7 @@ def _pcnt_running(counters: Mapping[str, PerfCounter], event: str) -> float | No
 
 
 def _perf_column(event: str) -> str:
-    return f"perf_{event.replace('-', '_')}"
+    return f"perf_{event.replace('-', '_').lower()}"
 
 
 def _pcnt_column(event: str) -> str:
@@ -262,9 +262,7 @@ TABLE_SCHEMA = pa.schema(
         ("ffmpeg_frames", pa.int64()),
         ("ffmpeg_fps", pa.float64()),
         ("ffmpeg_bitrate_kbps", pa.float64()),
-        ("ipc", pa.float64()),
-        ("cache_miss_rate", pa.float64()),
-        ("branch_mispredict_rate", pa.float64()),
+        *((name, pa.float64()) for name in METRIC_OPERANDS),
         ("cpu_pct_avg", pa.float64()),
     ]
 )

@@ -19,7 +19,7 @@ Inventário sob esse critério:
 | Filtro `warmup == false` | `orchestrator/`, `analysis/` | Warm-up contado como Replicação → média enviesada pra cima (ADR-0003) |
 | Agrupamento do triage (270 grupos × 3) | `orchestrator/` | Grupo mal formado → comparação de hash cross-arch inválida |
 | Modelo pydantic (estrito) + `schema_version` | `analysis/` | `meta.json` de forma antiga passando batido, ou tipo divergente sendo coagido em silêncio (ADR-0019) |
-| Derivados do `consolidate.py` (IPC, cache miss rate, branch mispredict rate) | `analysis/` | Divisão virando `NaN`/`ZeroDivisionError` calado |
+| Derivados do `consolidate.py` (IPC, cache miss rate, branch mispredict rate — **Emenda:** sem cache miss rate, pela ADR-0006) | `analysis/` | Divisão virando `NaN`/`ZeroDivisionError` calado |
 | Parsing da saída da AWS CLI | `orchestrator/` | Listagem de `runs/` mal parseada → `resume.py` decide errado |
 | Argv do FFmpeg (via smoke, ver abaixo) | `smoke/` | Parâmetro de encode perdido ou deformado na cadeia toml → `jq` → argv → vídeo válido, experimento inválido |
 
@@ -312,6 +312,17 @@ software e `pcnt-running` abaixo de 100.
 continua fora do alcance do Mac —, mas de graça: `perf stat` recusa uma sintaxe de
 grupo malformada do mesmo jeito que recusa um nome de evento que não conhece, então
 o `-e` com chaves é verificado lá antes de qualquer instância subir.
+**Emenda: não é.** Um evento solto que o kernel não abre volta `<not supported>`;
+um **líder de grupo** que não abre é fatal (`The cycles event is not supported.`,
+sem `perf.json`), e sem PMU no guest os três pares têm líder indisponível — a
+primeira corrida do aceite depois desta emenda caiu antes de o FFmpeg nascer. O
+aceite passa a receber o `-e` **sem as chaves**: a mesma lista, na mesma ordem,
+cada evento solto. É a única transcrição que o aceite faz sobre a cadeia, e é
+deliberada: o que ele verifica são os nomes e o parser; os grupos só abrem onde há
+PMU, e é o `preflight` que os confere. As alternativas — a cadeia da campanha
+sondar a PMU e cair para eventos soltos, ou o aceite parar de rodar o `perf` —
+foram rejeitadas: a primeira é o modo degradado que esta ADR recusa para a
+campanha, a segunda perde a âncora do parser do `perf.json`.
 
 **O `preflight` passa a guardar a saída crua do probe.** Stdout (`perf stat -j`) e
 stderr (o dump dos `perf_event_attr` do `-vv`) vão para o log do Orquestrador e

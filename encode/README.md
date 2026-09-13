@@ -186,9 +186,9 @@ não-completo em vez de ele sumir.
 ## A guarda do `perf.json`
 
 O `-e` do `perf stat` chega **pronto no objeto de run** (`perf_event_spec`), com
-os pares da ADR-0006 entre chaves: `{cycles,instructions},{cache-references,cache-misses},{branch-instructions,branch-misses}`
+os pares da ADR-0006 entre chaves: `{cycles,instructions},{branch-instructions,branch-misses}`
 mais os quatro eventos de software soltos. Montar essa sintaxe no `jq` seria o bash
-derivando o que decide se as três razões do artigo são medidas ou inventadas — o
+derivando o que decide se as duas razões do artigo são medidas ou inventadas — o
 `perf` escalona um grupo de forma atômica, e é isso que faz numerador e denominador
 verem a mesma janela de execução quando o kernel multiplexa os contadores.
 
@@ -209,10 +209,9 @@ eventos de software ficam fora da regra do zero: `context-switches = 0` e
 `cpu-migrations = 0` são resultados legítimos e desejáveis.
 
 Passando isso, cada métrica é conferida contra o seu `max_ratio`: `branch-misses`
-não passa de `branch-instructions`, `cache-misses` não passa de `cache-references`,
-e o IPC não passa do teto declarado. É o que separa "o contador respondeu" de "o
-contador mediu" — dois números não-zero, nenhum string de erro, e uma razão
-impossível.
+não passa de `branch-instructions`, e o IPC não passa do teto declarado. É o que separa "o contador
+respondeu" de "o contador mediu" — dois números não-zero, nenhum string de erro, e
+uma razão impossível.
 
 O `pcnt-running` **não** é recusa: com os pares, fração abaixo de 100 é o regime
 esperado onde a PMU tem menos contadores que eventos, e a razão continua correta.

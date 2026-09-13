@@ -1,1 +1,1 @@
-{"elapsed_s":3.09,"user_s":4.97,"sys_s":0.32,"max_rss_kb":512572,"major_page_faults":0,"minor_page_faults":129830,"fs_inputs":0,"fs_outputs":6096,"voluntary_ctx_switches":17708,"involuntary_ctx_switches":10409,"exit_status":0}
+{"elapsed_s":3.76,"user_s":5.88,"sys_s":0.55,"max_rss_kb":512900,"major_page_faults":0,"minor_page_faults":130282,"fs_inputs":0,"fs_outputs":6096,"voluntary_ctx_switches":18675,"involuntary_ctx_switches":10940,"exit_status":0}

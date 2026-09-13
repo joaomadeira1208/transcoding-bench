@@ -103,7 +103,7 @@ O que ele exercita e a camada com shims não alcança: que o encoder aceita o
 preset, o CRF e os `encoder_args` que o `config/experiment.toml` declara para
 ele; que o `/usr/bin/time` emite JSON com aquele format string; que o `pidstat`
 escreve a coluna `%CPU` que o parser procura pelo nome; que a extração de
-bitstream funciona com o muxer que cada um dos três codecs declara; e que os dez
+bitstream funciona com o muxer que cada um dos três codecs declara; e que os oito
 `pmu_events` são nomes que o `perf stat` reconhece — ele recusa o que não
 conhece.
 

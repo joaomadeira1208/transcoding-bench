@@ -151,7 +151,10 @@ def perf_failure(plan, execute) -> Execution:
 
 @pytest.fixture(scope="session")
 def unsupported_event(plan, execute) -> Execution:
-    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cache-misses=<not supported>")
+    return execute(
+        replication(plan["blocks"][0]),
+        SMOKE_PERF_VALUES="branch-misses=<not supported>",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -161,7 +164,7 @@ def uncounted_event(plan, execute) -> Execution:
 
 @pytest.fixture(scope="session")
 def zeroed_hardware_event(plan, execute) -> Execution:
-    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cache-references=0.000000")
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="branch-instructions=0.000000")
 
 
 @pytest.fixture(scope="session")
@@ -470,8 +473,8 @@ class TestInstrumentationFailure:
         assert omitted_event.meta()["exit_code"] != 0
 
     def test_an_unsupported_event_fails_the_run(self, unsupported_event):
-        # O `perf` não falha: reporta `<not supported>` e segue. A coluna de
-        # cache miss rate viria vazia para uma arquitetura inteira.
+        # O `perf` não falha: reporta `<not supported>` e segue. A coluna da
+        # razão viria vazia para uma arquitetura inteira.
         assert unsupported_event.returncode != 0
         assert unsupported_event.meta()["exit_code"] != 0
 
@@ -483,7 +486,7 @@ class TestInstrumentationFailure:
 
     def test_a_zeroed_hardware_counter_fails_the_run(self, zeroed_hardware_event):
         # Foi o c7i, e é o pior dos três: zero é número válido, passa por
-        # qualquer guarda de string e vira `cache_miss_rate` nulo para uma
+        # qualquer guarda de string e vira uma razão nula para uma
         # arquitetura inteira, descoberto só no `consolidate.py`.
         assert zeroed_hardware_event.returncode != 0
         assert zeroed_hardware_event.meta()["exit_code"] != 0

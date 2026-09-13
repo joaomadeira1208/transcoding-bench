@@ -5,7 +5,7 @@
 # tabela é uma capacidade que ninguém provou e o pesquisador acha que sim.
 #
 # A primeira rodada do passo reprovou o c7g por `<not counted>` e **aprovou** o
-# c7i com `cache-references = 0` e o c7a com `branch-misses` quase o dobro de
+# c7i com o par de cache zerado e o c7a com `branch-misses` quase o dobro de
 # `instructions`. Os três casos moram aqui.
 
 from __future__ import annotations
@@ -85,9 +85,7 @@ class TestThePerfProbe:
 
         assert argv[argv.index("-e") + 1] == INSTRUMENTATION.event_spec
 
-    def test_the_probe_dumps_the_resolved_event_of_each_name(self):
-        # Sem o `-vv` não há como dizer se `cache-references` é L1D, LLC ou L2
-        # naquela arquitetura, e o "cache miss rate" compararia três coisas.
+    def test_the_probe_dumps_the_event_attribute_of_each_name(self):
         argv = perf_probe_command(
             run=first_run(),
             event_spec=INSTRUMENTATION.event_spec,
@@ -170,7 +168,7 @@ class TestThePerfCounters:
     @pytest.mark.parametrize("event", HARDWARE_EVENTS)
     def test_a_zeroed_hardware_counter_is_refused_naming_the_event(self, event):
         # O modo de falha do c7i, e o pior dos três: zero é número válido, passa
-        # por qualquer guarda de string e vira `cache_miss_rate` nulo para uma
+        # por qualquer guarda de string e vira uma razão nula para uma
         # arquitetura inteira, descoberto só no `consolidate.py`.
         values = every_event_counted() | {event: "0.000000"}
 
@@ -286,13 +284,12 @@ class TestPlausibility:
         assert len(counted(values)) == len(PMU_EVENTS)
 
     def test_the_counters_of_the_c7a_are_refused(self):
-        # Os números da primeira rodada, verbatim: IPC 18,6 e 942 % de desvios
-        # errados. O passo aprovou isto.
+        # Os quatro contadores da primeira rodada que sobreviveram à troca do par
+        # de cache, verbatim: IPC 18,6 e 942 % de desvios errados. O passo
+        # aprovou isto.
         values = every_event_counted() | {
             "cycles": "40210.000000",
             "instructions": "746971.000000",
-            "cache-references": "82561.000000",
-            "cache-misses": "20657.000000",
             "branch-instructions": "146708.000000",
             "branch-misses": "1382176.000000",
         }

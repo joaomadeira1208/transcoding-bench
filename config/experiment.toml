@@ -26,15 +26,13 @@ strip_audio = true
 container = "mkv"
 scale_flags = "lanczos"
 
-# Desenho experimental, não constante de script (ADR-0006): IPC, cache miss rate e
-# branch mispredict rate saem daqui, e trocar um evento muda o que o artigo
+# Desenho experimental, não constante de script (ADR-0006): IPC e branch
+# mispredict rate saem daqui, e trocar um evento muda o que o artigo
 # reporta. A ordem é a que vai para o `-e` do `perf stat`.
 [instrumentation]
 pmu_events = [
   "cycles",
   "instructions",
-  "cache-references",
-  "cache-misses",
   "branch-instructions",
   "branch-misses",
   "task-clock",
@@ -43,10 +41,10 @@ pmu_events = [
   "page-faults",
 ]
 
-# As três métricas da ADR-0006, e cada uma declara o par que o `perf` tem de
+# As duas métricas da ADR-0006, e cada uma declara o par que o `perf` tem de
 # contar **no mesmo grupo**: a PMU tem poucos registradores, o kernel multiplexa
 # o que não cabe, e um numerador medido numa janela sobre um denominador medido
-# noutra produziu o IPC de 18,6 do c7a. Pares, e não o sexteto: um grupo que não
+# noutra produziu o IPC de 18,6 do c7a. Pares, e não o quarteto: um grupo que não
 # cabe nos contadores volta `<not counted>` inteiro, e o c7g mostrou que o
 # orçamento pode ser de três.
 #
@@ -59,12 +57,6 @@ name = "ipc"
 numerator = "instructions"
 denominator = "cycles"
 max_ratio = 10.0
-
-[[instrumentation.metric]]
-name = "cache_miss_rate"
-numerator = "cache-misses"
-denominator = "cache-references"
-max_ratio = 1.0
 
 [[instrumentation.metric]]
 name = "branch_mispredict_rate"

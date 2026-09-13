@@ -83,8 +83,21 @@ def instrumentation_chain(execution: Execution, clip: str, output: str) -> list[
             chain[index + 1] = f"{CONTAINER_OUT}/{Path(chain[index + 1]).name}"
         elif argument == "-i":
             chain[index + 1] = clip
+        elif argument == "-e":
+            chain[index + 1] = ungrouped(chain[index + 1])
     chain[-1] = output
     return chain
+
+
+def ungrouped(event_spec: str) -> str:
+    """O `-e` sem as chaves: a lista declarada, na ordem, cada evento solto.
+
+    Um evento solto que o kernel não abre volta `<not supported>`; um **líder de
+    grupo** que não abre é fatal para o `perf stat`, e sem PMU no guest os três
+    pares têm líder indisponível. O aceite verifica os nomes; os grupos são
+    pergunta do `preflight` (ADR-0022).
+    """
+    return event_spec.replace("{", "").replace("}", "")
 
 
 def pidstat_arguments(execution: Execution) -> tuple[str, str]:
@@ -240,11 +253,10 @@ class TestInstrumentation:
         assert all(isinstance(value, int | float) for value in time.values())
 
     def test_the_perf_echoes_back_every_event_the_spec_declares(self, captured):
-        # `perf stat` recusa um nome de evento que não conhece **e** uma sintaxe de
-        # grupo malformada, então isto é o que verifica o `-e` do
-        # `config/experiment.toml` sem PMU. Se cada evento retorna valor, em que
-        # regime, e o que o nome genérico resolveu naquela arquitetura são outras
-        # perguntas, e são do `preflight`.
+        # `perf stat` recusa um nome de evento que não conhece, então isto é o
+        # que verifica os nomes do `config/experiment.toml` sem PMU. Se cada
+        # evento retorna valor, em que regime, se os grupos abrem, e o que o nome
+        # genérico resolveu naquela arquitetura são perguntas do `preflight`.
         events = [
             json.loads(line)["event"]
             for line in captured.artifact("perf.json").splitlines()

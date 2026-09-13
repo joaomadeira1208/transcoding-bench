@@ -151,7 +151,10 @@ def perf_failure(plan, execute) -> Execution:
 
 @pytest.fixture(scope="session")
 def unsupported_event(plan, execute) -> Execution:
-    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cache-misses=<not supported>")
+    return execute(
+        replication(plan["blocks"][0]),
+        SMOKE_PERF_VALUES="L1-dcache-load-misses=<not supported>",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -161,7 +164,7 @@ def uncounted_event(plan, execute) -> Execution:
 
 @pytest.fixture(scope="session")
 def zeroed_hardware_event(plan, execute) -> Execution:
-    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="cache-references=0.000000")
+    return execute(replication(plan["blocks"][0]), SMOKE_PERF_VALUES="L1-dcache-loads=0.000000")
 
 
 @pytest.fixture(scope="session")

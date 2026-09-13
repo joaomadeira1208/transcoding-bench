@@ -44,8 +44,8 @@ EXPECTED_PAIRS = {
 EXPECTED_PMU_EVENTS = [
     "cycles",
     "instructions",
-    "cache-references",
-    "cache-misses",
+    "L1-dcache-loads",
+    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
     "task-clock",
@@ -59,13 +59,13 @@ EXPECTED_PMU_EVENTS = [
 # passa a reportar outra coisa com o mesmo nome.
 EXPECTED_METRIC_PAIRS = {
     "ipc": ("instructions", "cycles"),
-    "cache_miss_rate": ("cache-misses", "cache-references"),
+    "cache_miss_rate": ("L1-dcache-load-misses", "L1-dcache-loads"),
     "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
 }
 
 EXPECTED_EVENT_SPEC = (
     "{cycles,instructions},"
-    "{cache-references,cache-misses},"
+    "{L1-dcache-loads,L1-dcache-load-misses},"
     "{branch-instructions,branch-misses},"
     "task-clock,context-switches,cpu-migrations,page-faults"
 )
@@ -73,8 +73,8 @@ EXPECTED_EVENT_SPEC = (
 EXPECTED_HARDWARE_EVENTS = [
     "cycles",
     "instructions",
-    "cache-references",
-    "cache-misses",
+    "L1-dcache-loads",
+    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
 ]

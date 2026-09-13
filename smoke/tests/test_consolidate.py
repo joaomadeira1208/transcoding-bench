@@ -17,7 +17,7 @@ PMU_EVENTS = EXPERIMENT["instrumentation"]["pmu_events"]
 
 
 def perf_column(event: str) -> str:
-    return f"perf_{event.replace('-', '_')}"
+    return f"perf_{event.replace('-', '_').lower()}"
 
 
 def pcnt_column(event: str) -> str:

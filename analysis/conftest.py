@@ -96,8 +96,8 @@ _VALID_TIME: dict[str, Any] = {
 _VALID_COUNTERS: dict[str, Any] = {
     "cycles": 4_000_000_000,
     "instructions": 6_000_000_000,
-    "cache-references": 200_000_000,
-    "cache-misses": 50_000_000,
+    "L1-dcache-loads": 200_000_000,
+    "L1-dcache-load-misses": 50_000_000,
     "branch-instructions": 800_000_000,
     "branch-misses": 16_000_000,
     "task-clock": 312450.0,

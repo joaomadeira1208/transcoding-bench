@@ -25,11 +25,14 @@ from run_meta import RunMeta
 # Os dez eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
 # a coluna existe mesmo quando o contador falta, e é assim que um evento
 # indisponível numa arquitetura aparece como nulo em vez de sumir do schema.
+#
+# É transcrição do `config/experiment.toml`, e o `test_pmu_events.py` a amarra ao
+# TOML: sem ele, trocar um evento lá produziria esta coluna nula em silêncio.
 PMU_EVENTS = (
     "cycles",
     "instructions",
-    "cache-references",
-    "cache-misses",
+    "L1-dcache-loads",
+    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
     "task-clock",
@@ -149,7 +152,7 @@ def _row(run: RawRun) -> tuple[dict[str, Any], list[str]]:
         "ffmpeg_bitrate_kbps": ffmpeg.bitrate_kbps if ffmpeg else None,
         "ipc": ratio(_counted(counters, "instructions"), _counted(counters, "cycles")),
         "cache_miss_rate": ratio(
-            _counted(counters, "cache-misses"), _counted(counters, "cache-references")
+            _counted(counters, "L1-dcache-load-misses"), _counted(counters, "L1-dcache-loads")
         ),
         "branch_mispredict_rate": ratio(
             _counted(counters, "branch-misses"), _counted(counters, "branch-instructions")
@@ -193,7 +196,7 @@ def _pcnt_running(counters: Mapping[str, PerfCounter], event: str) -> float | No
 
 
 def _perf_column(event: str) -> str:
-    return f"perf_{event.replace('-', '_')}"
+    return f"perf_{event.replace('-', '_').lower()}"
 
 
 def _pcnt_column(event: str) -> str:

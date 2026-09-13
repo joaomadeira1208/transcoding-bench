@@ -57,14 +57,18 @@ produzir.
 
 Uma linha por Execução, com o Cenário, os metadados do run, os agregados de
 `time` e `perf`, os parseados do FFmpeg e os quatro derivados — `ipc`,
-`cache_miss_rate`, `branch_mispredict_rate` e `cpu_pct_avg` (ADR-0006/0007). As
+`cache_miss_rate`, `branch_mispredict_rate` e `cpu_pct_avg` (ADR-0006/0007). O
+`cache_miss_rate` é de **L1D** — `L1-dcache-load-misses` sobre `L1-dcache-loads`,
+o par que nomeia o nível em vez de deixá-lo a cargo do driver de PMU de cada
+arquitetura. As
 séries do `pidstat` ficam **fora**: só o agregado entra, e a série continua no
 raw dir, consultada sob demanda, para que a tabela não ganhe centenas de milhares
 de linhas.
 
 Cada evento de PMU tem **duas** colunas: `perf_{evento}` com o valor e
 `perf_{evento}_pcnt_running` com a fração do tempo em que aquele contador esteve
-rodando. Abaixo de 100 o valor é estimativa extrapolada, não contagem, e é o regime
+rodando — o nome do evento em minúsculas e com `-` virando `_`, de modo que
+`L1-dcache-loads` é `perf_l1_dcache_loads`. Abaixo de 100 o valor é estimativa extrapolada, não contagem, e é o regime
 esperado onde a PMU tem menos contadores que eventos — os pares da ADR-0006 mantêm
 a razão correta ali, mas sem a coluna uma estimativa de uma arquitetura e uma
 contagem de outra entrariam na mesma comparação indistinguíveis. É o que permite ao

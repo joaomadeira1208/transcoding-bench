@@ -5,7 +5,7 @@
 # tabela é uma capacidade que ninguém provou e o pesquisador acha que sim.
 #
 # A primeira rodada do passo reprovou o c7g por `<not counted>` e **aprovou** o
-# c7i com `cache-references = 0` e o c7a com `branch-misses` quase o dobro de
+# c7i com o par de cache zerado e o c7a com `branch-misses` quase o dobro de
 # `instructions`. Os três casos moram aqui.
 
 from __future__ import annotations
@@ -85,9 +85,10 @@ class TestThePerfProbe:
 
         assert argv[argv.index("-e") + 1] == INSTRUMENTATION.event_spec
 
-    def test_the_probe_dumps_the_resolved_event_of_each_name(self):
-        # Sem o `-vv` não há como dizer se `cache-references` é L1D, LLC ou L2
-        # naquela arquitetura, e o "cache miss rate" compararia três coisas.
+    def test_the_probe_dumps_the_event_attribute_of_each_name(self):
+        # O `-vv` despeja o `perf_event_attr` como o `perf` o abriu, e é onde se
+        # lê que o par de cache pediu `PERF_TYPE_HW_CACHE` com o nível L1D — não
+        # o evento nativo, que o driver do kernel resolve depois da syscall.
         argv = perf_probe_command(
             run=first_run(),
             event_spec=INSTRUMENTATION.event_spec,
@@ -286,13 +287,12 @@ class TestPlausibility:
         assert len(counted(values)) == len(PMU_EVENTS)
 
     def test_the_counters_of_the_c7a_are_refused(self):
-        # Os números da primeira rodada, verbatim: IPC 18,6 e 942 % de desvios
-        # errados. O passo aprovou isto.
+        # Os quatro contadores da primeira rodada que sobreviveram à troca do par
+        # de cache, verbatim: IPC 18,6 e 942 % de desvios errados. O passo
+        # aprovou isto.
         values = every_event_counted() | {
             "cycles": "40210.000000",
             "instructions": "746971.000000",
-            "cache-references": "82561.000000",
-            "cache-misses": "20657.000000",
             "branch-instructions": "146708.000000",
             "branch-misses": "1382176.000000",
         }

@@ -19,6 +19,15 @@ Mac, e o Docker não expõe a PMU ao guest. É o texto real de um evento
 indisponível, que é justamente o que o parser precisa atravessar; se cada evento
 retorna valor em cada arquitetura é pergunta do `preflight` (ADR-0022).
 
+**Duas linhas do `perf.json` foram editadas à mão**, e não capturadas: os nomes
+`L1-dcache-loads` e `L1-dcache-load-misses`, que a ADR-0006 emendada pôs no lugar
+de `cache-references` e `cache-misses`. O campo `event` do `perf stat -j` é eco do
+que o `-e` pediu, e o resto da linha — o `<not supported>`, o `event-runtime`, o
+`pcnt-running` — segue como a ferramenta o escreveu. A regeneração pela camada de
+aceite não estava disponível: a VM do Docker Desktop passou a fazer o `perf`
+abortar em `cycles` em vez de reportá-lo como indisponível, e a cadeia inteira sai
+antes do encode. Vale para o `master` também, e é defeito à parte.
+
 A allowlist do `.gitignore` admite `.json`, `.txt` e `.log` sob um diretório
 `fixtures/` (ADR-0017), e é por isso que o `output.mkv` da mesma captura não está
 aqui.

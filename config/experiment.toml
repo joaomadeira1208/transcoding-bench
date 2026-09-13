@@ -33,8 +33,8 @@ scale_flags = "lanczos"
 pmu_events = [
   "cycles",
   "instructions",
-  "cache-references",
-  "cache-misses",
+  "L1-dcache-loads",
+  "L1-dcache-load-misses",
   "branch-instructions",
   "branch-misses",
   "task-clock",
@@ -60,10 +60,14 @@ numerator = "instructions"
 denominator = "cycles"
 max_ratio = 10.0
 
+# O par de cache nomeia o nível, e é por isso que ele não é `cache-references` /
+# `cache-misses`: esses dois nomes genéricos resolvem para L1D no arm64, para a
+# família LLC na Intel e para o L2 na AMD, e o `cache_miss_rate` passa a comparar
+# três coisas diferentes sem que nada na saída diga isso (ADR-0006).
 [[instrumentation.metric]]
 name = "cache_miss_rate"
-numerator = "cache-misses"
-denominator = "cache-references"
+numerator = "L1-dcache-load-misses"
+denominator = "L1-dcache-loads"
 max_ratio = 1.0
 
 [[instrumentation.metric]]

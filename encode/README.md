@@ -210,9 +210,9 @@ eventos de software ficam fora da regra do zero: `context-switches = 0` e
 
 Passando isso, cada métrica é conferida contra o seu `max_ratio`: `branch-misses`
 não passa de `branch-instructions`, `L1-dcache-load-misses` não passa de
-`L1-dcache-loads`, e o IPC não passa do teto declarado. É o que separa "o contador respondeu" de "o
-contador mediu" — dois números não-zero, nenhum string de erro, e uma razão
-impossível.
+`L1-dcache-loads`, e o IPC não passa do teto declarado. É o que separa "o contador
+respondeu" de "o contador mediu" — dois números não-zero, nenhum string de erro, e
+uma razão impossível.
 
 O `pcnt-running` **não** é recusa: com os pares, fração abaixo de 100 é o regime
 esperado onde a PMU tem menos contadores que eventos, e a razão continua correta.

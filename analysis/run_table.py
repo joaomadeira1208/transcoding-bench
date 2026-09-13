@@ -25,9 +25,6 @@ from run_meta import RunMeta
 # Os dez eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
 # a coluna existe mesmo quando o contador falta, e é assim que um evento
 # indisponível numa arquitetura aparece como nulo em vez de sumir do schema.
-#
-# É transcrição do `config/experiment.toml`, e o `test_pmu_events.py` a amarra ao
-# TOML: sem ele, trocar um evento lá produziria esta coluna nula em silêncio.
 PMU_EVENTS = (
     "cycles",
     "instructions",

@@ -60,10 +60,6 @@ numerator = "instructions"
 denominator = "cycles"
 max_ratio = 10.0
 
-# O par de cache nomeia o nível, e é por isso que ele não é `cache-references` /
-# `cache-misses`: esses dois nomes genéricos resolvem para L1D no arm64, para a
-# família LLC na Intel e para o L2 na AMD, e o `cache_miss_rate` passa a comparar
-# três coisas diferentes sem que nada na saída diga isso (ADR-0006).
 [[instrumentation.metric]]
 name = "cache_miss_rate"
 numerator = "L1-dcache-load-misses"

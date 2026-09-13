@@ -313,7 +313,7 @@ pesquisador.
 
 O segundo subcomando prova, antes de haver uma instância faturando por dois dias,
 que `PassRole`, condição de tipo, chave via SSM, hop limit, clone no SHA, build,
-fatia, Masters validados, os dez eventos de PMU dentro do container e o
+fatia, Masters validados, os oito eventos de PMU dentro do container e o
 `PutObject` do encode funcionam **juntos**. Ele não mede nada — conferir que um
 contador abre não é medi-lo —, e é ele que responde à pergunta que custa mais
 caro do que qualquer outra: se cada evento da definição existe **naquela**
@@ -381,7 +381,7 @@ declara — é o que separa "o contador respondeu" de "o contador mediu", e o qu
 teria reprovado o c7a da primeira rodada. A recusa junta **todos** os eventos sem
 medição, não só o primeiro, porque a próxima tentativa custa outra instância.
 
-Passando, a linha lista os dez valores **com o `pcnt-running` de cada um** — a
+Passando, a linha lista os oito valores **com o `pcnt-running` de cada um** — a
 fração do tempo em que aquele contador esteve rodando. Abaixo de 100 **não é
 recusa**: com os pares, é o regime esperado onde a PMU tem menos contadores que
 eventos. É o que o pesquisador lê para saber se o número é contagem ou estimativa,

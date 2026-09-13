@@ -44,8 +44,6 @@ EXPECTED_PAIRS = {
 EXPECTED_PMU_EVENTS = [
     "cycles",
     "instructions",
-    "L1-dcache-loads",
-    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
     "task-clock",
@@ -59,13 +57,11 @@ EXPECTED_PMU_EVENTS = [
 # passa a reportar outra coisa com o mesmo nome.
 EXPECTED_METRIC_PAIRS = {
     "ipc": ("instructions", "cycles"),
-    "cache_miss_rate": ("L1-dcache-load-misses", "L1-dcache-loads"),
     "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
 }
 
 EXPECTED_EVENT_SPEC = (
     "{cycles,instructions},"
-    "{L1-dcache-loads,L1-dcache-load-misses},"
     "{branch-instructions,branch-misses},"
     "task-clock,context-switches,cpu-migrations,page-faults"
 )
@@ -73,8 +69,6 @@ EXPECTED_EVENT_SPEC = (
 EXPECTED_HARDWARE_EVENTS = [
     "cycles",
     "instructions",
-    "L1-dcache-loads",
-    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
 ]
@@ -744,7 +738,7 @@ class TestRejectsIncompleteRecords:
 
 
 class TestRejectsBadInstrumentation:
-    """Os dez eventos são desenho experimental (ADR-0006), não constante de script."""
+    """Os oito eventos são desenho experimental (ADR-0006), não constante de script."""
 
     def test_missing_pmu_events(self, make_raw_config):
         with pytest.raises(ConfigError) as excinfo:
@@ -756,7 +750,7 @@ class TestRejectsBadInstrumentation:
 
     def test_empty_pmu_events(self, make_raw_config):
         # Lista vazia é o pior caso: `perf stat` sem `-e` roda, coleta o conjunto
-        # default de eventos e devolve um JSON plausível — sem os dez que o
+        # default de eventos e devolve um JSON plausível — sem os oito que o
         # artigo reporta.
         with pytest.raises(ConfigError) as excinfo:
             validate_config(make_raw_config(instrumentation=make_instrumentation(pmu_events=[])))
@@ -827,7 +821,7 @@ class TestRejectsBadMetrics:
         assert field in message
 
     def test_missing_metric_table(self, make_raw_config):
-        # Sem grupo nenhum, o `perf` escalona os dez soltos e volta a multiplexar:
+        # Sem grupo nenhum, o `perf` escalona os oito soltos e volta a multiplexar:
         # numerador e denominador medidos em janelas diferentes.
         raw = make_raw_config(instrumentation=make_instrumentation(metric=ABSENT))
 

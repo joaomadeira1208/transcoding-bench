@@ -21,7 +21,7 @@ Pelo mesmo motivo o `time.json` deixa de ser descrito como "`-v` parseado": o `/
 
 `run_id` é um UUID v4 (à prova de retomada do experimento). `scenario_id` legível também persistido em `meta.json` pra debug humano (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`).
 
-**Tabela consolidada (Parquet)**: uma linha por Execução. Campos = cenário (chave composta) + run metadata + agregados de `time` e `perf` + parseados de FFmpeg + derivados (`ipc`, `cache_miss_rate`, `branch_mispredict_rate`, `cpu_pct_avg`; o `cache_miss_rate` é de L1D desde a emenda da ADR-0006). **Time series do pidstat NÃO entram no Parquet** — ficam nos diretórios raw e são consultadas sob demanda quando análise profunda precisa.
+**Tabela consolidada (Parquet)**: uma linha por Execução. Campos = cenário (chave composta) + run metadata + agregados de `time` e `perf` + parseados de FFmpeg + derivados (`ipc`, `cache_miss_rate`, `branch_mispredict_rate`, `cpu_pct_avg` — **Emenda:** sem `cache_miss_rate`: o par de cache saiu, pela ADR-0006). **Time series do pidstat NÃO entram no Parquet** — ficam nos diretórios raw e são consultadas sob demanda quando análise profunda precisa.
 
 **Retenção dos outputs `.mkv` pós-Pass de qualidade** (ADR-0005):
 - Manter apenas: (i) amostra metodológica fixa (~6–10), (ii) outputs de grupos hash-divergentes, (iii) reps usadas no Pass.
@@ -54,7 +54,9 @@ Cada evento vira duas colunas — o valor e o `pcnt-running` do contador (ADR-00
 `L1-dcache-loads` é `perf_l1_dcache_loads` e `perf_l1_dcache_loads_pcnt_running`.
 
 A regra da caixa não estava escrita porque nenhum dos dez eventos tinha maiúscula
-até o par de cache passar a nomear o nível. Sem ela o schema teria uma coluna
+até o par de cache passar a nomear o nível. O par saiu em seguida (ADR-0006), e
+nenhum dos oito eventos tem maiúscula de novo; a regra fica, porque foi escrita
+para o próximo que tiver. Sem ela o schema teria uma coluna
 `perf_L1_dcache_loads` no meio de um Parquet inteiramente minúsculo, e um `SELECT`
 escrito com o resto do schema em mente voltaria vazio em qualquer engine que
 diferencie caixa.

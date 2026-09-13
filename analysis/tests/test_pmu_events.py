@@ -35,7 +35,7 @@ class TestTheEventsTheAnalysisReads:
 
     def test_every_ratio_divides_the_pair_the_metric_declares(self, config: str) -> None:
         # Pelos dois nomes, e não por eles pertencerem ao `pmu_events`: repontar
-        # o `cache_miss_rate` para outro par que já esteja na lista deixaria a
+        # o `branch_mispredict_rate` para outro par que já esteja na lista deixaria a
         # análise dividindo o par antigo com tudo verde.
         assert operands(config) == METRIC_OPERANDS
 

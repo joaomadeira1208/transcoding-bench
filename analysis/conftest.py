@@ -91,13 +91,11 @@ _VALID_TIME: dict[str, Any] = {
     "exit_status": 0,
 }
 
-# Os dez eventos da ADR-0006, com valores que fazem os derivados sair redondos:
-# IPC 1.5, cache miss rate 0.25, branch mispredict rate 0.02.
+# Os oito eventos da ADR-0006, com valores que fazem os derivados sair redondos:
+# IPC 1.5, branch mispredict rate 0.02.
 _VALID_COUNTERS: dict[str, Any] = {
     "cycles": 4_000_000_000,
     "instructions": 6_000_000_000,
-    "L1-dcache-loads": 200_000_000,
-    "L1-dcache-load-misses": 50_000_000,
     "branch-instructions": 800_000_000,
     "branch-misses": 16_000_000,
     "task-clock": 312450.0,

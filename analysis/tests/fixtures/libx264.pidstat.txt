@@ -1,23 +1,11 @@
-Linux 6.8.0-117-generic (9f82dd3fcad5) 	09/13/26 	_aarch64_	(2 CPU)
+Linux 6.8.0-117-generic (06ea32899bf5) 	09/13/26 	_aarch64_	(2 CPU)
 
 # Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:52:56        0        31   29.41   92.16    0.00    0.00  121.57     0  34951.96      0.00  977452  202052  10.08  ffmpeg
+20:49:51        0        31  133.00   37.00    0.00    0.00  170.00     0  89158.00      0.00 1172168  426552  21.27  ffmpeg
 
 # Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:52:57        0        31   35.00   84.00    0.00    0.00  119.00     0  17998.00      0.00 1052164  273736  13.65  ffmpeg
+20:49:52        0        31  186.14    4.95    0.00    0.00  191.09     0   3811.88      0.00 1173484  441912  22.04  ffmpeg
 
 # Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:52:58        0        31   45.00   95.00    0.00    0.00  140.00     0  14986.00      0.00 1113292  333640  16.64  ffmpeg
-
-# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:52:59        0        31   73.00   90.00    0.00    1.00  163.00     1  21303.00      0.00 1171984  418760  20.88  ffmpeg
-
-# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:53:00        0        31  169.00   14.00    0.00    0.00  183.00     1   5314.00      0.00 1172860  440008  21.94  ffmpeg
-
-# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:53:01        0        31  148.51    0.00    0.00    0.00  148.51     1    510.89      0.00 1173244  441332  22.01  ffmpeg
-
-# Time        UID       PID    %usr %system  %guest   %wait    %CPU   CPU  minflt/s  majflt/s     VSZ     RSS   %MEM  Command
-18:53:02        0        31  189.00    0.00    0.00    0.00  189.00     1    201.00      0.00 1149648  425924  21.24  ffmpeg
+20:49:53        0        31  181.00    3.00    0.00    0.00  184.00     0    214.00      0.00 1149648  427412  21.31  ffmpeg
 

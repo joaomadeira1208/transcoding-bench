@@ -168,7 +168,7 @@ class TestThePerfCounters:
     @pytest.mark.parametrize("event", HARDWARE_EVENTS)
     def test_a_zeroed_hardware_counter_is_refused_naming_the_event(self, event):
         # O modo de falha do c7i, e o pior dos três: zero é número válido, passa
-        # por qualquer guarda de string e vira `cache_miss_rate` nulo para uma
+        # por qualquer guarda de string e vira uma razão nula para uma
         # arquitetura inteira, descoberto só no `consolidate.py`.
         values = every_event_counted() | {event: "0.000000"}
 

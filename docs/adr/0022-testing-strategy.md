@@ -19,7 +19,7 @@ Inventário sob esse critério:
 | Filtro `warmup == false` | `orchestrator/`, `analysis/` | Warm-up contado como Replicação → média enviesada pra cima (ADR-0003) |
 | Agrupamento do triage (270 grupos × 3) | `orchestrator/` | Grupo mal formado → comparação de hash cross-arch inválida |
 | Modelo pydantic (estrito) + `schema_version` | `analysis/` | `meta.json` de forma antiga passando batido, ou tipo divergente sendo coagido em silêncio (ADR-0019) |
-| Derivados do `consolidate.py` (IPC, cache miss rate, branch mispredict rate) | `analysis/` | Divisão virando `NaN`/`ZeroDivisionError` calado |
+| Derivados do `consolidate.py` (IPC, cache miss rate, branch mispredict rate — **Emenda:** sem cache miss rate, pela ADR-0006) | `analysis/` | Divisão virando `NaN`/`ZeroDivisionError` calado |
 | Parsing da saída da AWS CLI | `orchestrator/` | Listagem de `runs/` mal parseada → `resume.py` decide errado |
 | Argv do FFmpeg (via smoke, ver abaixo) | `smoke/` | Parâmetro de encode perdido ou deformado na cadeia toml → `jq` → argv → vídeo válido, experimento inválido |
 

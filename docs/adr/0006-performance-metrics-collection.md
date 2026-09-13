@@ -1,8 +1,8 @@
 # Coleta de métricas de desempenho durante a Execução
 
-Cada Execução é instrumentada com **quatro fontes em paralelo**: `/usr/bin/time -v` envolvendo o processo FFmpeg (wall/user/sys time, max RSS, page faults, I/O); `perf stat -j` envolvendo o processo (hardware counters via PMU: `cycles, instructions, cache-references, cache-misses, branch-instructions, branch-misses, task-clock, context-switches, cpu-migrations, page-faults` — **Emenda:** o par de cache passou a ser `L1-dcache-loads, L1-dcache-load-misses`, pela última seção deste ADR); `pidstat -h -r -u -p $PID 1` rodando em paralelo (time series de CPU% e RSS a 1 Hz); FFmpeg's own stderr `-stats` parseado (frames encoded, fps reportado, output bitrate).
+Cada Execução é instrumentada com **quatro fontes em paralelo**: `/usr/bin/time -v` envolvendo o processo FFmpeg (wall/user/sys time, max RSS, page faults, I/O); `perf stat -j` envolvendo o processo (hardware counters via PMU: `cycles, instructions, cache-references, cache-misses, branch-instructions, branch-misses, task-clock, context-switches, cpu-migrations, page-faults` — **Emenda:** o par de cache saiu, e são oito eventos: `cycles, instructions, branch-instructions, branch-misses, task-clock, context-switches, cpu-migrations, page-faults`, pela última seção deste ADR); `pidstat -h -r -u -p $PID 1` rodando em paralelo (time series de CPU% e RSS a 1 Hz); FFmpeg's own stderr `-stats` parseado (frames encoded, fps reportado, output bitrate).
 
-**Métricas-chave derivadas:** **IPC** (instructions/cycles), **cache miss rate** (cache-misses/cache-references; **Emenda:** L1-dcache-load-misses/L1-dcache-loads), **branch mispredict rate** (branch-misses/branch-instructions). Esses três são os principais indicadores arquiteturais — eficiência ALU, memory hierarchy e branch predictor — exatamente onde Neoverse-V1 (Graviton 3), Sapphire Rapids (c7i) e EPYC Genoa (c7a) divergem microarquiteturalmente.
+**Métricas-chave derivadas:** **IPC** (instructions/cycles), **cache miss rate** (cache-misses/cache-references; **Emenda:** saiu das métricas-chave, pela última seção deste ADR), **branch mispredict rate** (branch-misses/branch-instructions). Esses três são os principais indicadores arquiteturais — eficiência ALU, memory hierarchy e branch predictor — exatamente onde Neoverse-V1 (Graviton 3), Sapphire Rapids (c7i) e EPYC Genoa (c7a) divergem microarquiteturalmente.
 
 **Power/energia é skip explícito.** AWS Graviton não expõe contadores RAPL/MSR de energia ao guest EC2, impedindo medição cross-arch consistente. Custo entra como proxy no pós-experimento (`instance $/hour × wall_time`), não como métrica por Execução.
 
@@ -136,7 +136,7 @@ antes do piloto, entre trocar o par por eventos que contem nas três (mesmo nív
 cache) ou declarar por instância o evento indisponível — nunca uma exceção na
 guarda.
 
-## Emenda: o par de cache nomeia o nível, porque o nome genérico não nomeia nenhum
+## Emenda: o par de cache sai, porque nenhum par conta o mesmo nível nas três
 
 O `preflight` com os pares rodou nos três tipos contra `40eabee`, com um probe que
 encoda 5 s de um Master real. **Ele reprovou o c7i e aprovou o c7g e o c7a**, e
@@ -202,81 +202,147 @@ O zero do c7i é um fato à parte e mais forte do que o `<not counted>` da rodad
 6,41 s inteiros de CPU durante um encode que aposentou 32 bilhões de instruções, e
 contou zero. O evento abre, roda e não conta.
 
+### O candidato: um par que nomeia o nível
+
+A primeira decisão foi trocar o par por `L1-dcache-loads` /
+`L1-dcache-load-misses`, da abstração `PERF_TYPE_HW_CACHE` do `perf`, em que o
+nível está no nome em vez de ficar por conta do driver de PMU. O teste de
+aceitação **não** era o evento ter contado, e sim `L1-dcache-loads / instructions`
+cair na mesma faixa nas três — a de L1D, ~0,2 a 0,4 —, a mesma medida que fechou o
+defeito 6. Nada disso é decidível no Mac (ADR-0022), então o candidato foi
+declarado no TOML e o `preflight` rodou nos três tipos contra `da9b157`, c7i
+primeiro, o mesmo trabalho da rodada 2:
+
+| | c7g (Neoverse-V1) | c7i (Sapphire Rapids) | c7a (Genoa) |
+|---|---|---|---|
+| instância | `i-0ef3c6647baf40245` | `i-0b7f3b9cb36eec847` | `i-016a56da9f2cf4164` |
+| **veredito do passo** | **passou** | **passou** | **falhou** |
+| `pcnt-running` (hardware) | 33 % | 100 % | 66 % |
+| `cycles` | 13.595.719.511 *(est.)* | 21.869.294.137 | 13.773.153.004 *(est.)* |
+| `instructions` | 44.659.490.841 *(est.)* | 32.081.190.804 | 39.316.368.297 *(est.)* |
+| `L1-dcache-loads` | 15.333.812.319 *(est.)* | 8.780.555.335 | **0** |
+| `L1-dcache-load-misses` | 259.836.366 *(est.)* | 263.624.818 | **0** |
+| `branch-instructions` | 3.575.174.643 *(est.)* | 2.935.644.407 | 3.644.849.725 *(est.)* |
+| `branch-misses` | 26.409.636 *(est.)* | 21.690.210 | 41.254.686 *(est.)* |
+
+| | c7g | c7i | c7a |
+|---|---|---|---|
+| `L1-dcache-loads` / instrução | 0,343 | 0,274 | **0** |
+| L1D miss rate | 1,69 % | 3,00 % | — |
+| IPC | 3,285 | 1,467 | 2,855 |
+| branch mispredict rate | 0,739 % | 0,739 % | 1,132 % |
+
+**No c7g e no c7i o candidato funcionou como previsto.** Os dois estão na faixa de
+L1D, a Intel abaixo por contar só loads, e o c7g repetiu a rodada 2 na segunda
+casa — `L1-dcache-loads` resolve para o mesmo `L1D_CACHE` que `cache-references`
+já contava. IPC e branch mispredict repetiram a rodada 2 nas três, dentro da
+variação entre corridas.
+
+**No c7a o candidato zerou, dos dois lados.** O grupo foi escalonado (66 % do
+tempo, o mesmo `time_running` nos dois membros) e os dois contadores responderam
+zero — o modo de falha do c7i na rodada 2, no outro guest. O lado dos loads era o
+risco previsto (`0x0040`, ausente das tabelas do `amdzen4`). O lado do miss **não**
+era: `0xc860` é o evento `0x60`, e `0xff60` contou 1,45 bilhão no mesmo guest na
+rodada 2. A diferença é o umask — `0xff` contou, `0xc8` não —, o que diz que a
+vPMU do c7a filtra por par evento/umask, e não por evento. Qualquer candidato
+nativo é uma corrida sem resultado previsível.
+
 ### A decisão
 
-**O par de cache passa a ser `L1-dcache-loads` / `L1-dcache-load-misses`**, da
-abstração `PERF_TYPE_HW_CACHE` do `perf`, em que o nível está no nome em vez de
-ficar por conta do driver de PMU. O `config/experiment.toml` e o `config/pilot.toml`
-os declaram no `pmu_events` e no par do `cache_miss_rate`; o `analysis/run_table.py`
-os lê; as colunas do Parquet passam a ser `perf_l1_dcache_loads` e
-`perf_l1_dcache_load_misses`.
+**O cache miss rate sai das métricas-chave, e o par de cache sai do `pmu_events`.**
+Este ADR passa a ter **duas** métricas-chave, IPC e branch mispredict rate, sobre
+oito eventos: `{cycles, instructions}`, `{branch-instructions, branch-misses}` e os
+quatro de software. O `config/experiment.toml` e o `config/pilot.toml` deixam de
+declarar o par e a métrica; o `analysis/run_table.py` deixa de transcrevê-los e o
+Parquet perde as colunas `perf_l1_dcache_*` e `cache_miss_rate` (ADR-0007). A
+guarda não muda: os três modos de falha e as duas plausibilidades continuam valendo
+igual nas três, sem dispensa por arquitetura.
 
-O teste de aceitação **não** foi o evento ter contado, e sim
-`L1-dcache-loads / instructions` cair na mesma faixa nas três — a de L1D, ~0,2 a
-0,4. É a mesma medida que fechou o defeito 6, aplicada ao candidato.
+Por que sair, e não insistir:
 
-**O teste ainda não rodou, e esta parte da emenda está aberta.** Nada dele é
-decidível no Mac: não há PMU exposta ao Docker (ADR-0022), e o que se quer saber é
-o que cada guest conta. O que fecha esta seção são três corridas do `preflight`
-contra o SHA desta decisão — c7i primeiro, que é quem reprova hoje; c7g e c7a
-depois, os dois, sempre — e o número que entra aqui é `L1-dcache-loads /
-instructions` nas três.
+- **Não há nível de cache que as três vPMUs contem.** LLC está fora no c7i, L1D
+  está fora no c7a, e o filtro do c7a é por evento e umask. L2 nunca foi testado e
+  seria a mesma aposta.
+- **Mesmo um par que contasse não seria a mesma grandeza.** Loads retirados na
+  Intel, loads e stores no arm, loads despachados na AMD. O artigo teria uma coluna
+  com um nome e três definições — o defeito 6 com outra roupa.
+- **Miss em L1D explica pouco sozinho.** O que custa tempo é ciclo parado esperando
+  memória, e ligar miss a stall exige eventos ainda menos portáveis. O IPC já é o
+  resultado líquido da hierarquia de memória: um guest que sofre mais com cache
+  neste workload retira menos instruções por ciclo, e esse número existe nas três,
+  medido em grupo e validado.
+- **A variável dependente é tempo, throughput e custo (ADR-0005).** A PMU é
+  explicação arquitetural, e duas das três explicações sobrevivem — as duas que
+  são a mesma grandeza em qualquer ISA.
 
-**O que refuta a decisão, e para onde ela cai.** Uma das três fora da faixa por uma
-ordem de grandeza é o defeito 6 de novo com outro nome, e a escolha passa a ser
-entre declarar o evento nativo por arquitetura no TOML e tirar o cache das
-métricas-chave — as duas opções abaixo, nesta ordem. Um evento que zere é a mesma
-conversa: a guarda o recusa, sem exceção e sem dispensa por arquitetura.
+O que fica no lugar da hierarquia de memória: o IPC, mais o que já é portável e já
+é coletado — RSS máximo e page faults do `time`, `page-faults` do `perf`, e a série
+do `pidstat`. E um achado para o artigo: as vPMUs da AWS filtram eventos de cache
+de forma diferente por família de instância, e isso é resultado de
+reprodutibilidade, não rodapé.
+
+**Um rodapé que o artigo deve ao IPC.** O x86 corre o caminho AVX-512 e retira
+menos instruções, mais largas; o arm corre NEON de 128 bits e retira mais. O IPC de
+1,47 do c7i contra 3,28 do c7g não diz que um é pior — diz que a contagem de
+instruções não é a mesma moeda entre ISAs. O IPC é contexto; a comparação é em
+tempo e custo.
 
 #### Opções rejeitadas
 
-- **Declarar o evento nativo por arquitetura no TOML** (`l1d_cache` /
-  `l1d_cache_refill` no arm64, os equivalentes no x86). Mantém o nível fixo e
-  **explícito**, e é a única opção que cumpre por construção a rastreabilidade que
-  esta ADR promete, sem depender de cruzar a versão do kernel com o fonte. Custa a
-  neutralidade de arquitetura da declaração: o `event_spec` passaria a ser função da
-  instância além da métrica, e a spec do Experimento deixaria de ser um arquivo que
-  descreve o Experimento para virar um que descreve três. Pesou a neutralidade, e o
-  preço — registrar aqui os três eventos nativos e a versão do kernel — é pago uma
-  vez nesta emenda. Continua sendo o fallback se o kernel da AMI mudar o mapa.
-- **Tirar o cache das métricas-chave.** Honesto e barato: a variável dependente do
-  Experimento é tempo/throughput/custo (ADR-0005), a PMU é explicação arquitetural,
-  e duas das três explicações sobrevivem sem o par de cache. É o fallback se nenhum
-  par contar nas três na mesma faixa. Rejeitada porque a hierarquia de memória é
-  exatamente onde Neoverse-V1, Sapphire Rapids e Genoa divergem, e um par que
-  nomeia o nível resolve o problema em vez de contorná-lo.
-- **Declarar o evento indisponível por instância.** Sobrariam c7g (L1D) e c7a (L2),
-  que também não se comparam: seria trocar uma métrica quebrada nas três por uma
-  quebrada em duas, com a aparência de estar consertada.
-
-**Sem dispensa por arquitetura, e sem exceção na guarda.** Os três modos de falha
-e as três plausibilidades continuam valendo igual nas três. A decisão foi de
-desenho experimental e o lugar dela é aqui.
+- **Trocar o par por um que nomeie o nível** (`L1-dcache-loads` /
+  `L1-dcache-load-misses`). Foi a primeira decisão desta emenda, e foi **testada**:
+  passou no c7g e no c7i, na faixa prevista, e zerou no c7a. Rejeitada pelo número.
+- **Declarar o evento nativo por arquitetura no TOML.** Mantém o nível fixo e
+  explícito, e é a única opção que cumpre por construção a rastreabilidade que esta
+  ADR promete. Custa a neutralidade da declaração (o `event_spec` vira função da
+  instância), colunas do Parquet com nome diferente por arquitetura, e, depois do
+  zero no `0xc8`, uma corrida de ~22 min por candidato sem forma de prever o
+  resultado — para chegar a um par que ainda compararia três definições de "load".
+  Continua sendo o caminho se um dia houver um par que conte nas três e uma
+  pergunta que precise dele.
+- **Declarar o evento indisponível por instância.** Sobrariam c7g e c7i, que agora
+  contam o mesmo nível — mas uma métrica-chave em duas de três arquiteturas, sem
+  exceção na guarda, exige o mesmo `event_spec` por instância da opção anterior, e
+  o artigo compararia duas máquinas numa métrica e três nas outras. É a aparência
+  de conserto que a opção anterior custa, sem o dado que ela daria.
 
 ### O `-vv` não registra o evento nativo
 
 A emenda anterior afirmou que o probe com `-vv` "despeja no stderr o
 `perf_event_attr` de cada evento com o `config` nativo que o nome genérico
 resolveu". **Isso não se cumpre.** O que o `perf.stderr.txt` das três arquiteturas
-traz para `cache-references` é `config 0x2 (PERF_COUNT_HW_CACHE_REFERENCES)` — o
-nome genérico, idêntico nas três. A resolução para o evento nativo acontece dentro
-do driver do kernel, **depois** da syscall; o `perf_event_attr` que o `-vv` despeja
-é o de antes.
+trouxe para `cache-references` foi `config 0x2 (PERF_COUNT_HW_CACHE_REFERENCES)`,
+e para `L1-dcache-loads` foi `PERF_TYPE_HW_CACHE` com
+`PERF_COUNT_HW_CACHE_L1D | OP_READ | RESULT_ACCESS` — o nome genérico, idêntico nas
+três. A resolução para o evento nativo acontece dentro do driver do kernel,
+**depois** da syscall; o `perf_event_attr` que o `-vv` despeja é o de antes.
 
 O `-vv` continua no probe, e continua provando algo: é onde se lê o `type` e o
-`config` que o `perf` pediu, e com o par novo isso passa a ser
-`PERF_TYPE_HW_CACHE` com o nível L1D — a prova de que o nível está no nome. O que
-ele não dá é o evento nativo, e a rastreabilidade que o artigo precisa vem daqui:
-da tabela abaixo, lida do fonte do kernel, mais a versão do kernel da AMI.
+`config` que o `perf` pediu, e onde se confere que cada par abriu como grupo
+(`group_fd` apontando para o líder). O que ele não dá é o evento nativo, e a
+rastreabilidade que o artigo precisa vem daqui: da tabela abaixo, lida do fonte do
+kernel, mais a versão do kernel da AMI.
 
 ### O evento nativo, por arquitetura
 
 Tabelas de mapeamento do kernel Linux (`drivers/perf/arm_pmuv3.c`,
 `arch/x86/events/intel/core.c`, `arch/x86/events/amd/core.c`), lidas antes de
 gastar instância. Os mesmos valores em v6.8 e em v6.14, de modo que a leitura não
-depende de qual das duas séries a AMI carrega — o `uname -r` exato das duas AMIs
-(`ami-025d99823a4caad37` para x86_64, `ami-0246d714afcc1d494` para arm64) entra
-aqui junto com o resultado das corridas.
+depende de qual das duas séries a AMI carrega. O `uname -r` das duas AMIs
+(`ami-025d99823a4caad37` para x86_64, `ami-0246d714afcc1d494` para arm64): *a
+preencher a partir da instância do Orquestrador e do log do c7g*.
+
+O par que ficou, e o que cada nome resolve — os quatro são eventos arquiteturais
+nas duas ISAs x86 e eventos comuns do PMUv3 no arm64, e contaram nas três nas
+rodadas 2 e 3:
+
+| | `cycles` | `instructions` | `branch-instructions` | `branch-misses` |
+|---|---|---|---|---|
+| arm64 (`armv8_pmuv3_perf_map`) | `CPU_CYCLES` `0x0011` | `INST_RETIRED` `0x0008` | `PC_WRITE_RETIRED` `0x000c` | `BR_MIS_PRED` `0x0010` |
+| Sapphire Rapids (`intel_perfmon_event_map`) | `CPU_CLK_UNHALTED.THREAD` `0x003c` | `INST_RETIRED.ANY` `0x00c0` | `BR_INST_RETIRED.ALL_BRANCHES` `0x00c4` | `BR_MISP_RETIRED.ALL_BRANCHES` `0x00c5` |
+| Genoa (`amd_f17h_perfmon_event_map`) | `0x0076` | `0x00c0` | `0x00c2` | `0x00c3` |
+
+O candidato testado e rejeitado, para o registro de por que zerou onde zerou:
 
 | | `L1-dcache-loads` | `L1-dcache-load-misses` |
 |---|---|---|
@@ -284,51 +350,46 @@ aqui junto com o resultado das corridas.
 | Sapphire Rapids (`glc_hw_cache_event_ids`) | `MEM_INST_RETIRED.ALL_LOADS` `0x81d0` — só loads, retirados | `L2_RQSTS.ALL_DEMAND_DATA_RD` `0xe124` |
 | Genoa (`amd_hw_cache_event_ids_f17h`) | `0x0040` — acessos ao DC, loads e stores | `0xc860` — requisições de L2 por miss do DC |
 
-O nível vai para o nome; a **operação** e a definição de miss continuam por conta
-do driver, e é por isso que o teste foi a faixa e não a igualdade. É de esperar que
-a Intel fique abaixo das outras duas na taxa de referência, por contar só loads.
+E o par original, pelo mesmo motivo: `cache-references` era `L1D_CACHE` `0x0004` no
+arm64, `LONGEST_LAT_CACHE.REFERENCE` `0x4f2e` na Intel e `l2_request_g1.all`
+`0xff60` na AMD. É a tabela do defeito 6 lida do outro lado.
 
-Para comparação, o par que saiu: `cache-references` era `L1D_CACHE` `0x0004` no
-arm64 — o mesmo evento que `L1-dcache-loads` —, `LONGEST_LAT_CACHE.REFERENCE`
-`0x4f2e` na Intel e `l2_request_g1.all` `0xff60` na AMD. É a tabela do defeito 6
-lida do outro lado.
+**Duas notas que custaram uma leitura de fonte.** A primeira: o `0x0040` da AMD é
+da era do Zen 1 — `ls_dc_accesses` está nas tabelas de eventos do `amdzen1`, do
+`amdzen2` e do `amdzen3` e **não está na do `amdzen4`**, que é o Genoa; o kernel o
+programa de qualquer forma, porque `amd_hw_cache_event_ids_f17h` vale para toda
+família ≥ 0x17. A fonte foram as tabelas JSON do `perf`
+(`tools/perf/pmu-events/arch/x86/amdzen*/`), e o zero da rodada 3 confirmou o que
+elas diziam. A segunda: `MEM_INST_RETIRED.ALL_LOADS` **não** puxa evento auxiliar —
+o `PMU_FL_MEM_LOADS_AUX` da Sapphire Rapids vale só para o
+`0xcd`/`MEM_TRANS_RETIRED.LOAD_LATENCY` —, e a rodada 3 confirmou o grupo de dois
+contadores no c7i.
 
-**Duas notas que custaram uma leitura de fonte e valem a próxima.** A primeira é
-que o `0x0040` da AMD é da era do Zen 1: `ls_dc_accesses` está nas tabelas de
-eventos do `amdzen1`, do `amdzen2` e do `amdzen3` e **não está na do `amdzen4`**,
-que é o Genoa. O kernel o programa de qualquer forma, porque
-`amd_hw_cache_event_ids_f17h` vale para toda família ≥ 0x17. A fonte foram as
-tabelas JSON do `perf` (`tools/perf/pmu-events/arch/x86/amdzen*/`), e não o PPR
-da família 19h modelo 11h que o ticket nomeou: as tabelas são geradas a partir do
-PPR, mas a leitura direta dele fica em aberto, e o que decide é a corrida no c7a.
-A segunda é que o
-`MEM_INST_RETIRED.ALL_LOADS` **não** puxa evento auxiliar: o `PMU_FL_MEM_LOADS_AUX`
-da Sapphire Rapids vale só para o `0xcd`/`MEM_TRANS_RETIRED.LOAD_LATENCY`, e o
-grupo continua sendo dois contadores.
-
-### A hipótese sobre a vPMU do c7i
+### A hipótese sobre a vPMU do c7i, e o que a rodada 3 disse das três
 
 Os seis eventos genéricos de hardware são todos **arquiteturais** na Intel
-(CPUID leaf 0xA), e o guest do c7i contou quatro e zerou os dois de LLC. Isso
-mostra que a vPMU filtra **por evento**, e não por classe. Daí a hipótese com que
-esta decisão foi tomada: *só a família LLC está fora, e o resto da vPMU está
-inteiro*. Ela não estava provada — nenhum evento não-arquitetural tinha sido
-exercitado, e é exatamente o que `MEM_INST_RETIRED.ALL_LOADS` e
-`L2_RQSTS.ALL_DEMAND_DATA_RD` são.
+(CPUID leaf 0xA), e o guest do c7i contou quatro e zerou os dois de LLC na rodada
+2. A hipótese com que o candidato foi escolhido era *só a família LLC está fora, e
+o resto da vPMU está inteiro*; nenhum evento não-arquitetural tinha sido
+exercitado. **A rodada 3 a confirmou para os dois eventos que importavam:**
+`MEM_INST_RETIRED.ALL_LOADS` e `L2_RQSTS.ALL_DEMAND_DATA_RD` contaram a 100 % no
+c7i, com valores plausíveis.
 
-**A hipótese continua hipótese até a corrida do c7i.** É ela que a testa, e por
-isso o c7i vai primeiro: se `MEM_INST_RETIRED.ALL_LOADS` e
-`L2_RQSTS.ALL_DEMAND_DATA_RD` contarem, a hipótese se confirma e a vPMU filtra
-mesmo só a família LLC; se zerarem, ela se refuta e o que está fora daquele guest é
-maior do que a LLC — o que muda a resposta, porque a opção de declarar o evento
-nativo por arquitetura depende da mesma vPMU.
+O que as três rodadas dizem de cada vPMU, e que o artigo pode registrar:
+
+- **c7g**: contou tudo o que se pediu, genérico e de cache, com o orçamento de um
+  par por vez (33 %).
+- **c7i**: conta eventos arquiteturais e não-arquiteturais de core; zera a família
+  `LONGEST_LAT_CACHE`. Orçamento de três pares (100 %).
+- **c7a**: conta os arquiteturais e `0xff60`; zera `0x0040` e `0xc860`. O filtro é
+  por evento **e** umask. Orçamento de dois pares (66 %).
 
 ### A lista de eventos da análise
 
-O `analysis/run_table.py` transcreve os dez eventos porque o `meta.json` não os
-carrega, e lê o par de cache por nome. Trocar o par no TOML sem tocar nele
-produziria a coluna `cache_miss_rate` nula **em silêncio** — o sintoma que esta ADR
-mais teme, agora do lado da análise. A transcrição fica, e o
+O `analysis/run_table.py` transcreve os oito eventos porque o `meta.json` não os
+carrega, e lê o par de cada razão por nome. Trocar um par no TOML sem tocar nele
+produziria a coluna da razão nula **em silêncio** — o sintoma que esta ADR mais
+teme, agora do lado da análise. A transcrição fica, e o
 `analysis/tests/test_pmu_events.py` a amarra ao `config/experiment.toml` e ao
 `config/pilot.toml`: a lista, a ordem e o par de cada métrica. Ler o TOML em tempo
 de execução foi rejeitado porque o `consolidate.py` recebe um diretório `runs/` e

@@ -61,8 +61,6 @@ EXPECTED_PAIRS = {
 EXPECTED_PMU_EVENTS = [
     "cycles",
     "instructions",
-    "L1-dcache-loads",
-    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
     "task-clock",

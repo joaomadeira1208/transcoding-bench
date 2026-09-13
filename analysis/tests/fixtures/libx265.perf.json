@@ -1,10 +1,8 @@
 {"counter-value" : "<not supported>", "unit" : "", "event" : "cycles", "event-runtime" : 0, "pcnt-running" : 100.00, "metric-value" : "0.000000", "metric-unit" : ""}
 {"counter-value" : "<not supported>", "unit" : "", "event" : "instructions", "event-runtime" : 0, "pcnt-running" : 100.00, "metric-value" : "0.000000", "metric-unit" : ""}
-{"counter-value" : "<not supported>", "unit" : "", "event" : "L1-dcache-loads", "event-runtime" : 0, "pcnt-running" : 100.00, "metric-value" : "0.000000", "metric-unit" : ""}
-{"counter-value" : "<not supported>", "unit" : "", "event" : "L1-dcache-load-misses", "event-runtime" : 0, "pcnt-running" : 100.00, "metric-value" : "0.000000", "metric-unit" : ""}
 {"counter-value" : "<not supported>", "unit" : "", "event" : "branch-instructions", "event-runtime" : 0, "pcnt-running" : 100.00, "metric-value" : "0.000000", "metric-unit" : ""}
 {"counter-value" : "<not supported>", "unit" : "", "event" : "branch-misses", "event-runtime" : 0, "pcnt-running" : 100.00, "metric-value" : "0.000000", "metric-unit" : ""}
-{"counter-value" : "14781.332651", "unit" : "msec", "event" : "task-clock", "event-runtime" : 14781332651, "pcnt-running" : 100.00, "metric-value" : "1.834907", "metric-unit" : "CPUs utilized"}
-{"counter-value" : "4455.000000", "unit" : "", "event" : "context-switches", "event-runtime" : 14781332651, "pcnt-running" : 100.00, "metric-value" : "301.393664", "metric-unit" : "/sec"}
-{"counter-value" : "214.000000", "unit" : "", "event" : "cpu-migrations", "event-runtime" : 14781332651, "pcnt-running" : 100.00, "metric-value" : "14.477720", "metric-unit" : "/sec"}
-{"counter-value" : "111264.000000", "unit" : "", "event" : "page-faults", "event-runtime" : 14781332651, "pcnt-running" : 100.00, "metric-value" : "7.527332", "metric-unit" : "K/sec"}
+{"counter-value" : "13226.558966", "unit" : "msec", "event" : "task-clock", "event-runtime" : 13226558966, "pcnt-running" : 100.00, "metric-value" : "1.867216", "metric-unit" : "CPUs utilized"}
+{"counter-value" : "4282.000000", "unit" : "", "event" : "context-switches", "event-runtime" : 13226558966, "pcnt-running" : 100.00, "metric-value" : "323.742555", "metric-unit" : "/sec"}
+{"counter-value" : "216.000000", "unit" : "", "event" : "cpu-migrations", "event-runtime" : 13226558966, "pcnt-running" : 100.00, "metric-value" : "16.330778", "metric-unit" : "/sec"}
+{"counter-value" : "111266.000000", "unit" : "", "event" : "page-faults", "event-runtime" : 13226558966, "pcnt-running" : 100.00, "metric-value" : "8.412316", "metric-unit" : "K/sec"}

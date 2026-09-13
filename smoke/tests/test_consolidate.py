@@ -101,9 +101,8 @@ class TestParsedArtifacts:
         assert table.column("ffmpeg_fps").to_pylist() == [24.0] * 5
         assert table.column("ffmpeg_bitrate_kbps").to_pylist() == [2021.4] * 5
 
-    def test_the_four_derived_metrics(self, table):
+    def test_the_three_derived_metrics(self, table):
         assert table.column("ipc").to_pylist() == [1.0] * 5
-        assert table.column("cache_miss_rate").to_pylist() == [1.0] * 5
         assert table.column("branch_mispredict_rate").to_pylist() == [1.0] * 5
         assert table.column("cpu_pct_avg").to_pylist() == [98.0] * 5
 

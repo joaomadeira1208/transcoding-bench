@@ -22,14 +22,12 @@ from run_artifacts import (
 )
 from run_meta import RunMeta
 
-# Os dez eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
+# Os oito eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
 # a coluna existe mesmo quando o contador falta, e é assim que um evento
 # indisponível numa arquitetura aparece como nulo em vez de sumir do schema.
 PMU_EVENTS = (
     "cycles",
     "instructions",
-    "L1-dcache-loads",
-    "L1-dcache-load-misses",
     "branch-instructions",
     "branch-misses",
     "task-clock",
@@ -40,7 +38,6 @@ PMU_EVENTS = (
 
 METRIC_OPERANDS: dict[str, tuple[str, str]] = {
     "ipc": ("instructions", "cycles"),
-    "cache_miss_rate": ("L1-dcache-load-misses", "L1-dcache-loads"),
     "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
 }
 

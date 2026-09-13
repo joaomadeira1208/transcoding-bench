@@ -93,11 +93,10 @@ class TestSelection:
 
 
 class TestDerived:
-    def test_the_four_derived_columns(self):
+    def test_the_three_derived_columns(self):
         row = single()
 
         assert row["ipc"] == 1.5
-        assert row["cache_miss_rate"] == 0.25
         assert row["branch_mispredict_rate"] == 0.02
         assert row["cpu_pct_avg"] == 96.0
 

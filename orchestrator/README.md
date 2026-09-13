@@ -22,6 +22,35 @@ decide, e não o arquivo inteiro: `schema_version`, `scenario_id`, `warmup`,
 retomada, que desempata a dedup pelo `run_id` e compara o `commit` com o
 `--exclude-commit`.
 
+O `status_check.py` é o lado leitor do contrato de `status/` que o
+`encode/README.md` documenta campo a campo: `check_done_marker` e
+`check_progress` recebem o JSON já parseado e o `instance_id` da instância que
+este lançamento subiu, conferem tipo exato em cada campo e devolvem o registro
+ou `None`. `None` é "de outra instância", e é um resultado: numa retomada os
+objetos da tentativa anterior continuam no bucket, porque o `DeleteObject` da
+ADR-0016 não alcança `status/`, e é a identidade que os torna inertes — presença
+não é sinal. Campo ausente ou de tipo errado é recusado nomeando o campo, e
+recusado **antes** da comparação de identidade: o `instance_id` pelo qual se
+compararia é um dos campos a conferir.
+
+O `progress_line` é a linha por arquitetura que o `run` e o `watch` imprimem a
+cada poll, renderizada do objeto mais o **total de runs da fatia**, que é
+argumento e nunca sai do objeto — a Instância sabe quantos runs fez, e só o
+Orquestrador sabe quantos ela recebeu, porque foi ele quem subiu a fatia:
+
+    14:32:07 c7g  bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
+             c7i  sem progresso ainda, 0/36 runs reportados
+
+A hora é a do `written_at`, e não a do poll: uma hora que não anda entre dois
+polls é a Instância que parou de reportar. A arquitetura que ainda não escreveu
+progresso ganha a segunda linha — as três são lidas lado a lado, e uma que
+sumisse seria lida como uma arquitetura que não subiu.
+
+As colunas casam entre as três porque cada índice sai na largura do seu total e
+a coluna do `scenario_id` acomoda a maior que a campanha gera, que é a do
+warm-up: as três passam as 46 h em pontos diferentes da mesma sequência, e é o
+alinhamento que faz três linhas serem lidas de uma vez às 3 da manhã.
+
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano
 canônico (as duas são funções puras, e é nelas que os testes batem);

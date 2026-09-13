@@ -1,9 +1,10 @@
 # orchestrator/tests/fixtures/
 
-As saídas **cruas** que a AWS CLI v2 emitiu, capturadas na conta do experimento.
-Elas são a âncora dos parsers de `command_output.py`: uma fixture escrita à mão
-seria o autor do parser adivinhando o que a CLI devolve, e valida o Python
-contra o Python (ADR-0022).
+As saídas **cruas** de quem escreve o que este papel lê — a AWS CLI v2, capturada
+na conta do experimento, e o `run_all.sh` com os shims do smoke. Elas são a
+âncora dos parsers de `command_output.py` e dos leitores de `status_check.py`:
+uma fixture escrita à mão seria o autor do parser adivinhando o que o outro lado
+devolve, e valida o Python contra o Python (ADR-0022).
 
 As factories do `orchestrator/conftest.py` continuam onde estão e não são
 substituídas por estes arquivos. A divisão é a da ADR-0022 — factory por dentro,
@@ -21,6 +22,8 @@ listagem truncada, e é exatamente isso que os parsers recusam.
 | `list-objects-v2-empty.json` | prefixo sem objeto **não traz** `Contents` |
 | `get-parameter.json` | a forma de `Parameter`, com o `Value` substituído |
 | `get-caller-identity.json` | o ARN de `assumed-role` que o perfil do Orquestrador resolve |
+| `status-progress.json` | o objeto de progresso como o `jq -n` do `run_all.sh` o escreve |
+| `status-done.json` | o marcador de término do mesmo laço, com o `capped` booleano |
 
 As duas linhas em negrito eram suposição do `command_output.py` (`default=[]` e
 `_optional_field`) até esta captura.
@@ -59,6 +62,26 @@ alguém lembrar de apagá-la.
 A tag `role` da instância descartável é `encode`, não um nome próprio: a policy
 escopa `TerminateInstances` a `role ∈ {encode, judge, masters}` (ADR-0016), e uma
 tag fora dessa lista deixa a instância interminável por quem a lançou.
+
+## Como regenerar o par do `status/`
+
+Estes dois não vêm da AWS: vêm do laço de verdade sobre o bucket falso do smoke,
+que é onde o `run_all.sh` roda sem instância. Do Mac, no venv do `smoke/`:
+
+    .venv-smoke/bin/python -m pytest smoke/tests/test_run_all.py \
+        --capture-dir=orchestrator/tests/fixtures
+
+O `=` não é estilo. Sem ele o pytest lê o valor da opção como um caminho a
+coletar, carrega o `orchestrator/conftest.py` junto com o do `smoke/` e a sessão
+morre no `import conftest`.
+
+O par capturado é o do bloco de seis Execuções, todas bem-sucedidas — os casos de
+recusa são montados no `test_status_check.py`, porque nenhum deles é coisa que o
+bash produza. O `written_at` e o `finished_at` carregam o offset do relógio de
+quem capturou, e não o `+00:00` da instância: é o que prova que o leitor aceita um
+offset qualquer em vez de casar um prefixo de string.
+
+A hora de fazer isso é quando o `run_all.sh` mudar o que escreve em `status/`.
 
 ## O scrub
 

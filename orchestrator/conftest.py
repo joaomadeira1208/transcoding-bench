@@ -146,18 +146,58 @@ _VALID_META: dict[str, Any] = {
 
 def make_meta(**overrides: Any) -> dict[str, Any]:
     """Um `meta.json` válido como dict, com overrides por campo de topo."""
-    meta = copy.deepcopy(_VALID_META)
-    for field, value in overrides.items():
-        if value is _ABSENT:
-            meta.pop(field, None)
-        else:
-            meta[field] = value
-    return meta
+    return _overridden(_VALID_META, overrides)
 
 
 def make_meta_json(**overrides: Any) -> str:
     """O mesmo, já serializado — o checador recebe os bytes que o bash escreveu."""
     return json.dumps(make_meta(**overrides), indent=2) + "\n"
+
+
+# Os dois objetos de `status/` que o `run_all.sh` escreve (D3/D4 da Spec 4). As
+# fixtures capturadas do bash estão em `tests/fixtures/`; estas factories são o
+# lado montado à mão, de onde saem os casos que o bash não produz.
+_VALID_PROGRESS: dict[str, Any] = {
+    "instance_id": "i-0123456789abcdef0",
+    "block_index": 4,
+    "block_count": 6,
+    "run_index": 3,
+    "run_count": 6,
+    "scenario_id": "libx265_1080p_720p_tos_c7g_rep2",
+    "runs_total": 21,
+    "runs_failed": 0,
+    "elapsed_seconds": 4200,
+    "written_at": "2026-09-07T14:32:07+00:00",
+}
+
+_VALID_DONE_MARKER: dict[str, Any] = {
+    "instance_id": "i-0123456789abcdef0",
+    "finished_at": "2026-09-07T14:32:07+00:00",
+    "runs_total": 36,
+    "runs_failed": 0,
+    "capped": False,
+    "exit_status": 0,
+}
+
+
+def make_progress(**overrides: Any) -> dict[str, Any]:
+    """Um `status/{instance_type}_progress` válido como dict."""
+    return _overridden(_VALID_PROGRESS, overrides)
+
+
+def make_done_marker(**overrides: Any) -> dict[str, Any]:
+    """Um `status/{instance_type}_done` válido como dict."""
+    return _overridden(_VALID_DONE_MARKER, overrides)
+
+
+def _overridden(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    payload = copy.deepcopy(base)
+    for field, value in overrides.items():
+        if value is _ABSENT:
+            payload.pop(field, None)
+        else:
+            payload[field] = value
+    return payload
 
 
 # O manifesto da preparação, derivado do `experiment.toml` real pelo mesmo plano
@@ -266,7 +306,7 @@ FIXTURES = REPO_ROOT / "orchestrator" / "tests" / "fixtures"
 
 
 def captured(name: str) -> str:
-    """A saída crua de uma execução real da CLI — `tests/fixtures/README.md`."""
+    """A saída crua de quem escreve o que este papel lê — `tests/fixtures/README.md`."""
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 

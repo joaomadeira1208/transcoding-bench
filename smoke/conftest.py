@@ -26,6 +26,7 @@ GENERATE_MASTERS_PLAN = REPO_ROOT / "orchestrator" / "generate_masters_plan.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
 VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
+RESUME = REPO_ROOT / "orchestrator" / "resume.py"
 ORCHESTRATOR_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
@@ -170,6 +171,23 @@ class Fetch(ShimTrail):
         return {path.name for path in self.dest.iterdir()}
 
 
+@dataclass(frozen=True)
+class Resume(ShimTrail):
+    """O que uma invocação do `orchestrator/resume.py` deixou para trás."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    out_dir: Path
+
+    def slices(self) -> dict[str, dict[str, Any]]:
+        """As fatias reduzidas que a retomada escreveu, por nome de arquivo."""
+        return {
+            path.name: json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(self.out_dir.iterdir())
+        }
+
+
 def _load_config(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         return tomllib.load(handle)
@@ -182,7 +200,7 @@ EXPERIMENT = _load_config(EXPERIMENT_TOML)
 PILOT = _load_config(PILOT_TOML)
 
 
-def _generate_plan(config: Path, out_dir: Path) -> dict[str, Any]:
+def generate_plan(config: Path, out_dir: Path) -> dict[str, Any]:
     """O canônico de uma definição, gerado invocando o CLI do orquestrador."""
     subprocess.run(
         [
@@ -203,13 +221,13 @@ def _generate_plan(config: Path, out_dir: Path) -> dict[str, Any]:
 @pytest.fixture(scope="session")
 def plan(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     """O plano canônico da campanha, pelo CLI como caixa-preta."""
-    return _generate_plan(EXPERIMENT_TOML, tmp_path_factory.mktemp("scenarios"))
+    return generate_plan(EXPERIMENT_TOML, tmp_path_factory.mktemp("scenarios"))
 
 
 @pytest.fixture(scope="session")
 def pilot_plan(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     """O plano canônico do piloto, pelo mesmo CLI e do mesmo jeito."""
-    return _generate_plan(PILOT_TOML, tmp_path_factory.mktemp("pilot-scenarios"))
+    return generate_plan(PILOT_TOML, tmp_path_factory.mktemp("pilot-scenarios"))
 
 
 @pytest.fixture(scope="session")
@@ -289,17 +307,30 @@ def versions_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
-def shim_environment(shim_bin: Path, workdir: Path, shim_env: dict[str, str]) -> dict[str, str]:
+def shim_environment(
+    shim_bin: Path,
+    workdir: Path,
+    shim_env: dict[str, str],
+    *,
+    s3_root: Path | None = None,
+) -> dict[str, str]:
     """O ambiente em que os shims interceptam: PATH, `TIME_BIN`, onde registram o
-    argv e onde fica o bucket falso. Os dois diretórios são criados aqui."""
+    argv e onde fica o bucket falso.
+
+    O `s3_root` é o de quem já tem um bucket para oferecer — a retomada lê o que o
+    laço escreveu —, e um bucket novo quando ninguém o oferece. O diretório do
+    argv é sempre novo: é dele que sai o argv daquela invocação.
+    """
     (workdir / "argv").mkdir()
-    (workdir / "s3").mkdir()
+    if s3_root is None:
+        s3_root = workdir / "s3"
+        s3_root.mkdir()
     return {
         **os.environ,
         "PATH": f"{shim_bin}{os.pathsep}{os.environ['PATH']}",
         "TIME_BIN": str(shim_bin / "time"),
         "SMOKE_ARGV_DIR": str(workdir / "argv"),
-        "SMOKE_S3_ROOT": str(workdir / "s3"),
+        "SMOKE_S3_ROOT": str(s3_root),
         **shim_env,
     }
 
@@ -479,6 +510,49 @@ def fetch_masters(
         )
 
     return _fetch_masters
+
+
+@pytest.fixture(scope="session")
+def resume(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
+    """Roda o `orchestrator/resume.py` de verdade sobre o bucket que o rastro dado
+    deixou, com o `--config` que gerou o plano daquele laço.
+
+    O argv fica num diretório próprio, e não no do laço: os dois falam com o
+    `aws`, e é o do `s3 sync` que se quer ler aqui. O `--out` é novo a cada
+    invocação, que é o que a CLI exige.
+    """
+
+    def _resume(trail: ShimTrail, config: Path, *flags: str, **shim_env: str) -> Resume:
+        workdir = tmp_path_factory.mktemp("resume")
+        env = shim_environment(shim_bin, workdir, shim_env, s3_root=trail.s3_root)
+        out_dir = workdir / "out"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(RESUME),
+                "--config",
+                str(config),
+                "--bucket",
+                BUCKET,
+                "--out",
+                str(out_dir),
+                *flags,
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return Resume(
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            out_dir=out_dir,
+            argv_dir=Path(env["SMOKE_ARGV_DIR"]),
+            s3_root=trail.s3_root,
+        )
+
+    return _resume
 
 
 @pytest.fixture(scope="session")

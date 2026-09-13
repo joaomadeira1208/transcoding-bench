@@ -357,9 +357,10 @@ kernel, mais a versão do kernel da AMI.
 Tabelas de mapeamento do kernel Linux (`drivers/perf/arm_pmuv3.c`,
 `arch/x86/events/intel/core.c`, `arch/x86/events/amd/core.c`), lidas antes de
 gastar instância. Os mesmos valores em v6.8 e em v6.14, de modo que a leitura não
-depende de qual das duas séries a AMI carrega. O `uname -r` das duas AMIs
-(`ami-025d99823a4caad37` para x86_64, `ami-0246d714afcc1d494` para arm64): *a
-preencher a partir da instância do Orquestrador e do log do c7g*.
+depende de qual das duas séries a AMI carrega. A proveniência são as duas AMIs
+(`ami-025d99823a4caad37` para x86_64, `ami-0246d714afcc1d494` para arm64): uma AMI
+fixa um kernel, e os quatro eventos que ficaram são arquiteturais nas duas ISAs x86
+e comuns do PMUv3 no arm64 — o mapeamento deles não muda entre as séries.
 
 O par que ficou, e o que cada nome resolve — os quatro são eventos arquiteturais
 nas duas ISAs x86 e eventos comuns do PMUv3 no arm64, e contaram nas três nas

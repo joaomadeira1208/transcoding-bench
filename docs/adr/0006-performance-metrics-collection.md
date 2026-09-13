@@ -306,6 +306,35 @@ tempo e custo.
   o artigo compararia duas máquinas numa métrica e três nas outras. É a aparência
   de conserto que a opção anterior custa, sem o dado que ela daria.
 
+### Os oito eventos, contra o SHA da decisão
+
+O `preflight` rodou nos três tipos contra `1946cb5`, o commit que declara os oito
+eventos e as duas métricas, o mesmo trabalho das rodadas anteriores:
+
+| | c7g (Neoverse-V1) | c7i (Sapphire Rapids) | c7a (Genoa) |
+|---|---|---|---|
+| instância | `i-0312d83d88e1c9bd8` | `i-09066ca6eecbc3112` | `i-00204c6caaa5ecc5f` |
+| **veredito do passo** | **passou** | **passou** | **passou** |
+| `pcnt-running` (hardware) | **50 %** | 100 % | **100 %** |
+| pares simultâneos | 1 de 2 | 2 de 2 | 2 de 2 |
+| `cycles` | 13.754.574.251 *(est.)* | 20.323.709.704 | 14.030.868.881 |
+| `instructions` | 44.839.254.857 *(est.)* | 31.929.616.683 | 39.701.824.549 |
+| `branch-instructions` | 3.623.297.620 *(est.)* | 2.925.824.838 | 3.624.644.900 |
+| `branch-misses` | 26.883.878 *(est.)* | 21.675.501 | 39.877.090 |
+
+| | c7g | c7i | c7a |
+|---|---|---|---|
+| IPC | 3,260 | 1,571 | 2,830 |
+| branch mispredict rate | 0,742 % | 0,741 % | 1,100 % |
+
+**Os dois pares abrem nas três, e o regime melhorou onde o orçamento apertava.** Com
+dois pares em vez de três, o c7a passou de 66 % para **100 %** — contagem, não
+estimativa — e o c7g de 33 % para 50 %. O único absoluto extrapolado que resta é o
+do Graviton, por um fator de 2, e a coluna `pcnt-running` continua ao lado dele no
+Parquet. As duas razões repetiram as rodadas 2 e 3 na segunda casa nas três
+máquinas, em três regimes diferentes: é a prova, pela quarta vez, de que o grupo as
+torna invariantes ao regime.
+
 ### O `-vv` não registra o evento nativo
 
 A emenda anterior afirmou que o probe com `-vv` "despeja no stderr o
@@ -378,11 +407,11 @@ c7i, com valores plausíveis.
 O que as três rodadas dizem de cada vPMU, e que o artigo pode registrar:
 
 - **c7g**: contou tudo o que se pediu, genérico e de cache, com o orçamento de um
-  par por vez (33 %).
+  par por vez — 33 % com três pares, 50 % com dois.
 - **c7i**: conta eventos arquiteturais e não-arquiteturais de core; zera a família
   `LONGEST_LAT_CACHE`. Orçamento de três pares (100 %).
 - **c7a**: conta os arquiteturais e `0xff60`; zera `0x0040` e `0xc860`. O filtro é
-  por evento **e** umask. Orçamento de dois pares (66 %).
+  por evento **e** umask. Orçamento de dois pares — 66 % com três, 100 % com dois.
 
 ### A lista de eventos da análise
 

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,6 +19,7 @@ from conftest import (
     Loop,
     Resume,
     generate_plan,
+    shim_environment,
 )
 
 # A arquitetura e o codec que sobram na configuração reduzida: os primeiros
@@ -33,8 +33,9 @@ RUNS_SOURCE = f"s3://{BUCKET}/runs/"
 
 SLICE_LINE = "fatia reduzida: "
 
-# O rastro que o preflight (#82) deixa no bucket da campanha, sem apagar: o do
-# piloto já tem os das nove corridas.
+# O par de filtros do `s3_sync_run_metas`, na ordem em que ele os passa.
+META_FILTERS = ("--exclude", "*", "--include", "*/meta.json")
+
 PREFLIGHT_ARTIFACTS = {
     "perf.json": '{"counter-value": "1234567", "event": "cycles"}\n',
     "perf.stderr.txt": "Performance counter stats for 'ffmpeg':\n",
@@ -77,6 +78,23 @@ def failed_block_id(loop: Loop) -> str:
     return block_id_of(failed["scenario_id"])
 
 
+def sync_with_the_shim(shim_bin: Path, s3_root: Path, workdir: Path, *filters: str) -> list[str]:
+    """O `s3 sync` do shim invocado direto sobre `runs/`: o que desceu, relativo
+    ao destino."""
+    workdir.mkdir()
+    destination = workdir / "down"
+    subprocess.run(
+        [str(shim_bin / "aws"), "s3", "sync", RUNS_SOURCE, str(destination), *filters],
+        env=shim_environment(shim_bin, workdir, {}, s3_root=s3_root),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sorted(
+        str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file()
+    )
+
+
 def report_lines(resume: Resume) -> list[str]:
     """O relatório sem as linhas que nomeiam as fatias escritas.
 
@@ -91,11 +109,8 @@ def report_lines(resume: Resume) -> list[str]:
 def two_blocks_toml(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """O `config/pilot.toml` reduzido a um codec e a uma arquitetura: dois blocos.
 
-    Reduzida e não escrita à mão, para não virar uma terceira definição do
-    Experimento (ADR-0019) — e reduzida a partir do piloto, que já declara um par
-    só. Dois blocos é o que faz as asserções serem exatas: com a campanha inteira
-    no `--config`, os 160 blocos que laço nenhum do smoke roda sairiam pendentes
-    por ausência, e "uma fatia só" deixaria de ser verificável.
+    Reduzido, e não escrito à mão, para não virar uma terceira definição do
+    Experimento (ADR-0019); por que são dois blocos está no README do papel.
     """
     text = PILOT_TOML.read_text(encoding="utf-8")
     for table in ("codec", "instance"):
@@ -211,33 +226,46 @@ class TestHealthyBlocks:
 
 
 class TestSync:
-    def test_it_is_the_filtered_download_of_the_adr(self, failed_resume):
-        # `aws s3 sync --exclude '*' --include '*/meta.json' s3://bucket/runs/ <dir>`:
-        # a retomada baixa os `meta.json` e nada mais, e é por isso que os GB de
-        # bitstream do bucket não atravessam a rede do Mac.
+    def test_the_resume_asks_for_the_metas_and_nothing_else(self, failed_resume):
         (argv,) = failed_resume.argv("aws")
         *command, destination = argv
 
-        assert command == [
-            "s3",
-            "sync",
-            "--only-show-errors",
-            "--exclude",
-            "*",
-            "--include",
-            "*/meta.json",
-            RUNS_SOURCE,
-        ]
+        assert command == ["s3", "sync", "--only-show-errors", *META_FILTERS, RUNS_SOURCE]
         assert Path(destination).is_absolute()
 
+    def test_that_pair_of_filters_brings_one_meta_per_execution(
+        self, shim_bin, failed_loop, tmp_path
+    ):
+        downloaded = sync_with_the_shim(
+            shim_bin, failed_loop.s3_root, tmp_path / "filtrado", *META_FILTERS
+        )
+
+        assert downloaded == [f"{run_dir.name}/meta.json" for run_dir in failed_loop.run_dirs()]
+
+    def test_the_last_pattern_that_matches_is_the_one_that_decides(
+        self, shim_bin, failed_loop, tmp_path
+    ):
+        # O mesmo par na ordem trocada não quer dizer a mesma coisa: o
+        # `--exclude '*'` depois do include apaga o include, e nada desce.
+        inverted = (*META_FILTERS[2:], *META_FILTERS[:2])
+
+        assert (
+            sync_with_the_shim(shim_bin, failed_loop.s3_root, tmp_path / "trocado", *inverted) == []
+        )
+
+    def test_an_empty_prefix_brings_nothing_and_succeeds(self, shim_bin, tmp_path):
+        # O bucket da campanha que morreu antes do primeiro upload.
+        s3_root = tmp_path / "s3"
+        (s3_root / BUCKET).mkdir(parents=True)
+
+        assert sync_with_the_shim(shim_bin, s3_root, tmp_path / "vazio") == []
+
     def test_the_other_direction_is_refused(self, shim_bin, failed_loop, tmp_path):
+        workdir = tmp_path / "subida"
+        workdir.mkdir()
         refused = subprocess.run(
-            [str(shim_bin / "aws"), "s3", "sync", str(tmp_path), RUNS_SOURCE],
-            env={
-                **os.environ,
-                "SMOKE_ARGV_DIR": str(tmp_path),
-                "SMOKE_S3_ROOT": str(failed_loop.s3_root),
-            },
+            [str(shim_bin / "aws"), "s3", "sync", str(workdir), RUNS_SOURCE],
+            env=shim_environment(shim_bin, workdir, {}, s3_root=failed_loop.s3_root),
             capture_output=True,
             text=True,
             check=False,

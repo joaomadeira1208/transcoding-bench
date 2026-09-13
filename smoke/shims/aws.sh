@@ -98,8 +98,10 @@ s3_cp() {
 }
 
 # O `s3 sync` da retomada: bucket para disco, com a chave relativa ao prefixo de
-# origem passando pelos `--exclude`/`--include` na ordem da linha de comando e o
-# último padrão que casa decidindo — é assim que a CLI de verdade os aplica.
+# origem passando por todos os `--exclude`/`--include` na ordem da linha de
+# comando. Parar no primeiro que casa inverte o par `--exclude '*'
+# --include '*/meta.json'`: nada desceria, e a retomada declararia ausente a
+# campanha inteira.
 s3_sync() {
   local source="" destination="" filter_flag=() filter_pattern=() relative included i
   while (($#)); do
@@ -110,7 +112,11 @@ s3_sync() {
         shift 2
         continue
         ;;
-      --*) ;;
+      --only-show-errors) ;;
+      # Recusa em vez de ignorar: uma flag com valor — o `--copy-props` do outro
+      # `s3 sync` do adaptador — ignorada aqui deixaria o valor dela virar a
+      # origem, e o fake responderia sobre o prefixo errado.
+      --*) fail "flag não shimada em s3 sync: $1" ;;
       *)
         if [[ -z $source ]]; then
           source=$1
@@ -128,7 +134,11 @@ s3_sync() {
     fail "s3 sync fora do sentido bucket para disco não é shimado"
 
   source=$(object_path "$source")
-  [[ -d $source ]] || fail "prefixo inexistente: $source"
+  # Prefixo sem objeto é um sync de zero arquivos com status zero, como na CLI de
+  # verdade. Falhar aqui faria a campanha que morreu antes do primeiro upload —
+  # todo bloco ausente, o caso mais comum da retomada — voltar como bucket
+  # ilegível.
+  [[ -d $source ]] || return 0
   source=${source%/}
   destination=${destination%/}
 

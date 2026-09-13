@@ -38,9 +38,6 @@ PMU_EVENTS = (
     "page-faults",
 )
 
-# As três razões da ADR-0006, cada uma com o par que o `perf` contou no mesmo
-# grupo. Dado, e não três chamadas escritas à mão, porque é o que o
-# `test_pmu_events.py` consegue conferir contra o par declarado no TOML.
 METRIC_OPERANDS: dict[str, tuple[str, str]] = {
     "ipc": ("instructions", "cycles"),
     "cache_miss_rate": ("L1-dcache-load-misses", "L1-dcache-loads"),

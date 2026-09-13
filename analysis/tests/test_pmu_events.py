@@ -1,13 +1,6 @@
-"""O `PMU_EVENTS` da análise contra o `config/experiment.toml` que a campanha mede.
-
-O alvo é a deriva silenciosa entre os dois: o `run_table.py` transcreve a lista de
-eventos e lê o par de cada razão por nome, e um evento trocado na spec sem esta
-amarra não estoura em lugar nenhum — a coluna nasce nula para a campanha inteira
-(ADR-0006/0019).
-
-O papel `analysis/` não importa o validador do `orchestrator/`: são dois papéis com
-`requirements.txt` separados (ADR-0017), e o que se confere aqui é o texto do TOML.
-"""
+# A lista de eventos e o par de cada razão são transcritos no `run_table.py`, e um
+# evento trocado no TOML sem esta amarra não estoura em lugar nenhum: a coluna
+# nasce nula para a campanha inteira (ADR-0006).
 
 from __future__ import annotations
 
@@ -61,7 +54,4 @@ class TestTheColumnsOfTheEvents:
         assert _pcnt_column(event) in TABLE_SCHEMA.names
 
     def test_every_column_is_lower_case(self) -> None:
-        # `L1-dcache-loads` é o único evento com maiúscula, e uma coluna
-        # `perf_L1_dcache_loads` no meio de um schema em minúsculas faz um
-        # `SELECT` correto voltar vazio em engine que diferencia caixa.
         assert TABLE_SCHEMA.names == [name.lower() for name in TABLE_SCHEMA.names]

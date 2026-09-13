@@ -86,9 +86,6 @@ class TestThePerfProbe:
         assert argv[argv.index("-e") + 1] == INSTRUMENTATION.event_spec
 
     def test_the_probe_dumps_the_event_attribute_of_each_name(self):
-        # O `-vv` despeja o `perf_event_attr` como o `perf` o abriu, e é onde se
-        # lê que o par de cache pediu `PERF_TYPE_HW_CACHE` com o nível L1D — não
-        # o evento nativo, que o driver do kernel resolve depois da syscall.
         argv = perf_probe_command(
             run=first_run(),
             event_spec=INSTRUMENTATION.event_spec,

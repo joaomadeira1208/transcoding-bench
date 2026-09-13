@@ -1,8 +1,8 @@
 # Coleta de métricas de desempenho durante a Execução
 
-Cada Execução é instrumentada com **quatro fontes em paralelo**: `/usr/bin/time -v` envolvendo o processo FFmpeg (wall/user/sys time, max RSS, page faults, I/O); `perf stat -j` envolvendo o processo (hardware counters via PMU: `cycles, instructions, cache-references, cache-misses, branch-instructions, branch-misses, task-clock, context-switches, cpu-migrations, page-faults` — **emenda:** o par de cache passou a ser `L1-dcache-loads, L1-dcache-load-misses`, pela última seção deste ADR); `pidstat -h -r -u -p $PID 1` rodando em paralelo (time series de CPU% e RSS a 1 Hz); FFmpeg's own stderr `-stats` parseado (frames encoded, fps reportado, output bitrate).
+Cada Execução é instrumentada com **quatro fontes em paralelo**: `/usr/bin/time -v` envolvendo o processo FFmpeg (wall/user/sys time, max RSS, page faults, I/O); `perf stat -j` envolvendo o processo (hardware counters via PMU: `cycles, instructions, cache-references, cache-misses, branch-instructions, branch-misses, task-clock, context-switches, cpu-migrations, page-faults` — **Emenda:** o par de cache passou a ser `L1-dcache-loads, L1-dcache-load-misses`, pela última seção deste ADR); `pidstat -h -r -u -p $PID 1` rodando em paralelo (time series de CPU% e RSS a 1 Hz); FFmpeg's own stderr `-stats` parseado (frames encoded, fps reportado, output bitrate).
 
-**Métricas-chave derivadas:** **IPC** (instructions/cycles), **cache miss rate** (cache-misses/cache-references; **emenda:** L1-dcache-load-misses/L1-dcache-loads), **branch mispredict rate** (branch-misses/branch-instructions). Esses três são os principais indicadores arquiteturais — eficiência ALU, memory hierarchy e branch predictor — exatamente onde Neoverse-V1 (Graviton 3), Sapphire Rapids (c7i) e EPYC Genoa (c7a) divergem microarquiteturalmente.
+**Métricas-chave derivadas:** **IPC** (instructions/cycles), **cache miss rate** (cache-misses/cache-references; **Emenda:** L1-dcache-load-misses/L1-dcache-loads), **branch mispredict rate** (branch-misses/branch-instructions). Esses três são os principais indicadores arquiteturais — eficiência ALU, memory hierarchy e branch predictor — exatamente onde Neoverse-V1 (Graviton 3), Sapphire Rapids (c7i) e EPYC Genoa (c7a) divergem microarquiteturalmente.
 
 **Power/energia é skip explícito.** AWS Graviton não expõe contadores RAPL/MSR de energia ao guest EC2, impedindo medição cross-arch consistente. Custo entra como proxy no pós-experimento (`instance $/hour × wall_time`), não como métrica por Execução.
 
@@ -297,7 +297,11 @@ lida do outro lado.
 que o `0x0040` da AMD é da era do Zen 1: `ls_dc_accesses` está nas tabelas de
 eventos do `amdzen1`, do `amdzen2` e do `amdzen3` e **não está na do `amdzen4`**,
 que é o Genoa. O kernel o programa de qualquer forma, porque
-`amd_hw_cache_event_ids_f17h` vale para toda família ≥ 0x17. A segunda é que o
+`amd_hw_cache_event_ids_f17h` vale para toda família ≥ 0x17. A fonte foram as
+tabelas JSON do `perf` (`tools/perf/pmu-events/arch/x86/amdzen*/`), e não o PPR
+da família 19h modelo 11h que o ticket nomeou: as tabelas são geradas a partir do
+PPR, mas a leitura direta dele fica em aberto, e o que decide é a corrida no c7a.
+A segunda é que o
 `MEM_INST_RETIRED.ALL_LOADS` **não** puxa evento auxiliar: o `PMU_FL_MEM_LOADS_AUX`
 da Sapphire Rapids vale só para o `0xcd`/`MEM_TRANS_RETIRED.LOAD_LATENCY`, e o
 grupo continua sendo dois contadores.

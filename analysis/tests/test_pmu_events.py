@@ -17,11 +17,9 @@ from typing import Any
 
 import pytest
 from conftest import ROLE_ROOT
-from run_table import PMU_EVENTS, TABLE_SCHEMA, _pcnt_column, _perf_column
+from run_table import METRIC_OPERANDS, PMU_EVENTS, TABLE_SCHEMA, _pcnt_column, _perf_column
 
 CONFIGS = ("experiment", "pilot")
-
-METRICS = ("ipc", "cache_miss_rate", "branch_mispredict_rate")
 
 
 @cache
@@ -30,8 +28,11 @@ def declared(config: str) -> dict[str, Any]:
         return tomllib.load(handle)["instrumentation"]
 
 
-def metric(config: str, name: str) -> dict[str, Any]:
-    return next(record for record in declared(config)["metric"] if record["name"] == name)
+def operands(config: str) -> dict[str, tuple[str, str]]:
+    return {
+        record["name"]: (record["numerator"], record["denominator"])
+        for record in declared(config)["metric"]
+    }
 
 
 @pytest.mark.parametrize("config", CONFIGS)
@@ -39,14 +40,18 @@ class TestTheEventsTheAnalysisReads:
     def test_they_are_the_ones_the_campaign_measures_in_order(self, config: str) -> None:
         assert list(PMU_EVENTS) == declared(config)["pmu_events"]
 
-    @pytest.mark.parametrize("name", METRICS)
-    def test_every_declared_metric_is_a_column_over_declared_events(
+    def test_every_ratio_divides_the_pair_the_metric_declares(self, config: str) -> None:
+        # Pelos dois nomes, e não por eles pertencerem ao `pmu_events`: repontar
+        # o `cache_miss_rate` para outro par que já esteja na lista deixaria a
+        # análise dividindo o par antigo com tudo verde.
+        assert operands(config) == METRIC_OPERANDS
+
+    @pytest.mark.parametrize("name", METRIC_OPERANDS)
+    def test_every_ratio_is_a_column_over_events_the_campaign_measures(
         self, config: str, name: str
     ) -> None:
-        record = metric(config, name)
-
         assert name in TABLE_SCHEMA.names
-        assert {record["numerator"], record["denominator"]} <= set(PMU_EVENTS)
+        assert set(operands(config)[name]) <= set(PMU_EVENTS)
 
 
 class TestTheColumnsOfTheEvents:

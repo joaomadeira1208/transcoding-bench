@@ -21,7 +21,7 @@ Pelo mesmo motivo o `time.json` deixa de ser descrito como "`-v` parseado": o `/
 
 `run_id` é um UUID v4 (à prova de retomada do experimento). `scenario_id` legível também persistido em `meta.json` pra debug humano (ex.: `libx264_2160p_1080p_bbb_c7g_rep1`).
 
-**Tabela consolidada (Parquet)**: uma linha por Execução. Campos = cenário (chave composta) + run metadata + agregados de `time` e `perf` + parseados de FFmpeg + derivados (`ipc`, `cache_miss_rate`, `branch_mispredict_rate`, `cpu_pct_avg`). **Time series do pidstat NÃO entram no Parquet** — ficam nos diretórios raw e são consultadas sob demanda quando análise profunda precisa.
+**Tabela consolidada (Parquet)**: uma linha por Execução. Campos = cenário (chave composta) + run metadata + agregados de `time` e `perf` + parseados de FFmpeg + derivados (`ipc`, `cache_miss_rate`, `branch_mispredict_rate`, `cpu_pct_avg`; o `cache_miss_rate` é de L1D desde a emenda da ADR-0006). **Time series do pidstat NÃO entram no Parquet** — ficam nos diretórios raw e são consultadas sob demanda quando análise profunda precisa.
 
 **Retenção dos outputs `.mkv` pós-Pass de qualidade** (ADR-0005):
 - Manter apenas: (i) amostra metodológica fixa (~6–10), (ii) outputs de grupos hash-divergentes, (iii) reps usadas no Pass.
@@ -46,3 +46,15 @@ Pelo mesmo motivo o `time.json` deixa de ser descrito como "`-v` parseado": o `/
 - Time series só são analisadas sob demanda — pra a maioria das análises, a row do Parquet basta. Evita "carregar 500 k linhas pra todo plot".
 - Decisão de **onde os runs dirs vivem** (storage backend: S3? EFS? local + sync periódico?) é separada e cai dentro de arquitetura/orquestração da pipeline.
 - `output.sha256` precisa ser hash do **bitstream codificado**, não do container `.mkv` inteiro. Containers carregam metadados de mux com timestamps de criação que mudariam o hash sem o bitstream ter mudado. Extrair via `ffmpeg -i input.mkv -c copy -f $codec -` ou similar antes do `sha256sum`.
+
+## Emenda: o nome da coluna de um evento de PMU
+
+Cada evento vira duas colunas — o valor e o `pcnt-running` do contador (ADR-0006)
+—, e o nome delas é o nome do evento em **minúsculas**, com `-` virando `_`:
+`L1-dcache-loads` é `perf_l1_dcache_loads` e `perf_l1_dcache_loads_pcnt_running`.
+
+A regra da caixa não estava escrita porque nenhum dos dez eventos tinha maiúscula
+até o par de cache passar a nomear o nível. Sem ela o schema teria uma coluna
+`perf_L1_dcache_loads` no meio de um Parquet inteiramente minúsculo, e um `SELECT`
+escrito com o resto do schema em mente voltaria vazio em qualquer engine que
+diferencie caixa.

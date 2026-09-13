@@ -38,6 +38,15 @@ PMU_EVENTS = (
     "page-faults",
 )
 
+# As três razões da ADR-0006, cada uma com o par que o `perf` contou no mesmo
+# grupo. Dado, e não três chamadas escritas à mão, porque é o que o
+# `test_pmu_events.py` consegue conferir contra o par declarado no TOML.
+METRIC_OPERANDS: dict[str, tuple[str, str]] = {
+    "ipc": ("instructions", "cycles"),
+    "cache_miss_rate": ("L1-dcache-load-misses", "L1-dcache-loads"),
+    "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
+}
+
 
 @dataclass(frozen=True)
 class RawRun:
@@ -147,13 +156,10 @@ def _row(run: RawRun) -> tuple[dict[str, Any], list[str]]:
         "ffmpeg_frames": ffmpeg.frames if ffmpeg else None,
         "ffmpeg_fps": ffmpeg.fps if ffmpeg else None,
         "ffmpeg_bitrate_kbps": ffmpeg.bitrate_kbps if ffmpeg else None,
-        "ipc": ratio(_counted(counters, "instructions"), _counted(counters, "cycles")),
-        "cache_miss_rate": ratio(
-            _counted(counters, "L1-dcache-load-misses"), _counted(counters, "L1-dcache-loads")
-        ),
-        "branch_mispredict_rate": ratio(
-            _counted(counters, "branch-misses"), _counted(counters, "branch-instructions")
-        ),
+        **{
+            name: ratio(_counted(counters, numerator), _counted(counters, denominator))
+            for name, (numerator, denominator) in METRIC_OPERANDS.items()
+        },
         "cpu_pct_avg": mean(cpu_pct),
     }
     return row, unreadable
@@ -262,9 +268,7 @@ TABLE_SCHEMA = pa.schema(
         ("ffmpeg_frames", pa.int64()),
         ("ffmpeg_fps", pa.float64()),
         ("ffmpeg_bitrate_kbps", pa.float64()),
-        ("ipc", pa.float64()),
-        ("cache_miss_rate", pa.float64()),
-        ("branch_mispredict_rate", pa.float64()),
+        *((name, pa.float64()) for name in METRIC_OPERANDS),
         ("cpu_pct_avg", pa.float64()),
     ]
 )

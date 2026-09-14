@@ -15,7 +15,7 @@ from command_output import S3Object, TruncatedListing
 from experiment_config import ExperimentConfig, InstanceRecord
 from generate_scenarios import CANONICAL_FILENAME, SLICE_FILENAME
 from scenario_plan import build_canonical_plan, build_instance_slices
-from vigilance import Vigilance
+from vigilance import is_standing
 
 SCENARIOS_PREFIX = "scenarios/"
 CANONICAL_KEY = f"{SCENARIOS_PREFIX}{CANONICAL_FILENAME}"
@@ -91,8 +91,8 @@ def refuse_populated_runs(
 
 
 def refuse_standing_instances(state: CampaignState) -> str | None:
-    """O motivo de recusar o estado que já está no work dir, ou `None` se tudo nele morreu."""
-    standing = [each for each in state.instances if each.state is not Vigilance.DEAD]
+    """O motivo de recusar o estado do work dir, ou `None` se nada nele está de pé."""
+    standing = [each for each in state.instances if is_standing(each.state)]
     if not standing:
         return None
     return "\n".join(

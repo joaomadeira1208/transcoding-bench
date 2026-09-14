@@ -13,7 +13,9 @@ objetos de `status/` e a linha de progresso que sai deles, o núcleo do
 tabela), o do lançamento (a AMI da arquitetura pedida e as tags da instância), a
 precedência da decisão de vigilância, a leitura do arquivo de estado, o núcleo
 do `run` (as duas guardas — o `runs/` povoado e o arquivo de estado com
-instância de pé —, a projeção do `--slices` e a decisão depois dos bootstraps) e
-o parser do PID que volta do disparo.
+instância de pé —, a projeção do `--slices` e a decisão depois dos bootstraps),
+o parser do PID que volta do disparo e o núcleo da vigilância (o prazo do
+Orquestrador, o veredito que decide o código de saída, o resumo final e a linha
+de cada poll).
 Invariantes escritas à mão como default; golden inline no `.py` só onde congelar
 *é* o requisito.

@@ -107,6 +107,9 @@ class TestTheGuardOverTheStateFile:
     def test_a_launch_that_the_watch_abort_already_ended_passes(self):
         assert standing(tracked(c7g=Vigilance.DEAD, c7i=Vigilance.DEAD)) is None
 
+    def test_a_campaign_that_ran_to_the_end_passes(self):
+        assert standing(tracked(c7g=Vigilance.FINISHED, c7i=Vigilance.DEAD)) is None
+
     @pytest.mark.parametrize(
         "state",
         [

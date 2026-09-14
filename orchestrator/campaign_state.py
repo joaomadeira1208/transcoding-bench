@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any
 
 from field_checks import FieldError, check_fields, check_int, check_non_empty_str
+from status_check import DoneMarker, StatusError, check_done_marker
 from vigilance import Vigilance
 
 
@@ -33,6 +34,7 @@ class TrackedInstance:
     block_count: int
     runs_total: int
     state: Vigilance
+    outcome: DoneMarker | None
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,7 @@ class CampaignState:
     bucket: str
     config_path: str
     commit: str
+    total_timeout: int
     slice_keys: tuple[str, ...]
     instances: tuple[TrackedInstance, ...]
 
@@ -68,7 +71,31 @@ def serialize_state(state: CampaignState) -> str:
 
 def _tracked(payload: Any, where: str) -> TrackedInstance:
     values = _values(TrackedInstance, _object(payload, where), f"{where}.")
-    return TrackedInstance(**{**values, "state": Vigilance(values["state"])})
+    return TrackedInstance(
+        **{
+            **values,
+            "state": Vigilance(values["state"]),
+            "outcome": _outcome(values["outcome"], values["instance_id"], f"{where}.outcome"),
+        }
+    )
+
+
+def _outcome(payload: Any, instance_id: str, where: str) -> DoneMarker | None:
+    """O marcador que encerrou aquela fatia, conferido pelo leitor que é dono dele.
+
+    Pela identidade também: um estado que guardasse o marcador da tentativa
+    anterior daria a fatia por completa sem que uma Execução desta tivesse
+    rodado, e o `resume.py` não seria chamado para nenhuma delas.
+    """
+    if payload is None:
+        return None
+    try:
+        marker = check_done_marker(payload, instance_id=instance_id)
+    except StatusError as error:
+        raise StateError(f"{where}: {error}") from error
+    if marker is None:
+        raise StateError(f"{where}: o marcador guardado é de outra instância, não de {instance_id}")
+    return marker
 
 
 def _slice_keys(listed: list[Any]) -> tuple[str, ...]:
@@ -106,6 +133,17 @@ def _check_pid(field: str, value: Any) -> None:
         raise FieldError(f"{field}: esperava PID positivo, veio {value!r}")
 
 
+def _check_outcome(field: str, value: Any) -> None:
+    if value is not None and not isinstance(value, Mapping):
+        raise FieldError(f"{field}: esperava o marcador ou nulo, veio {type(value).__name__}")
+
+
+def _check_timeout(field: str, value: Any) -> None:
+    check_int(field, value)
+    if value <= 0:
+        raise FieldError(f"{field}: esperava segundos positivos, veio {value!r}")
+
+
 def _check_state(field: str, value: Any) -> None:
     try:
         Vigilance(value)
@@ -123,6 +161,7 @@ _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "bucket": check_non_empty_str,
     "config_path": check_non_empty_str,
     "commit": check_non_empty_str,
+    "total_timeout": _check_timeout,
     "slice_keys": _check_list,
     "instances": _check_list,
     "instance": check_non_empty_str,
@@ -132,4 +171,5 @@ _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "block_count": check_int,
     "runs_total": check_int,
     "state": _check_state,
+    "outcome": _check_outcome,
 }

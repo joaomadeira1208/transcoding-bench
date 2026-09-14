@@ -42,8 +42,20 @@ class Vigilance(Enum):
     BOOTSTRAPPING = "bootstrapping"
     RUNNING = "running"
     READY_TO_TERMINATE = "ready to terminate"
+    FINISHED = "finished"
     DEAD = "dead"
     UNRESPONSIVE = "unresponsive"
+
+
+# `finished` é a que o marcador encerrou e o `terminate-instances` já levou;
+# `dead` é a que o laço deu por morta e terminou por isso. As duas saem do laço,
+# e a diferença entre elas é o resumo final e o código de saída (D8).
+_SETTLED = frozenset({Vigilance.FINISHED, Vigilance.DEAD})
+
+
+def is_standing(state: Vigilance) -> bool:
+    """A arquitetura que ainda fatura, e por isso ainda é perguntada e terminável."""
+    return state not in _SETTLED
 
 
 def marker_verdict(payload: Any, *, instance_id: str) -> Marker:

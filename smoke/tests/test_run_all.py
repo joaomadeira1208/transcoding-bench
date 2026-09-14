@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from datetime import datetime
 from typing import Any
@@ -91,6 +92,21 @@ def elapsed_s(meta: dict[str, Any]) -> float:
     started = datetime.fromisoformat(meta["started_at"])
     finished = datetime.fromisoformat(meta["finished_at"])
     return (finished - started).total_seconds()
+
+
+# As fixtures-âncora do leitor do Orquestrador saem daqui: o par de `status/`
+# que este laço acabou de escrever é o que o `jq -n` do `run_all.sh` produz de
+# verdade — ver `orchestrator/tests/fixtures/README.md`.
+CAPTURED = {PROGRESS_OBJECT: "status-progress.json", DONE_MARKER: "status-done.json"}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def captured_status(loop, status_capture_dir) -> None:
+    """Deposita o par de `status/` do bloco quando se pediu `--status-capture-dir`."""
+    if status_capture_dir is None:
+        return
+    for key, name in CAPTURED.items():
+        shutil.copyfile(loop.bucket_dir() / key, status_capture_dir / name)
 
 
 @pytest.fixture(scope="session")

@@ -777,6 +777,7 @@ def consolidate_with_cli(runs_dir: Path, out: Path) -> subprocess.CompletedProce
 
 DOCKER_OPTION = "--docker"
 CAPTURE_DIR_OPTION = "--capture-dir"
+STATUS_CAPTURE_DIR_OPTION = "--status-capture-dir"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -789,7 +790,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         CAPTURE_DIR_OPTION,
         default=None,
-        help="diretório onde depositar as saídas cruas capturadas, para virarem fixtures",
+        help="diretório onde depositar as saídas cruas do aceite, para virarem fixtures",
+    )
+    parser.addoption(
+        STATUS_CAPTURE_DIR_OPTION,
+        default=None,
+        help="diretório onde depositar o par de `status/` que o laço escreveu",
     )
 
 
@@ -816,8 +822,18 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 @pytest.fixture(scope="session")
 def capture_dir(pytestconfig: pytest.Config) -> Path | None:
-    """O diretório de `--capture-dir`, criado; `None` quando não se pediu por ele."""
-    requested = pytestconfig.getoption(CAPTURE_DIR_OPTION)
+    """O destino das saídas cruas do aceite; `None` quando não se pediu por ele."""
+    return _requested_dir(pytestconfig, CAPTURE_DIR_OPTION)
+
+
+@pytest.fixture(scope="session")
+def status_capture_dir(pytestconfig: pytest.Config) -> Path | None:
+    """O destino do par de `status/`; `None` quando não se pediu por ele."""
+    return _requested_dir(pytestconfig, STATUS_CAPTURE_DIR_OPTION)
+
+
+def _requested_dir(config: pytest.Config, option: str) -> Path | None:
+    requested = config.getoption(option)
     if requested is None:
         return None
     destination = Path(requested).resolve()

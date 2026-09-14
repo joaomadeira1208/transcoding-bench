@@ -1,0 +1,12 @@
+{
+  "instance_id": "i-0123456789abcdef0",
+  "block_index": 1,
+  "block_count": 1,
+  "run_index": 6,
+  "run_count": 6,
+  "scenario_id": "libsvtav1_2160p_480p_bbb_c7g_rep5",
+  "runs_total": 6,
+  "runs_failed": 0,
+  "elapsed_seconds": 6,
+  "written_at": "2026-09-13T20:25:10-03:00"
+}

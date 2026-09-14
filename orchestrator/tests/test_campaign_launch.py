@@ -1,10 +1,12 @@
-# O núcleo puro do `run` (D7, D13 e D18 da Spec 4). Os três alvos falham em
-# silêncio e custam mais do que uma instância: a guarda que deixa passar um
+# O núcleo puro do `run` (D7, D12, D13 e D18 da Spec 4). Os quatro alvos falham
+# em silêncio e custam mais do que uma instância: a guarda que deixa passar um
 # `runs/` povoado escreve o piloto dentro da campanha, ou a campanha duas vezes
-# no mesmo bucket; a projeção do `--slices` que sobe o `canonical.json` reescreve
-# o registro do Experimento com a fatia reduzida da retomada; e a decisão de
-# bootstrap que dispara duas arquiteturas quando a terceira falhou paga dois
-# dias de dado que a próxima campanha descarta.
+# no mesmo bucket; a que deixa passar um arquivo de estado com instância de pé
+# apaga os ids dela, e o `watch --abort` fica sem o que terminar; a projeção do
+# `--slices` que sobe o `canonical.json` reescreve o registro do Experimento com
+# a fatia reduzida da retomada; e a decisão de bootstrap que dispara duas
+# arquiteturas quando a terceira falhou paga dois dias de dado que a próxima
+# campanha descarta.
 
 from __future__ import annotations
 
@@ -19,12 +21,15 @@ from campaign_launch import (
     abort_reasons,
     full_campaign,
     refuse_populated_runs,
+    refuse_standing_instances,
     resumed_campaign,
     slice_key,
 )
+from campaign_state import parse_state
 from command_output import S3Object, TruncatedListing
-from conftest import real_config, real_pilot_config
+from conftest import make_campaign_state, make_tracked_instance, real_config, real_pilot_config
 from scenario_plan import build_canonical_plan, build_instance_slices
+from vigilance import Vigilance
 
 PREFLIGHT_PREFIX = "runs/preflight/"
 
@@ -82,6 +87,55 @@ class TestTheGuardOverRuns:
 
         assert message is not None
         assert "truncada" in message
+
+
+def tracked(**states: Vigilance) -> list[dict[str, Any]]:
+    return [
+        make_tracked_instance(instance=instance, instance_id=f"i-{instance}", state=state.value)
+        for instance, state in states.items()
+    ]
+
+
+def standing(instances: list[dict[str, Any]]) -> str | None:
+    return refuse_standing_instances(parse_state(make_campaign_state(instances=instances)))
+
+
+class TestTheGuardOverTheStateFile:
+    def test_a_file_with_no_architecture_passes(self):
+        assert standing([]) is None
+
+    def test_a_launch_that_the_watch_abort_already_ended_passes(self):
+        assert standing(tracked(c7g=Vigilance.DEAD, c7i=Vigilance.DEAD)) is None
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            Vigilance.BOOTSTRAPPING,
+            Vigilance.RUNNING,
+            Vigilance.READY_TO_TERMINATE,
+            Vigilance.UNRESPONSIVE,
+        ],
+    )
+    def test_anything_that_is_not_dead_is_refused_naming_its_id(self, state: Vigilance):
+        message = standing(tracked(c7g=state)) or ""
+
+        assert "i-c7g" in message
+        assert state.value in message
+
+    def test_the_refusal_names_the_way_out(self):
+        assert "watch --abort" in (standing(tracked(c7g=Vigilance.RUNNING)) or "")
+
+    def test_every_standing_architecture_is_named_and_the_dead_one_is_not(self):
+        message = (
+            standing(
+                tracked(c7g=Vigilance.RUNNING, c7i=Vigilance.DEAD, c7a=Vigilance.BOOTSTRAPPING)
+            )
+            or ""
+        )
+
+        assert "i-c7g" in message
+        assert "i-c7a" in message
+        assert "i-c7i" not in message
 
 
 class TestTheFullCampaign:

@@ -1,5 +1,5 @@
-"""O núcleo puro do `run`: a guarda do bucket, o que sobe e quem é lançado, e a
-decisão depois dos bootstraps (D7, D13 e D18 da Spec 4) — ver `orchestrator/README.md`.
+"""O núcleo puro do `run`: as duas guardas, o que sobe e quem é lançado, e a
+decisão depois dos bootstraps (D7, D12, D13 e D18 da Spec 4) — ver `orchestrator/README.md`.
 """
 
 from __future__ import annotations
@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from campaign_state import CampaignState
 from command_output import S3Object, TruncatedListing
 from experiment_config import ExperimentConfig, InstanceRecord
 from generate_scenarios import CANONICAL_FILENAME, SLICE_FILENAME
 from scenario_plan import build_canonical_plan, build_instance_slices
+from vigilance import Vigilance
 
 SCENARIOS_PREFIX = "scenarios/"
 CANONICAL_KEY = f"{SCENARIOS_PREFIX}{CANONICAL_FILENAME}"
@@ -84,6 +86,20 @@ def refuse_populated_runs(
             f"runs/ já tem {len(executions)} objeto(s) fora de {preflight_prefix}: "
             f"é o bucket de outra campanha, ou desta disparada duas vezes",
             *(f"  {key}" for key in executions),
+        ]
+    )
+
+
+def refuse_standing_instances(state: CampaignState) -> str | None:
+    """O motivo de recusar o estado que já está no work dir, ou `None` se tudo nele morreu."""
+    standing = [each for each in state.instances if each.state is not Vigilance.DEAD]
+    if not standing:
+        return None
+    return "\n".join(
+        [
+            f"{len(standing)} instância(s) de um lançamento anterior ainda de pé: "
+            f"rode o watch --abort antes de um run novo",
+            *(f"  {each.instance_id} ({each.instance}): {each.state.value}" for each in standing),
         ]
     )
 

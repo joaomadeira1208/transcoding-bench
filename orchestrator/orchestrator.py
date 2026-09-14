@@ -24,6 +24,7 @@ from campaign_launch import (
     dispatch_command,
     full_campaign,
     refuse_populated_runs,
+    refuse_standing_instances,
     resumed_campaign,
     slice_key,
     slice_name,
@@ -214,8 +215,9 @@ def main() -> int:
         "run",
         help="sobe o plano, lança uma Instância por arquitetura e dispara o run_all.sh em cada uma",
         description=(
-            "Roda a auto-checagem, recusa um bucket cujo runs/ já tem Execuções, sobe o "
-            "plano para scenarios/, lança uma Instância de encode por registro [[instance]] "
+            "Roda a auto-checagem, recusa um arquivo de estado com instância de pé e um "
+            "bucket cujo runs/ já tem Execuções, sobe o plano para scenarios/, lança uma "
+            "Instância de encode por registro [[instance]] "
             "da definição, espera os três cloud-init e dispara o run_all.sh desacoplado da "
             "sessão SSH. Termina aqui: as Instâncias seguem sozinhas (ADR-0010) e o arquivo "
             "de estado no work dir é o que o watch lê."
@@ -496,6 +498,8 @@ def run_campaign(
     if commit is None:
         return EXIT_FAILURE
 
+    state_path = work_dir / STATE_NAME
+    _guard_state(state_path)
     if slices_dir is None:
         _guard_runs(bucket)
         campaign = full_campaign(config)
@@ -504,7 +508,7 @@ def run_campaign(
     _upload_plan(campaign, bucket=bucket, work_dir=work_dir)
 
     tracked = _StateFile(
-        work_dir / STATE_NAME,
+        state_path,
         CampaignState(
             bucket=bucket,
             config_path=str(config_path),
@@ -591,6 +595,16 @@ def _self_check(
     commit = _step(results, Step.GIT, git_rev_parse)
     _step(results, Step.SYNC, lambda: _sync_between_buckets(infra, work_dir))
     return commit
+
+
+def _guard_state(path: Path) -> None:
+    """A guarda da D12: instância de pé no arquivo de estado recusa o lançamento novo."""
+    if not path.exists():
+        return
+    refusal = refuse_standing_instances(_StateFile.load(path).state)
+    if refusal is not None:
+        raise CampaignError(f"{path}: {refusal}")
+    _report(f"{path}: só instâncias mortas, o arquivo de estado pode ser reescrito")
 
 
 def _guard_runs(bucket: str) -> None:

@@ -76,7 +76,9 @@ S3, e por isso sem localstack. O sentido bucket → disco é o do
 confere o sha256 antes do primeiro Cenário, e é o único do `s3 sync`: o sentido
 contrário sai como não shimado. Os `--exclude`/`--include` são aplicados na ordem
 em que a CLI de verdade os aplica — o último padrão que casa decide —, porque é
-um par deles que define o que a retomada baixa.
+um par deles que define o que a retomada baixa. Prefixo sem objeto desce zero
+arquivos e sai com status zero; bucket inexistente falha, como o `NoSuchBucket`
+da CLI, que é o que o `resume.py` separa de "campanha que ainda não começou".
 
 **A retomada decide sobre o que o bash escreveu.** O `resume.py` é invocado como
 caixa-preta sobre o bucket falso que o `run_all.sh` acabou de encher, com o

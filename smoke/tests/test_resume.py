@@ -245,8 +245,6 @@ class TestSync:
     def test_the_last_pattern_that_matches_is_the_one_that_decides(
         self, shim_bin, failed_loop, tmp_path
     ):
-        # O mesmo par na ordem trocada não quer dizer a mesma coisa: o
-        # `--exclude '*'` depois do include apaga o include, e nada desce.
         inverted = (*META_FILTERS[2:], *META_FILTERS[:2])
 
         assert (
@@ -259,6 +257,20 @@ class TestSync:
         (s3_root / BUCKET).mkdir(parents=True)
 
         assert sync_with_the_shim(shim_bin, s3_root, tmp_path / "vazio") == []
+
+    def test_a_bucket_that_does_not_exist_is_refused(self, shim_bin, tmp_path):
+        workdir = tmp_path / "sem-bucket"
+        workdir.mkdir()
+        refused = subprocess.run(
+            [str(shim_bin / "aws"), "s3", "sync", RUNS_SOURCE, str(workdir / "down")],
+            env=shim_environment(shim_bin, workdir, {}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert refused.returncode != 0
+        assert "bucket inexistente" in refused.stderr
 
     def test_the_other_direction_is_refused(self, shim_bin, failed_loop, tmp_path):
         workdir = tmp_path / "subida"

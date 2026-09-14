@@ -97,13 +97,8 @@ s3_cp() {
   fi
 }
 
-# O `s3 sync` da retomada: bucket para disco, com a chave relativa ao prefixo de
-# origem passando por todos os `--exclude`/`--include` na ordem da linha de
-# comando. Parar no primeiro que casa inverte o par `--exclude '*'
-# --include '*/meta.json'`: nada desceria, e a retomada declararia ausente a
-# campanha inteira.
 s3_sync() {
-  local source="" destination="" filter_flag=() filter_pattern=() relative included i
+  local source="" destination="" filter_flag=() filter_pattern=() bucket relative included i
   while (($#)); do
     case $1 in
       --exclude | --include)
@@ -132,6 +127,10 @@ s3_sync() {
   [[ -n $source && -n $destination ]] || fail "s3 sync exige origem e destino"
   [[ $source == s3://* && $destination != s3://* ]] ||
     fail "s3 sync fora do sentido bucket para disco não é shimado"
+
+  bucket=${source#s3://}
+  bucket=${bucket%%/*}
+  [[ -d $SMOKE_S3_ROOT/$bucket ]] || fail "bucket inexistente: $bucket"
 
   source=$(object_path "$source")
   # Prefixo sem objeto é um sync de zero arquivos com status zero, como na CLI de

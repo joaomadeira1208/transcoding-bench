@@ -11,6 +11,14 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Any
 
+from field_checks import (
+    FieldError,
+    check_aware_timestamp,
+    check_bool,
+    check_int,
+    check_non_empty_str,
+)
+
 INSTANCE_WIDTH = 4
 HOUR_WIDTH = 8
 
@@ -89,7 +97,10 @@ def _checked[T](record: type[T], payload: Any, what: str, instance_id: str) -> T
     for field in fields(record):
         if field.name not in payload:
             raise StatusError(f"{field.name}: campo obrigatório ausente")
-        _CHECKS[field.name](field.name, payload[field.name])
+        try:
+            _CHECKS[field.name](field.name, payload[field.name])
+        except FieldError as error:
+            raise StatusError(str(error)) from error
 
     if payload["instance_id"] != instance_id:
         return None
@@ -114,50 +125,18 @@ def _elapsed(seconds: int) -> str:
     return f"{minutes}m"
 
 
-def _check_non_empty_str(field: str, value: Any) -> None:
-    if type(value) is not str or not value:
-        raise StatusError(f"{field}: esperava str não-vazia, veio {value!r}")
-
-
-def _check_bool(field: str, value: Any) -> None:
-    # Tipo exato: o que se barra é o `"false"` que um `--arg` no lugar de um
-    # `--argjson` faria o `jq` do `run_all.sh` escrever.
-    if type(value) is not bool:
-        raise StatusError(f"{field}: esperava booleano JSON, veio {value!r}")
-
-
-def _check_int(field: str, value: Any) -> None:
-    # E ao contrário: `isinstance(True, int)` é verdadeiro, e um
-    # `"exit_status": true` passaria como "saiu com 1".
-    if type(value) is not int:
-        raise StatusError(f"{field}: esperava inteiro, veio {value!r}")
-
-
-def _check_aware_timestamp(field: str, value: Any) -> None:
-    if type(value) is not str:
-        raise StatusError(f"{field}: esperava timestamp ISO-8601 como string, veio {value!r}")
-
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError as error:
-        raise StatusError(f"{field}: timestamp ISO-8601 não parseável: {value!r}") from error
-
-    if parsed.utcoffset() is None:
-        raise StatusError(f"{field}: timestamp sem offset de fuso: {value!r}")
-
-
 _CHECKS: dict[str, Callable[[str, Any], None]] = {
-    "instance_id": _check_non_empty_str,
-    "finished_at": _check_aware_timestamp,
-    "written_at": _check_aware_timestamp,
-    "scenario_id": _check_non_empty_str,
-    "block_index": _check_int,
-    "block_count": _check_int,
-    "run_index": _check_int,
-    "run_count": _check_int,
-    "runs_total": _check_int,
-    "runs_failed": _check_int,
-    "elapsed_seconds": _check_int,
-    "capped": _check_bool,
-    "exit_status": _check_int,
+    "instance_id": check_non_empty_str,
+    "finished_at": check_aware_timestamp,
+    "written_at": check_aware_timestamp,
+    "scenario_id": check_non_empty_str,
+    "block_index": check_int,
+    "block_count": check_int,
+    "run_index": check_int,
+    "run_count": check_int,
+    "runs_total": check_int,
+    "runs_failed": check_int,
+    "elapsed_seconds": check_int,
+    "capped": check_bool,
+    "exit_status": check_int,
 }

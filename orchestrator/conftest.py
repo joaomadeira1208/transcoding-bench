@@ -280,13 +280,7 @@ def make_raw_config():
     """Uma factory de configuração já parseada, com overrides por chave de topo."""
 
     def _make(**overrides: Any) -> dict[str, Any]:
-        raw = copy.deepcopy(_MINIMAL)
-        for key, value in overrides.items():
-            if value is _ABSENT:
-                raw.pop(key, None)
-            else:
-                raw[key] = value
-        return raw
+        return _overridden(_MINIMAL, overrides)
 
     return _make
 
@@ -459,10 +453,4 @@ _INFRA: dict[str, Any] = {
 
 def make_infra(**overrides: Any) -> dict[str, Any]:
     """O `infra.json` já parseado, com overrides por chave de topo."""
-    infra = copy.deepcopy(_INFRA)
-    for key, value in overrides.items():
-        if value is _ABSENT:
-            infra.pop(key, None)
-        else:
-            infra[key] = value
-    return infra
+    return _overridden(_INFRA, overrides)

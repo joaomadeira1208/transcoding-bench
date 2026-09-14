@@ -51,6 +51,13 @@ a coluna do `scenario_id` acomoda a maior que a campanha gera, que é a do
 warm-up: as três passam as 46 h em pontos diferentes da mesma sequência, e é o
 alinhamento que faz três linhas serem lidas de uma vez às 3 da manhã.
 
+Os dois leitores conferem os campos pelas mesmas primitivas, que moram no
+`field_checks.py` e levantam um `FieldError` que cada um embrulha na sua
+exceção. "Inteiro exato" e "ISO-8601 com offset" não são regra de contrato
+nenhum, e a duplicação que a ADR-0022 licencia é **entre papéis**: aqui é o
+mesmo papel e o mesmo venv, e duplicar não compraria verificação independente de
+nada.
+
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano
 canônico (as duas são funções puras, e é nelas que os testes batem);

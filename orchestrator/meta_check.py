@@ -9,8 +9,15 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
+
+from field_checks import (
+    FieldError,
+    check_aware_timestamp,
+    check_bool,
+    check_int,
+    check_non_empty_str,
+)
 
 # Um `meta.json` de forma antiga continua no S3 durante a janela de retomada da
 # ADR-0012, e detectá-lo é o serviço deste campo.
@@ -34,7 +41,10 @@ def check_meta(raw: str | bytes) -> dict[str, Any]:
     for field, check in _CHECKS.items():
         if field not in meta:
             raise MetaError(f"{field}: campo obrigatório ausente")
-        check(field, meta[field])
+        try:
+            check(field, meta[field])
+        except FieldError as error:
+            raise MetaError(str(error)) from error
 
     return meta
 
@@ -42,52 +52,15 @@ def check_meta(raw: str | bytes) -> dict[str, Any]:
 def _check_schema_version(field: str, value: Any) -> None:
     if type(value) is not str or value not in KNOWN_SCHEMA_VERSIONS:
         known = ", ".join(sorted(KNOWN_SCHEMA_VERSIONS))
-        raise MetaError(f"{field}: esperava uma das versões conhecidas ({known}), veio {value!r}")
-
-
-def _check_non_empty_str(field: str, value: Any) -> None:
-    if type(value) is not str or not value:
-        raise MetaError(f"{field}: esperava str não-vazia, veio {value!r}")
-
-
-def _check_bool(field: str, value: Any) -> None:
-    # Tipo exato, e não `isinstance`: o que se barra é a string `"false"` que o
-    # bash escreve por acidente.
-    if type(value) is not bool:
-        raise MetaError(f"{field}: esperava booleano JSON, veio {value!r}")
-
-
-def _check_int(field: str, value: Any) -> None:
-    # Ao contrário: `isinstance(True, int)` é verdadeiro, e um `"exit_code": true`
-    # passaria como "falhou".
-    if type(value) is not int:
-        raise MetaError(f"{field}: esperava inteiro, veio {value!r}")
-
-
-def _check_aware_timestamp(field: str, value: Any) -> None:
-    """Parseável **e** timezone-aware — as duas metades, sempre juntas.
-
-    Naïve é rejeitado porque a informação para normalizar já se perdeu, e a
-    leitura é a única janela em que isso é detectável.
-    """
-    if type(value) is not str:
-        raise MetaError(f"{field}: esperava timestamp ISO-8601 como string, veio {value!r}")
-
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError as error:
-        raise MetaError(f"{field}: timestamp ISO-8601 não parseável: {value!r}") from error
-
-    if parsed.utcoffset() is None:
-        raise MetaError(f"{field}: timestamp sem offset de fuso: {value!r}")
+        raise FieldError(f"{field}: esperava uma das versões conhecidas ({known}), veio {value!r}")
 
 
 _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "schema_version": _check_schema_version,
-    "scenario_id": _check_non_empty_str,
-    "warmup": _check_bool,
-    "exit_code": _check_int,
-    "run_id": _check_non_empty_str,
-    "started_at": _check_aware_timestamp,
-    "commit": _check_non_empty_str,
+    "scenario_id": check_non_empty_str,
+    "warmup": check_bool,
+    "exit_code": check_int,
+    "run_id": check_non_empty_str,
+    "started_at": check_aware_timestamp,
+    "commit": check_non_empty_str,
 }

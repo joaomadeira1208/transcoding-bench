@@ -24,6 +24,7 @@ from campaign_launch import (
     abort_reasons,
     dispatch_command,
     full_campaign,
+    launched_instance,
     refuse_populated_runs,
     refuse_standing_instances,
     resumed_campaign,
@@ -115,7 +116,6 @@ from status_check import (
     STATUS_PREFIX,
     Progress,
     StatusError,
-    check_done_marker,
     check_progress,
     done_key,
     progress_key,
@@ -686,17 +686,24 @@ def _standing(tracked: _StateFile) -> list[TrackedInstance]:
 
 def _poll(tracked: _StateFile, unanswered: dict[str, int]) -> None:
     """As três perguntas por arquitetura de pé, e uma linha para cada arquitetura (D2)."""
-    try:
-        listed = {entry.key for entry in s3_list_prefix(tracked.state.bucket, STATUS_PREFIX)}
-    except _FAILURES as error:
-        _fail(f"s3://{tracked.state.bucket}/{STATUS_PREFIX}: a listagem falhou neste poll: {error}")
-        return
+    listed = _status_listing(tracked)
 
     for each in tracked.state.instances:
-        if is_standing(each.state):
-            _poll_architecture(tracked, each, listed=listed, unanswered=unanswered)
-        else:
+        if not is_standing(each.state):
             print(settled_line(each))
+        elif listed is None:
+            _fail(f"{each.instance}: o poll não pôde ser feito desta vez, sem a listagem")
+        else:
+            _poll_architecture(tracked, each, listed=listed, unanswered=unanswered)
+
+
+def _status_listing(tracked: _StateFile) -> set[str] | None:
+    """A listagem de `status/`, uma só para as três, ou `None` se ela não pôde ser feita."""
+    try:
+        return {entry.key for entry in s3_list_prefix(tracked.state.bucket, STATUS_PREFIX)}
+    except _FAILURES as error:
+        _fail(f"s3://{tracked.state.bucket}/{STATUS_PREFIX}: a listagem falhou neste poll: {error}")
+        return None
 
 
 def _poll_architecture(
@@ -716,7 +723,7 @@ def _poll_architecture(
         described = described_instance(each.instance_id)
         liveness = _liveness(each, described)
         payload = _status_object(tracked, done_key(each.instance_type), listed)
-        marker = marker_verdict(payload, instance_id=each.instance_id)
+        marker, outcome = marker_verdict(payload, instance_id=each.instance_id)
         progress = _progress(tracked, each, listed)
     except _FAILURES as error:
         _fail(f"{each.instance}: o poll não pôde ser feito desta vez: {error}")
@@ -733,7 +740,6 @@ def _poll_architecture(
     print(poll_line(each, state=state, progress=progress, unanswered_polls=silent))
 
     if state is Vigilance.READY_TO_TERMINATE:
-        outcome = check_done_marker(payload, instance_id=each.instance_id)
         _remember(tracked, each.instance, state=state, outcome=outcome)
         _terminate_architecture(tracked, each, Vigilance.FINISHED)
     elif state is Vigilance.DEAD:
@@ -913,20 +919,7 @@ def _launch_all(
     """Uma Instância por fatia, cada uma no arquivo de estado assim que tem id."""
     for each in campaign.slices:
         instance_id = _launch_architecture(each, state=tracked.state, infra=infra, config=config)
-        tracked.update(
-            [
-                *tracked.state.instances,
-                TrackedInstance(
-                    instance=each.instance.id,
-                    instance_id=instance_id,
-                    instance_type=each.instance.instance_type,
-                    pid=None,
-                    block_count=each.block_count,
-                    runs_total=each.runs_total,
-                    state=Vigilance.BOOTSTRAPPING,
-                ),
-            ]
-        )
+        tracked.update([*tracked.state.instances, launched_instance(each, instance_id)])
         _report(
             f"{instance_id}: {each.instance.id} ({each.instance.instance_type}) lançada no "
             f"commit {tracked.state.commit}, fatia em {each.key}"

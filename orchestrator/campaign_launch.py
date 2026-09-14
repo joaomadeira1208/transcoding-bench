@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from campaign_state import CampaignState
+from campaign_state import CampaignState, TrackedInstance
 from command_output import S3Object, TruncatedListing
 from experiment_config import ExperimentConfig, InstanceRecord
 from generate_scenarios import CANONICAL_FILENAME, SLICE_FILENAME
 from scenario_plan import build_canonical_plan, build_instance_slices
-from vigilance import is_standing
+from vigilance import Vigilance, is_standing
 
 SCENARIOS_PREFIX = "scenarios/"
 CANONICAL_KEY = f"{SCENARIOS_PREFIX}{CANONICAL_FILENAME}"
@@ -101,6 +101,20 @@ def refuse_standing_instances(state: CampaignState) -> str | None:
             f"rode o watch --abort antes de um run novo",
             *(f"  {each.instance_id} ({each.instance}): {each.state.value}" for each in standing),
         ]
+    )
+
+
+def launched_instance(each: ArchitectureSlice, instance_id: str) -> TrackedInstance:
+    """A arquitetura recém-lançada como o arquivo de estado a guarda, antes do disparo."""
+    return TrackedInstance(
+        instance=each.instance.id,
+        instance_id=instance_id,
+        instance_type=each.instance.instance_type,
+        pid=None,
+        block_count=each.block_count,
+        runs_total=each.runs_total,
+        state=Vigilance.BOOTSTRAPPING,
+        outcome=None,
     )
 
 

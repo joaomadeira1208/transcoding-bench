@@ -41,11 +41,6 @@ IMDS_HOP_LIMIT = 2
 
 READY_TIMEOUT_SECONDS = 600.0
 
-# Medido, e não estimado: nas nove corridas do preflight, do `run-instances` ao
-# container pronto, o c7a levou 19,7 a 19,9 min, o c7g 21,4 a 21,7 e o c7i 22,9 a
-# 24,6 — o `docker build` com `-march=native` da ADR-0008/0013 mais o download
-# dos Masters. O teto é o pior caso observado arredondado para 25 min mais 15 de
-# folga, e é ele que o prazo da vigilância soma (D10).
 BOOTSTRAP_TIMEOUT_SECONDS = 40 * 60.0
 
 

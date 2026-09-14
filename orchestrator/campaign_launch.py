@@ -1,10 +1,5 @@
 """O núcleo puro do `run`: a guarda do bucket, o que sobe e quem é lançado, e a
-decisão depois dos bootstraps (D7, D13 e D18 da Spec 4).
-
-As funções recebem dado já buscado e devolvem dado — quem lista o bucket, lê o
-diretório do `--slices`, lança e espera é o `orchestrator.py`, sobre o
-`external.py` e o `instance_launch.py`. O comando de disparo é argv e fica sem
-teste, como o `prepare_masters_command` (ADR-0022).
+decisão depois dos bootstraps (D7, D13 e D18 da Spec 4) — ver `orchestrator/README.md`.
 """
 
 from __future__ import annotations
@@ -15,7 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from command_output import S3Object
+from command_output import S3Object, TruncatedListing
 from experiment_config import ExperimentConfig, InstanceRecord
 from generate_scenarios import CANONICAL_FILENAME, SLICE_FILENAME
 from scenario_plan import build_canonical_plan, build_instance_slices
@@ -42,7 +37,7 @@ class Bootstrap(Enum):
 
 
 @dataclass(frozen=True)
-class SliceUpload:
+class ArchitectureSlice:
     """Uma arquitetura do lançamento: o registro que a lança e a fatia que ela consome."""
 
     instance: InstanceRecord
@@ -63,7 +58,7 @@ class CampaignPlan:
     """O que sobe para `scenarios/`, por chave, e quem é lançado, na ordem declarada."""
 
     uploads: dict[str, dict[str, Any]]
-    slices: tuple[SliceUpload, ...]
+    slices: tuple[ArchitectureSlice, ...]
 
 
 def slice_name(instance: str) -> str:
@@ -76,14 +71,10 @@ def slice_key(instance: str) -> str:
 
 
 def refuse_populated_runs(
-    listing: Sequence[S3Object] | None, *, preflight_prefix: str
+    listing: Sequence[S3Object] | TruncatedListing, *, preflight_prefix: str
 ) -> str | None:
-    """O motivo de recusar o bucket, ou `None` se `runs/` só tem o rastro do preflight.
-
-    `None` na listagem é a truncada: o parser do adaptador a recusa por desenho,
-    e o `runs/` de uma campanha passa de mil objetos — truncado é povoado.
-    """
-    if listing is None:
+    """O motivo de recusar o bucket, ou `None` se `runs/` só tem o rastro do preflight (D13)."""
+    if isinstance(listing, TruncatedListing):
         return "runs/ veio numa listagem truncada: o bucket já tem uma campanha"
     executions = [entry.key for entry in listing if not entry.key.startswith(preflight_prefix)]
     if not executions:
@@ -102,7 +93,7 @@ def full_campaign(config: ExperimentConfig) -> CampaignPlan:
     plan = build_canonical_plan(config)
     slices = build_instance_slices(plan)
     launched = tuple(
-        SliceUpload(instance=record, key=slice_key(record.id), plan=slices[record.id])
+        ArchitectureSlice(instance=record, key=slice_key(record.id), plan=slices[record.id])
         for record in config.instances
     )
     return CampaignPlan(
@@ -125,7 +116,7 @@ def resumed_campaign(config: ExperimentConfig, slices: Mapping[str, Any]) -> Cam
         )
 
     launched = tuple(
-        SliceUpload(
+        ArchitectureSlice(
             instance=record,
             key=slice_key(instance),
             plan=_checked_slice(instance, slices[instance]),

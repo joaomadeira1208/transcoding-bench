@@ -22,7 +22,7 @@ from campaign_launch import (
     resumed_campaign,
     slice_key,
 )
-from command_output import S3Object
+from command_output import S3Object, TruncatedListing
 from conftest import real_config, real_pilot_config
 from scenario_plan import build_canonical_plan, build_instance_slices
 
@@ -44,9 +44,6 @@ class TestTheGuardOverRuns:
         assert refusal() is None
 
     def test_the_trace_the_preflight_keeps_passes(self):
-        # Desde o #82 o preflight guarda a saída crua do probe em
-        # `runs/preflight/<instance-id>/`, sem apagar: o bucket do piloto tem 18
-        # objetos ali, e a D13 como a spec a escreveu recusaria o primeiro `run`.
         assert (
             refusal(
                 f"{PREFLIGHT_PREFIX}i-0123456789abcdef0/perf.json",
@@ -79,11 +76,9 @@ class TestTheGuardOverRuns:
         assert all(key in message for key in keys)
 
     def test_a_truncated_listing_counts_as_populated(self):
-        # O `runs/` de uma campanha passa de mil objetos e o parser do adaptador
-        # recusa truncamento por desenho: tratar a recusa como erro deixaria o
-        # bucket povoado indistinguível de uma CLI mal invocada, e tratá-la como
-        # vazio lançaria por cima da campanha.
-        message = refuse_populated_runs(None, preflight_prefix=PREFLIGHT_PREFIX)
+        truncated = TruncatedListing("list-objects-v2: página truncada")
+
+        message = refuse_populated_runs(truncated, preflight_prefix=PREFLIGHT_PREFIX)
 
         assert message is not None
         assert "truncada" in message
@@ -231,8 +226,9 @@ class TestTheDecisionAfterTheBootstraps:
         # provada, e o relatório não pode dizer que ela concluiu.
         reasons = abort_reasons(outcomes(c7i=Bootstrap.ERROR, c7a=Bootstrap.NOT_AWAITED))
 
-        assert [reason.split(":")[0] for reason in reasons] == ["c7i", "c7a"]
-        assert Bootstrap.NOT_AWAITED.value in reasons[1]
+        assert len(reasons) == 2
+        assert "c7i" in reasons[0]
+        assert "c7a" in reasons[1] and Bootstrap.NOT_AWAITED.value in reasons[1]
 
     def test_the_concluded_ones_are_not_in_the_reasons(self):
         reasons = abort_reasons(outcomes(c7i=Bootstrap.ERROR))

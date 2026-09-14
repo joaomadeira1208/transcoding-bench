@@ -63,7 +63,6 @@ class Step(Enum):
 
 STEPS = tuple(Step)
 
-# A auto-checagem: o que o `run` roda pela mesma função, antes de lançar (D6).
 SELF_CHECK_STEPS = (Step.STS, Step.BUCKETS, Step.SSM, Step.GIT, Step.SYNC)
 
 

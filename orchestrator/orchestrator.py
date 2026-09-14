@@ -16,6 +16,7 @@ from typing import Any
 
 from campaign_launch import (
     DISPATCH_LOG_NAME,
+    ArchitectureSlice,
     Bootstrap,
     CampaignError,
     CampaignPlan,
@@ -28,7 +29,7 @@ from campaign_launch import (
     slice_name,
 )
 from campaign_state import CampaignState, StateError, TrackedInstance, parse_state, serialize_state
-from command_output import OutputError, TruncatedListing, parse_dispatched_pid
+from command_output import OutputError, S3Object, TruncatedListing, parse_dispatched_pid
 from experiment_config import ConfigError, ExperimentConfig, validate_config
 from external import (
     RUNS_PREFIX,
@@ -112,7 +113,6 @@ SELF_CHECK_CONTENT = "preflight\n"
 STATE_NAME = "state.json"
 LOCAL_SCENARIOS_DIR = "scenarios"
 
-# As duas camadas locais da ADR-0012, como o `run_all.sh` as tem por default.
 RUN_TIMEOUT_SECONDS = 4 * 60 * 60
 TOTAL_TIMEOUT_SECONDS = 72 * 60 * 60
 
@@ -210,7 +210,7 @@ def main() -> int:
             **common,
         )
     )
-    launch = subcommands.add_parser(
+    campaign = subcommands.add_parser(
         "run",
         help="sobe o plano, lança uma Instância por arquitetura e dispara o run_all.sh em cada uma",
         description=(
@@ -221,18 +221,18 @@ def main() -> int:
             "de estado no work dir é o que o watch lê."
         ),
     )
-    launch.add_argument(
+    campaign.add_argument(
         "--config",
         required=True,
         type=Path,
         help="caminho do TOML da definição: config/pilot.toml ou config/experiment.toml",
     )
-    launch.add_argument(
+    campaign.add_argument(
         "--bucket",
         required=True,
         help="bucket que recebe o plano e as Execuções: o do piloto ou o da campanha",
     )
-    launch.add_argument(
+    campaign.add_argument(
         "--slices",
         type=Path,
         default=None,
@@ -241,21 +241,21 @@ def main() -> int:
             "scenarios/{id}.json, lança só essas arquiteturas e dispensa a guarda do runs/"
         ),
     )
-    launch.add_argument(
+    campaign.add_argument(
         "--run-timeout",
         type=positive_seconds,
         default=RUN_TIMEOUT_SECONDS,
         metavar="SECONDS",
         help=f"teto de cada Execução, repassado ao run_all.sh (default: {RUN_TIMEOUT_SECONDS})",
     )
-    launch.add_argument(
+    campaign.add_argument(
         "--total-timeout",
         type=positive_seconds,
         default=TOTAL_TIMEOUT_SECONDS,
         metavar="SECONDS",
         help=f"teto do laço de cada Instância, idem (default: {TOTAL_TIMEOUT_SECONDS})",
     )
-    launch.set_defaults(
+    campaign.set_defaults(
         run=lambda args, **common: run_campaign(
             config=_load_config(args.config),
             config_path=args.config,
@@ -491,9 +491,10 @@ def run_campaign(
     try:
         commit = _self_check(results, infra=infra, bucket=bucket, work_dir=work_dir)
     except _Aborted:
-        print(render_table(summarize(results, SELF_CHECK_STEPS)))
-        return EXIT_FAILURE
+        commit = None
     print(render_table(summarize(results, SELF_CHECK_STEPS)))
+    if commit is None:
+        return EXIT_FAILURE
 
     if slices_dir is None:
         _guard_runs(bucket)
@@ -502,62 +503,82 @@ def run_campaign(
         campaign = resumed_campaign(config, _read_slices(slices_dir))
     _upload_plan(campaign, bucket=bucket, work_dir=work_dir)
 
-    state_path = work_dir / STATE_NAME
-    state = CampaignState(
-        bucket=bucket,
-        config_path=str(config_path),
-        commit=commit,
-        slice_keys=tuple(each.key for each in campaign.slices),
-        instances=(),
+    tracked = _StateFile(
+        work_dir / STATE_NAME,
+        CampaignState(
+            bucket=bucket,
+            config_path=str(config_path),
+            commit=commit,
+            slice_keys=tuple(each.key for each in campaign.slices),
+            instances=(),
+        ),
     )
-    _write_state(state_path, state)
+    tracked.write()
 
     try:
-        state = _launch_all(state, campaign, infra=infra, config=config, state_path=state_path)
-        hosts = _await_bootstraps(state)
+        _launch_all(tracked, campaign, infra=infra, config=config)
+        hosts = _await_bootstraps(tracked.state)
     except _FAILURES as error:
         _fail(error)
-        _terminate_all(state, state_path)
+        _terminate_all(tracked)
         return EXIT_FAILURE
 
     try:
-        state = _dispatch_all(
-            state,
-            hosts,
-            run_timeout=run_timeout,
-            total_timeout=total_timeout,
-            state_path=state_path,
-        )
+        _dispatch_all(tracked, hosts, run_timeout=run_timeout, total_timeout=total_timeout)
     except _FAILURES as error:
         _fail(error)
         _fail(
-            f"as instâncias de {state_path} continuam de pé (ADR-0010): "
+            f"as instâncias de {tracked.path} continuam de pé (ADR-0010): "
             f"o watch --abort termina todas"
         )
         return EXIT_FAILURE
 
     _report(
-        f"{len(state.instances)} Instância(s) rodando sozinhas; o arquivo de estado é "
-        f"{state_path}. A vigilância é o watch (#76); a saída de emergência é o watch --abort"
+        f"{len(tracked.state.instances)} Instância(s) rodando sozinhas; o arquivo de estado é "
+        f"{tracked.path}. A vigilância é o watch (#76); a saída de emergência é o watch --abort"
     )
     return EXIT_OK
 
 
 def watch_abort(*, infra: InfraConfig, work_dir: Path) -> int:
     """Termina toda instância que o arquivo de estado lista e ainda não deu por morta."""
-    state_path = work_dir / STATE_NAME
-    state = _load_state(state_path)
-    standing = [tracked for tracked in state.instances if tracked.state is not Vigilance.DEAD]
-    if not standing:
-        _report(f"{state_path}: nenhuma instância de pé, nada a terminar")
+    tracked = _StateFile.load(work_dir / STATE_NAME)
+    terminated = _terminate_all(tracked)
+    if not terminated:
+        _report(f"{tracked.path}: nenhuma instância de pé, nada a terminar")
         return EXIT_OK
 
-    _terminate_all(state, state_path)
     _report(
-        f"{len(standing)} instância(s) terminada(s); o que já está em "
-        f"s3://{state.bucket}/{RUNS_PREFIX} fica lá, para o resume.py"
+        f"{terminated} instância(s) terminada(s); o que já está em "
+        f"s3://{tracked.state.bucket}/{RUNS_PREFIX} fica lá, para o resume.py"
     )
     return EXIT_OK
+
+
+@dataclass
+class _StateFile:
+    """O arquivo de estado em disco e a última versão dele que este processo escreveu.
+
+    Cada mudança passa pelo `update` e vai para o disco na hora: a instância que
+    subiu e só existe na memória de quem depois levantou é a que ninguém termina.
+    """
+
+    path: Path
+    state: CampaignState
+
+    @classmethod
+    def load(cls, path: Path) -> _StateFile:
+        try:
+            return cls(path, parse_state(json.loads(path.read_text(encoding="utf-8"))))
+        except (OSError, json.JSONDecodeError, StateError) as error:
+            raise StateError(f"{path}: {error}") from error
+
+    def update(self, instances: Sequence[TrackedInstance]) -> None:
+        self.state = replace(self.state, instances=tuple(instances))
+        self.write()
+
+    def write(self) -> None:
+        self.path.write_text(serialize_state(self.state), encoding="utf-8")
 
 
 def _self_check(
@@ -575,9 +596,9 @@ def _self_check(
 def _guard_runs(bucket: str) -> None:
     """A guarda da D13: `runs/` com qualquer Execução, ou truncado, recusa o lançamento."""
     try:
-        listing = s3_list_prefix(bucket, RUNS_PREFIX)
-    except TruncatedListing:
-        listing = None
+        listing: Sequence[S3Object] | TruncatedListing = s3_list_prefix(bucket, RUNS_PREFIX)
+    except TruncatedListing as truncated:
+        listing = truncated
     refusal = refuse_populated_runs(listing, preflight_prefix=PREFLIGHT_PREFIX)
     if refusal is not None:
         raise CampaignError(f"s3://{bucket}/{RUNS_PREFIX}: {refusal}")
@@ -610,43 +631,49 @@ def _upload_plan(campaign: CampaignPlan, *, bucket: str, work_dir: Path) -> None
 
 
 def _launch_all(
-    state: CampaignState,
+    tracked: _StateFile,
     campaign: CampaignPlan,
     *,
     infra: InfraConfig,
     config: ExperimentConfig,
-    state_path: Path,
-) -> CampaignState:
+) -> None:
     """Uma Instância por fatia, cada uma no arquivo de estado assim que tem id."""
     for each in campaign.slices:
-        target = encode_target(config, infra.amis, each.instance.instance_type)
-        instance_id = launch_encode(
-            target=target,
-            infra=infra,
-            commit=state.commit,
-            bucket=state.bucket,
-            slice_key=each.key,
-            manifest_key=f"{MASTERS_PREFIX}{MANIFEST_NAME}",
-            masters_prefix=MASTERS_PREFIX,
-            volume_size_gb=ENCODE_VOLUME_SIZE_GB,
-            tags=encode_tags(name=encode_name(each.instance), commit=state.commit),
+        instance_id = _launch_architecture(each, state=tracked.state, infra=infra, config=config)
+        tracked.update(
+            [
+                *tracked.state.instances,
+                TrackedInstance(
+                    instance=each.instance.id,
+                    instance_id=instance_id,
+                    instance_type=each.instance.instance_type,
+                    pid=None,
+                    block_count=each.block_count,
+                    runs_total=each.runs_total,
+                    state=Vigilance.BOOTSTRAPPING,
+                ),
+            ]
         )
-        tracked = TrackedInstance(
-            instance=each.instance.id,
-            instance_id=instance_id,
-            instance_type=each.instance.instance_type,
-            pid=None,
-            block_count=each.block_count,
-            runs_total=each.runs_total,
-            state=Vigilance.BOOTSTRAPPING,
-        )
-        state = replace(state, instances=(*state.instances, tracked))
-        _write_state(state_path, state)
         _report(
             f"{instance_id}: {each.instance.id} ({each.instance.instance_type}) lançada no "
-            f"commit {state.commit}, fatia em {each.key}"
+            f"commit {tracked.state.commit}, fatia em {each.key}"
         )
-    return state
+
+
+def _launch_architecture(
+    each: ArchitectureSlice, *, state: CampaignState, infra: InfraConfig, config: ExperimentConfig
+) -> str:
+    return launch_encode(
+        target=encode_target(config, infra.amis, each.instance.instance_type),
+        infra=infra,
+        commit=state.commit,
+        bucket=state.bucket,
+        slice_key=each.key,
+        manifest_key=f"{MASTERS_PREFIX}{MANIFEST_NAME}",
+        masters_prefix=MASTERS_PREFIX,
+        volume_size_gb=ENCODE_VOLUME_SIZE_GB,
+        tags=encode_tags(name=encode_name(each.instance), commit=state.commit),
+    )
 
 
 def _await_bootstraps(state: CampaignState) -> dict[str, str]:
@@ -677,65 +704,54 @@ def _await_bootstraps(state: CampaignState) -> dict[str, str]:
 
 
 def _dispatch_all(
-    state: CampaignState,
+    tracked: _StateFile,
     hosts: Mapping[str, str],
     *,
     run_timeout: int,
     total_timeout: int,
-    state_path: Path,
-) -> CampaignState:
+) -> None:
     """O `launch_container.sh` desacoplado em cada Instância, e o PID no arquivo de estado."""
-    dispatched = list(state.instances)
-    for index, tracked in enumerate(dispatched):
+    dispatched = list(tracked.state.instances)
+    for index, architecture in enumerate(dispatched):
         command = dispatch_command(
             repo_dir=REMOTE_REPO_DIR,
             work_dir=REMOTE_WORK_DIR,
-            plan_name=slice_name(tracked.instance),
-            bucket=state.bucket,
-            commit=state.commit,
-            instance_id=tracked.instance_id,
-            instance_type=tracked.instance_type,
+            plan_name=slice_name(architecture.instance),
+            bucket=tracked.state.bucket,
+            commit=tracked.state.commit,
+            instance_id=architecture.instance_id,
+            instance_type=architecture.instance_type,
             run_timeout=run_timeout,
             total_timeout=total_timeout,
         )
         pid = parse_dispatched_pid(
-            ssh_exec(hosts[tracked.instance], command, timeout=DISPATCH_TIMEOUT_SECONDS)
+            ssh_exec(hosts[architecture.instance], command, timeout=DISPATCH_TIMEOUT_SECONDS)
         )
-        dispatched[index] = replace(tracked, pid=pid, state=Vigilance.RUNNING)
-        state = replace(state, instances=tuple(dispatched))
-        _write_state(state_path, state)
+        dispatched[index] = replace(architecture, pid=pid, state=Vigilance.RUNNING)
+        tracked.update(dispatched)
         _report(
-            f"{tracked.instance_id}: run_all.sh disparado, PID {pid}, "
+            f"{architecture.instance_id}: run_all.sh disparado, PID {pid}, "
             f"log em {REMOTE_WORK_DIR}/{DISPATCH_LOG_NAME}"
         )
-    return state
 
 
-def _terminate_all(state: CampaignState, state_path: Path) -> None:
-    """Termina o que está de pé e o marca morto no arquivo, numa chamada só."""
-    standing = [tracked for tracked in state.instances if tracked.state is not Vigilance.DEAD]
-    if not standing:
-        return
-    _report(f"terminando {', '.join(tracked.instance_id for tracked in standing)}")
-    terminate_instances([tracked.instance_id for tracked in standing])
-    _write_state(
-        state_path,
-        replace(
-            state,
-            instances=tuple(replace(tracked, state=Vigilance.DEAD) for tracked in state.instances),
-        ),
-    )
-
-
-def _write_state(path: Path, state: CampaignState) -> None:
-    path.write_text(serialize_state(state), encoding="utf-8")
-
-
-def _load_state(path: Path) -> CampaignState:
-    try:
-        return parse_state(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, StateError) as error:
-        raise StateError(f"{path}: {error}") from error
+def _terminate_all(tracked: _StateFile) -> int:
+    """Termina o que está de pé, numa chamada só, e o marca morto; devolve quantas eram."""
+    standing = [
+        architecture
+        for architecture in tracked.state.instances
+        if architecture.state is not Vigilance.DEAD
+    ]
+    if standing:
+        _report(f"terminando {', '.join(architecture.instance_id for architecture in standing)}")
+        terminate_instances([architecture.instance_id for architecture in standing])
+        tracked.update(
+            [
+                replace(architecture, state=Vigilance.DEAD)
+                for architecture in tracked.state.instances
+            ]
+        )
+    return len(standing)
 
 
 def _list_both_buckets(infra: InfraConfig, bucket: str) -> str:

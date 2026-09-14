@@ -298,10 +298,6 @@ class TestCloudInitStatus:
 
 
 class TestDispatchedPid:
-    # O que o comando de disparo devolve é o que o `watch` vai perguntar com
-    # `kill -0`: um PID inventado a partir de uma saída vazia ou de um `0` faria
-    # a vigilância ler "vivo" para sempre.
-
     def test_the_pid_the_remote_shell_echoed(self):
         assert parse_dispatched_pid("4242\n") == 4242
 

@@ -11,9 +11,11 @@ import pytest
 from command_output import (
     CloudInitStatus,
     OutputError,
+    TruncatedListing,
     parse_caller_identity,
     parse_cloud_init_status,
     parse_describe_instances,
+    parse_dispatched_pid,
     parse_get_parameter,
     parse_list_objects,
     parse_run_instances,
@@ -193,10 +195,12 @@ class TestListObjects:
             "runs/10/meta.json",
         ]
 
-    def test_rejects_a_truncated_page(self):
+    def test_rejects_a_truncated_page_as_such(self):
+        # Como o subtipo, e não como a recusa genérica: é por ele que a guarda do
+        # `run` lê "povoado" em vez de "CLI mal invocada".
         payload = make_list_objects_payload(make_s3_object("runs/1/meta.json"), IsTruncated=True)
 
-        with pytest.raises(OutputError, match="--page-size"):
+        with pytest.raises(TruncatedListing, match="--page-size"):
             parse_list_objects(payload)
 
     def test_rejects_a_page_with_a_continuation_token(self):
@@ -204,7 +208,7 @@ class TestListObjects:
             make_s3_object("runs/1/meta.json"), NextToken="eyJNYXJrZXIi"
         )
 
-        with pytest.raises(OutputError, match="--max-items"):
+        with pytest.raises(TruncatedListing, match="--max-items"):
             parse_list_objects(payload)
 
     def test_rejects_an_object_without_size(self):
@@ -291,6 +295,25 @@ class TestCloudInitStatus:
     def test_rejects_output_without_a_status_line(self):
         with pytest.raises(OutputError, match="status"):
             parse_cloud_init_status("Permission denied (publickey).\n")
+
+
+class TestDispatchedPid:
+    # O que o comando de disparo devolve é o que o `watch` vai perguntar com
+    # `kill -0`: um PID inventado a partir de uma saída vazia ou de um `0` faria
+    # a vigilância ler "vivo" para sempre.
+
+    def test_the_pid_the_remote_shell_echoed(self):
+        assert parse_dispatched_pid("4242\n") == 4242
+
+    @pytest.mark.parametrize("raw", ["", "\n", "bash: setsid: command not found\n", "42 43\n"])
+    def test_rejects_what_is_not_a_single_pid(self, raw):
+        with pytest.raises(OutputError, match="PID"):
+            parse_dispatched_pid(raw)
+
+    @pytest.mark.parametrize("raw", ["0\n", "-1\n"])
+    def test_rejects_the_pids_that_kill_reads_as_a_group(self, raw):
+        with pytest.raises(OutputError, match="PID"):
+            parse_dispatched_pid(raw)
 
 
 class TestCapturedPayloads:

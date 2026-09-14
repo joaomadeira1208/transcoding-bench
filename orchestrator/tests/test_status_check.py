@@ -207,8 +207,6 @@ class TestProgressLine:
         assert line.index("21/36 runs") == RUNS_COLUMN
 
     def test_two_architectures_in_blocks_of_different_widths_keep_the_columns_aligned(self):
-        # A campanha tem 54 blocos e 324 runs por fatia, e as três arquiteturas
-        # passam as 46 h em pontos diferentes da mesma sequência.
         ninth = progress_line(
             progress_of(block_index=9, block_count=54, runs_total=54),
             instance="c7g",
@@ -259,10 +257,6 @@ class TestProgressLine:
         assert line == "         c7i  sem progresso ainda, 0/36 runs reportados"
 
 
-# O que só o bash diz: o `jq -n` do `run_all.sh` escreveu estes dois objetos no
-# bucket falso do smoke, no laço de um bloco. Uma fixture montada aqui seria o
-# autor do leitor conferindo o que ele mesmo imaginou que o bash produz — é o
-# instinto do `test_meta_agreement.py` (ADR-0022).
 class TestWhatTheBashWrote:
     def test_the_captured_progress_is_accepted(self):
         progress = capture("status-progress.json", check_progress)

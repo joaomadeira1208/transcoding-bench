@@ -454,3 +454,49 @@ _INFRA: dict[str, Any] = {
 def make_infra(**overrides: Any) -> dict[str, Any]:
     """O `infra.json` já parseado, com overrides por chave de topo."""
     return _overridden(_INFRA, overrides)
+
+
+# O arquivo de estado que o `run` escreve no work dir antes do primeiro
+# lançamento e o `watch` relê para retomar a vigilância (D12 da Spec 4). Os
+# totais são os da fatia do piloto, os mesmos que a linha de progresso do
+# `README.md` ilustra.
+
+_TRACKED_INSTANCE: dict[str, Any] = {
+    "instance": "c7g",
+    "instance_id": "i-0123456789abcdef0",
+    "instance_type": "c7g.xlarge",
+    "pid": 4242,
+    "block_count": 6,
+    "runs_total": 36,
+    "state": "running",
+}
+
+_CAMPAIGN_STATE: dict[str, Any] = {
+    "bucket": _INFRA["buckets"]["pilot"],
+    "config_path": "config/pilot.toml",
+    "commit": _VALID_META["commit"],
+    "slice_keys": ["scenarios/c7g.json", "scenarios/c7i.json"],
+    "instances": [
+        _TRACKED_INSTANCE,
+        # A arquitetura lançada e ainda não disparada: o PID só existe depois do
+        # disparo, e é o estado em que um `watch` retomado pode encontrá-la.
+        {
+            **_TRACKED_INSTANCE,
+            "instance": "c7i",
+            "instance_id": "i-09876543210fedcba",
+            "instance_type": "c7i.xlarge",
+            "pid": None,
+            "state": "bootstrapping",
+        },
+    ],
+}
+
+
+def make_tracked_instance(**overrides: Any) -> dict[str, Any]:
+    """Uma arquitetura do arquivo de estado como dict, com overrides por campo."""
+    return _overridden(_TRACKED_INSTANCE, overrides)
+
+
+def make_campaign_state(**overrides: Any) -> dict[str, Any]:
+    """O arquivo de estado já parseado, com overrides por chave de topo."""
+    return _overridden(_CAMPAIGN_STATE, overrides)

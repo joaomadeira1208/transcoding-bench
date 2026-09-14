@@ -51,12 +51,71 @@ a coluna do `scenario_id` acomoda a maior que a campanha gera, que é a do
 warm-up: as três passam as 46 h em pontos diferentes da mesma sequência, e é o
 alinhamento que faz três linhas serem lidas de uma vez às 3 da manhã.
 
-Os dois leitores conferem os campos pelas mesmas primitivas, que moram no
-`field_checks.py` e levantam um `FieldError` que cada um embrulha na sua
-exceção. "Inteiro exato" e "ISO-8601 com offset" não são regra de contrato
-nenhum, e a duplicação que a ADR-0022 licencia é **entre papéis**: aqui é o
-mesmo papel e o mesmo venv, e duplicar não compraria verificação independente de
-nada.
+Os leitores conferem os campos pelas mesmas primitivas, que moram no
+`field_checks.py` e levantam um `FieldError` que cada um embrulha na sua exceção,
+e pelo mesmo laço: o `check_fields` percorre os campos do registro exigindo
+presença e tipo e devolve os valores crus a quem sabe montá-lo. "Inteiro exato" e
+"ISO-8601 com offset" não são regra de contrato nenhum, e a duplicação que a
+ADR-0022 licencia é **entre papéis**: aqui é o mesmo papel e o mesmo venv, e
+duplicar não compraria verificação independente de nada.
+
+O `vigilance.py` é a decisão de um poll sobre uma arquitetura (D2/D8/D9 da
+Spec 4): recebe o que o `describe-instances` disse, o que o `kill -0` no PID
+gravado respondeu por SSH, o veredito do `status_check` sobre o marcador e
+quantos polls seguidos ficaram sem resposta, e devolve um dos cinco estados —
+bootstrapping, rodando, pronta para terminar, morta, sem resposta.
+
+A precedência entre as respostas é a decisão inteira. O marcador válido vem antes
+de tudo, porque o fim normal é ele com o processo já morto: o `run_all.sh`
+escreve o marcador e sai, e perguntar pelo processo primeiro faria toda campanha
+bem-sucedida ser lida como morte no meio de um run. Vale qualquer que seja o
+`exit_status` que ele carrega (D9) — o trabalho daquela arquitetura acabou, o que
+falhou está no `resume.py`, e esperar a última custaria a diferença entre as 30 h
+de uma e as 46 h da outra. Vale inclusive contra a instância ausente do
+`describe`, que é a única exceção à regra de que ausente é morta: um marcador
+válido é o trabalho terminado, e recusá-lo porque o `describe` já esqueceu a
+instância mandaria o pesquisador retomar uma fatia completa.
+
+Depois do marcador vem o `describe-instances`: `pending` é bootstrapping,
+`running` passa a pergunta adiante, e qualquer outro estado — inclusive a
+instância ausente da resposta — é morte. Só então o processo: sem disparo ainda é
+bootstrapping, vivo é rodando, morto é morta, e sem resposta é sem resposta até o
+`UNANSWERED_POLL_LIMIT`, e morta no poll seguinte.
+
+"Sem disparo ainda" é uma das respostas do `kill -0` porque o bootstrap acontece
+com a instância já `running`: são ~25 min de `cloud-init` (as nove corridas do
+preflight mediram 19,7 a 24,6 min) em que não há PID pelo qual perguntar, e sem
+essa resposta o laço teria de mentir "sem resposta" e abandonar como morta uma
+instância que está buildando. É o mesmo intervalo em que o `pid` do arquivo de
+estado é nulo.
+
+O progresso não entra na decisão, e é por isso que o `kill -0` existe: um encode
+de 4K no x265 leva uma hora, e nesse intervalo o objeto de progresso não muda —
+progresso parado com processo vivo é o caso normal. O limite de polls sem
+resposta é constante pelo mesmo motivo: com o poll de 5 minutos da ADR-0010, três
+polls são ~15 min de silêncio numa instância que o `describe-instances` continua
+chamando de `running`; abaixo disso um sshd ocupado viraria morte e a arquitetura
+seria abandonada viva, acima a morte de verdade demora a aparecer na tela.
+
+O `campaign_state.py` é o arquivo de estado (D12), o JSON no work dir do
+Orquestrador: o bucket, o caminho da definição, o SHA e as chaves das fatias que
+este lançamento subiu e, por arquitetura, o `instance_id`, o `instance_type`, o
+PID remoto, os totais de blocos e de runs da fatia e o estado corrente, que é o
+do `vigilance.py`. O `run` o escreve antes do primeiro lançamento — quando as
+fatias já subiram e nenhuma arquitetura está de pé, e é por isso que as chaves
+são de topo e a lista de arquiteturas nasce vazia — e o reescreve a cada mudança
+de estado; o `watch` o lê e volta ao mesmo laço.
+
+O `pid` é o único campo que aceita nulo, e é o intervalo entre o lançamento e o
+disparo; o `instance_id` não aceita, porque é por ele que a vigilância pergunta e
+por ele que ela termina. Nulo é o único valor degenerado que o `pid` aceita: ele
+vai para um `kill -0`, onde `0` sinaliza o process group de quem chama e `-1`
+todo processo alcançável — os dois respondem vivo para sempre, e a arquitetura
+ficaria rodando até o prazo total de D10 estourar. O parse recusa nomeando o
+campo com o índice da arquitetura (`instances[1].instance_id`), pelas primitivas
+do `field_checks.py`, e a serialização é determinística como a do plano: o
+arquivo é reescrito a cada mudança, e o `diff` entre duas versões tem de mostrar
+só o que mudou.
 
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano

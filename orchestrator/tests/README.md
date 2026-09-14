@@ -10,6 +10,7 @@ duas definições de `config/`, a checagem do `meta.json` e do
 `masters/manifest.json` que o bash escreve à mão, o veredito sobre os dois
 objetos de `status/` e a linha de progresso que sai deles, o núcleo do
 `preflight` (o veredito sobre o `perf stat`, a lista de eventos que ele pede e a
-tabela) e o do lançamento (a AMI da arquitetura pedida e as tags da instância).
+tabela), o do lançamento (a AMI da arquitetura pedida e as tags da instância), a
+precedência da decisão de vigilância e a leitura do arquivo de estado.
 Invariantes escritas à mão como default; golden inline no `.py` só onde congelar
 *é* o requisito.

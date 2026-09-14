@@ -63,6 +63,8 @@ class Step(Enum):
 
 STEPS = tuple(Step)
 
+SELF_CHECK_STEPS = (Step.STS, Step.BUCKETS, Step.SSM, Step.GIT, Step.SYNC)
+
 
 class Outcome(Enum):
     PASSED = "passou"
@@ -259,7 +261,9 @@ def _implausible(metric: MetricRecord, counted: Mapping[str, Counter]) -> str | 
     )
 
 
-def summarize(observed: Sequence[StepResult]) -> tuple[StepResult, ...]:
+def summarize(
+    observed: Sequence[StepResult], steps: Sequence[Step] = STEPS
+) -> tuple[StepResult, ...]:
     """A tabela inteira, na ordem declarada: o que não rodou aparece dizendo isso."""
     seen: dict[Step, StepResult] = {}
     for result in observed:
@@ -267,7 +271,7 @@ def summarize(observed: Sequence[StepResult]) -> tuple[StepResult, ...]:
             raise PreflightError(f"{result.step.value}: passo registrado duas vezes")
         seen[result.step] = result
 
-    return tuple(seen.get(step, StepResult(step, Outcome.SKIPPED, "")) for step in STEPS)
+    return tuple(seen.get(step, StepResult(step, Outcome.SKIPPED, "")) for step in steps)
 
 
 def failed(results: Sequence[StepResult]) -> bool:

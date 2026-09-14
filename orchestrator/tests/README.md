@@ -11,6 +11,9 @@ duas definições de `config/`, a checagem do `meta.json` e do
 objetos de `status/` e a linha de progresso que sai deles, o núcleo do
 `preflight` (o veredito sobre o `perf stat`, a lista de eventos que ele pede e a
 tabela), o do lançamento (a AMI da arquitetura pedida e as tags da instância), a
-precedência da decisão de vigilância e a leitura do arquivo de estado.
+precedência da decisão de vigilância, a leitura do arquivo de estado, o núcleo
+do `run` (as duas guardas — o `runs/` povoado e o arquivo de estado com
+instância de pé —, a projeção do `--slices` e a decisão depois dos bootstraps) e
+o parser do PID que volta do disparo.
 Invariantes escritas à mão como default; golden inline no `.py` só onde congelar
 *é* o requisito.

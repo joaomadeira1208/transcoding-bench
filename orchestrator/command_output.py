@@ -12,6 +12,10 @@ class OutputError(Exception):
     """Saída de comando externo que o Orquestrador recusa a ler."""
 
 
+class TruncatedListing(OutputError):
+    """Listagem que não coube numa página — o `run` a lê como bucket povoado (D13)."""
+
+
 @dataclass(frozen=True)
 class DescribedInstance:
     """O que o `describe-instances` diz de uma instância, reduzido ao que se usa."""
@@ -105,6 +109,25 @@ def parse_cloud_init_status(raw: str) -> CloudInitStatus:
     raise OutputError(f"cloud-init: saída sem linha de status: {raw.strip()[:120]!r}")
 
 
+def parse_dispatched_pid(raw: str) -> int:
+    """O PID que o comando de disparo ecoou — um só, e nunca o `0` ou o `-1`.
+
+    Positivo pelo mesmo motivo do arquivo de estado: é para um `kill -0`, onde
+    `0` é o process group de quem chama e `-1` todo processo alcançável.
+    """
+    tokens = raw.split()
+    refusal = f"disparo: esperava um PID no stdout, veio {raw.strip()[:120]!r}"
+    if len(tokens) != 1:
+        raise OutputError(refusal)
+    try:
+        pid = int(tokens[0])
+    except ValueError as error:
+        raise OutputError(refusal) from error
+    if pid <= 0:
+        raise OutputError(f"disparo: esperava PID positivo, veio {pid}")
+    return pid
+
+
 def _s3_object(entry: Any) -> S3Object:
     content = _as_object(entry, "Contents[]")
     return S3Object(key=_field(content, "Key", str), size=_field(content, "Size", int))
@@ -141,7 +164,7 @@ def _reject_truncation(payload: dict[str, Any]) -> None:
     daí a listagem perde chaves em silêncio.
     """
     if payload.get("IsTruncated") or "NextToken" in payload or "NextContinuationToken" in payload:
-        raise OutputError(
+        raise TruncatedListing(
             "list-objects-v2: página truncada — a CLI v2 agrega páginas sozinha, "
             "então isto é --page-size/--max-items no argv"
         )

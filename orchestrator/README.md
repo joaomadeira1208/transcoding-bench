@@ -104,7 +104,8 @@ PID remoto, os totais de blocos e de runs da fatia e o estado corrente, que é o
 do `vigilance.py`. O `run` o escreve antes do primeiro lançamento — quando as
 fatias já subiram e nenhuma arquitetura está de pé, e é por isso que as chaves
 são de topo e a lista de arquiteturas nasce vazia — e o reescreve a cada mudança
-de estado; o `watch` o lê e volta ao mesmo laço.
+de estado; o `watch` o lê e volta ao mesmo laço. Mora ao lado do arquivo de
+infra, em `~/work/state.json`, e um `run` novo o sobrescreve.
 
 O `pid` é o único campo que aceita nulo, e é o intervalo entre o lançamento e o
 disparo; o `instance_id` não aceita, porque é por ele que a vigilância pergunta e
@@ -116,6 +117,14 @@ campo com o índice da arquitetura (`instances[1].instance_id`), pelas primitiva
 do `field_checks.py`, e a serialização é determinística como a do plano: o
 arquivo é reescrito a cada mudança, e o `diff` entre duas versões tem de mostrar
 só o que mudou.
+
+O `campaign_launch.py` é o núcleo puro do `run` (D7, D13 e D18): a guarda sobre
+a listagem de `runs/`, a projeção do que sobe e de quem é lançado — com e sem
+`--slices` — e a decisão depois dos três bootstraps. As três recebem dado já
+buscado (a lista de `S3Object`, as fatias já parseadas, o status de cada espera)
+e devolvem dado, e são o que ganha teste; o comando de disparo mora no mesmo
+módulo, é argv e fica sem teste, como o `prepare_masters_command` (ADR-0022). O
+que cada uma decide está na seção do `run`, abaixo.
 
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano
@@ -351,11 +360,14 @@ recusá-la amarraria um `apply` novo a um checkout novo do Orquestrador.
 Um subcomando por passo da campanha, e o `--infra` antes dele, com o caminho do
 arquivo acima. Roda na instância do Orquestrador, **dentro de `tmux`**: os
 subcomandos bloqueiam por horas e a sessão SSH que cair não pode levar o passo
-junto. São dois:
+junto. São quatro:
 
     python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
         --instance-type c7g.xlarge
+    python orchestrator/orchestrator.py --infra ~/work/infra.json run \
+        --config config/pilot.toml --bucket <piloto>
+    python orchestrator/orchestrator.py --infra ~/work/infra.json watch --abort
 
 A escada em que eles se encaixam, cada degrau disparado pelo pesquisador
 (ADR-0022): smoke local → aceite com Docker → preparação dos Masters → **gate
@@ -540,6 +552,114 @@ a instância instala (`aws-cli/2.36.40`) são `none`, `metadata-directive` e
 `default`, e a flag **só se aplica a cópia S3→S3**: o `s3 cp` local↔S3 do resto
 do sistema não vê diferença. O argv fica sem teste, como o resto do adaptador
 (ADR-0022).
+
+### O `run`
+
+O terceiro subcomando é a campanha até o disparo, e o piloto atravessa
+exatamente este caminho com o `pilot.toml` e o bucket do piloto:
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json run \
+        --config config/pilot.toml --bucket <piloto> \
+        [--slices <dir>] [--run-timeout <s>] [--total-timeout <s>]
+
+`--config` e `--bucket` são obrigatórios e sem default: o par é o gate humano
+entre piloto e campanha, e um default de bucket é o erro da ADR-0011 esperando
+para acontecer (D5). Para este subcomando a definição deixa de ser a constante
+do `orchestrator.py`: é o `--config` que gera o plano e que dá os registros
+`[[instance]]` e a AMI de cada um. Os dois timeouts são as camadas locais da
+ADR-0012, com os mesmos defaults do `run_all.sh` (4 h e 72 h), e viajam até ele
+pelo `launch_container.sh`; o piloto roda com os mesmos (ADR-0022).
+
+Em passos:
+
+1. **A auto-checagem**, pela mesma função do preflight — `sts`, `buckets` com o
+   manifesto no bucket alvo, `ssm`, `git`, `s3-sync` — e a tabela dela. Falha ali
+   é saída sem lançamento (D6).
+2. **A guarda do arquivo de estado** (D12). Antes de qualquer escrita, o `run`
+   lê o `~/work/state.json` que já esteja lá e recusa se ele listar alguma
+   arquitetura que não esteja morta, nomeando os `instance_id` e mandando rodar
+   o `watch --abort` primeiro. O arquivo é a saída de emergência — é *por causa
+   dele* que os ids não são caçados no console —, e um `run` novo que o
+   sobrescreva deixa o lançamento anterior de pé sem ninguém que saiba os ids.
+   A guarda do `runs/` não cobre esse caso: com `--slices` ela nem roda, e sem
+   ela só recusa depois da primeira Execução concluída, isto é, depois do
+   bootstrap inteiro (~2 h) mais um encode — uma janela inteira em que um
+   segundo `run` passaria e zeraria o arquivo. Um arquivo cujas instâncias estão
+   todas mortas passa: é o rastro de uma campanha encerrada.
+3. **A guarda do bucket** (D13). Sem `--slices`, o `run` lista `runs/` do bucket
+   e recusa se houver qualquer objeto **fora de `runs/preflight/`**: cobre o
+   `pilot.toml` contra o bucket da campanha e a campanha disparada duas vezes.
+   A exceção do prefixo é obrigatória, não detalhe: desde o #82 o preflight
+   guarda a saída crua do probe em `runs/preflight/<instance-id>/`, sem apagar,
+   e a D13 como a spec a escreveu recusaria o primeiro `run` do piloto.
+   A comparação é pelo prefixo com a barra, de modo que um
+   `runs/preflight-old/` é Execução. Uma listagem truncada conta como
+   **povoado**, e não como erro: o `runs/` de uma campanha passa de mil
+   objetos, o parser do adaptador recusa truncamento por desenho, e o `run` lê
+   essa recusa (`TruncatedListing`) como "já tem campanha". Com `--slices` a
+   guarda não se aplica, porque retomar é justamente escrever num bucket
+   povoado.
+4. **O plano.** Sem `--slices`, gera o canônico da definição e sobe
+   `scenarios/canonical.json` e `scenarios/{id}.json` por registro `[[instance]]`.
+   Com `--slices <dir>`, sobe só as fatias presentes no diretório — o `--out` do
+   `resume.py` —, sobrescrevendo `scenarios/{id}.json`, sem tocar no
+   `canonical.json`, e só essas arquiteturas seguem (D18); `--config` continua
+   obrigatório, porque é dele que saem o tipo e a AMI de cada id. O id é o nome
+   do arquivo, e um que a definição não declare é recusado nomeando os
+   declarados — inclusive o `canonical.json` que um `--slices build/scenarios`
+   levaria junto. Uma fatia com blocos de outra arquitetura é recusada também:
+   `c7g.json` cheia de blocos do c7i lançaria uma `c7g.xlarge` encodando a
+   matriz do c7i. Os totais de blocos e de runs de cada arquitetura são contados
+   sobre a fatia que sobe, e não sobre a definição, porque na retomada são os da
+   fatia reduzida que a linha de progresso divide.
+5. **O arquivo de estado** é escrito antes do primeiro lançamento, com as chaves
+   das fatias e nenhuma arquitetura, e reescrito a cada instância lançada (com
+   `pid` nulo e estado `bootstrapping`) e a cada disparo (com o PID e `running`).
+6. **Uma Instância de encode por arquitetura**, pelo `instance_launch.py`: AMI
+   pela `arch`, perfil `encode`, 200 GB gp3, hop limit 2, e as tags `role`,
+   `commit` e `Name=transcoding-bench-encode-{id}` (D14).
+7. **A espera pelos três `cloud-init`**, uma de cada vez. **Qualquer** erro ou
+   timeout para a espera ali, termina tudo o que subiu — inclusive a que ainda
+   não foi esperada, e o relatório a nomeia como tal — e sai com erro antes de
+   qualquer disparo (D7): um build quebrado é `Dockerfile`, e `Dockerfile` é outra
+   campanha (ADR-0021). A mesma regra vale para o que falhar entre o primeiro
+   lançamento e o último bootstrap, um `run-instances` recusado na segunda
+   arquitetura inclusive. As terminadas ficam no arquivo de estado como mortas.
+8. **O disparo desacoplado** (D1): por SSH, o `launch_container.sh` sob
+   `setsid`/`nohup`, stdin de `/dev/null`, stdout e stderr em
+   `~/work/launch_container.log` da instância, com os dois timeouts; o comando
+   ecoa o PID, que vai para `~/work/launch_container.pid` lá e para o arquivo de
+   estado aqui. O `ssh` volta em segundos, e é o `parse_dispatched_pid` que
+   recusa um PID que não seja um inteiro positivo — o `0` e o `-1` são os que o
+   `kill -0` lê como "vivo para sempre". O `launch_container.sh` termina em `exec
+   sudo docker run`, de modo que o PID gravado passa a ser de um processo de
+   root: quem perguntar por ele com `kill -0` como `ubuntu` recebe `EPERM`, e a
+   pergunta do `watch` tem de ser `sudo kill -0` ou `ps -p`.
+9. **Termina aqui.** Imprime o caminho do arquivo de estado e diz que a
+   vigilância é o `watch` (#76). As Instâncias ficam rodando — são auto-dirigidas
+   por desenho (ADR-0010) — e a partir do primeiro `ssh` de disparo a regra
+   inverte: nenhuma falha desta fase termina instância alguma, e o `run` sai com
+   erro dizendo que o `watch --abort` termina todas.
+
+O que ganha teste é o núcleo do `campaign_launch.py`: a guarda sobre a listagem
+(vazia, só com o rastro do preflight, com Execução, truncada), a guarda sobre o
+arquivo de estado (sem arquitetura, todas mortas, e cada estado de pé recusado
+nomeando o id), a projeção do `--slices` (quais chaves sobem, quais arquiteturas
+são lançadas, `canonical.json` intocado, id não declarado e fatia de outra
+arquitetura recusados) e a decisão de abortar tudo sobre os três status de
+bootstrap; mais o parser do PID no `command_output.py`. Laço, comandos remotos
+e renderização são escritos direto (ADR-0022).
+
+### O `watch --abort`
+
+O quarto subcomando nasce só com `--abort`, e é a saída de emergência que não é
+o console da AWS (D12): lê `~/work/state.json`, o valida pelo `campaign_state.py`
+— campo defeituoso é recusado pelo nome, e uma vigilância nunca termina a
+instância errada — e termina, numa chamada só, todas as instâncias que ele lista
+e ainda não estão como mortas, marcando-as mortas em seguida. O que já está em
+`runs/` fica lá, para o `resume.py`. Um arquivo sem instância de pé é "nada a
+terminar", com status zero. O `watch` sem `--abort` — o laço de vigilância — é o
+#76.
 
 ## A retomada: `resume.py`
 

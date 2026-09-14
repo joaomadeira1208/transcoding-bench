@@ -15,8 +15,8 @@ from status_check import check_done_marker
 
 UNANSWERED_POLL_LIMIT = 3
 
-PENDING = "pending"
-RUNNING = "running"
+DESCRIBED_PENDING = "pending"
+DESCRIBED_RUNNING = "running"
 
 
 class Liveness(Enum):
@@ -65,9 +65,9 @@ def decide_vigilance(
     """O estado da arquitetura neste poll; `described_state` é `None` se ela sumiu."""
     if marker is Marker.VALID:
         return Vigilance.READY_TO_TERMINATE
-    if described_state == PENDING:
+    if described_state == DESCRIBED_PENDING:
         return Vigilance.BOOTSTRAPPING
-    if described_state != RUNNING:
+    if described_state != DESCRIBED_RUNNING:
         return Vigilance.DEAD
     if liveness is Liveness.NOT_DISPATCHED:
         return Vigilance.BOOTSTRAPPING

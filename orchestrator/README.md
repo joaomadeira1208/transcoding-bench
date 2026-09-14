@@ -108,10 +108,14 @@ de estado; o `watch` o lê e volta ao mesmo laço.
 
 O `pid` é o único campo que aceita nulo, e é o intervalo entre o lançamento e o
 disparo; o `instance_id` não aceita, porque é por ele que a vigilância pergunta e
-por ele que ela termina. O parse recusa nomeando o campo com o índice da
-arquitetura (`instances[1].instance_id`), pelas primitivas do `field_checks.py`,
-e a serialização é determinística como a do plano: o arquivo é reescrito a cada
-mudança, e o `diff` entre duas versões tem de mostrar só o que mudou.
+por ele que ela termina. Nulo é o único valor degenerado que o `pid` aceita: ele
+vai para um `kill -0`, onde `0` sinaliza o process group de quem chama e `-1`
+todo processo alcançável — os dois respondem vivo para sempre, e a arquitetura
+ficaria rodando até o prazo total de D10 estourar. O parse recusa nomeando o
+campo com o índice da arquitetura (`instances[1].instance_id`), pelas primitivas
+do `field_checks.py`, e a serialização é determinística como a do plano: o
+arquivo é reescrito a cada mudança, e o `diff` entre duas versões tem de mostrar
+só o que mudou.
 
 O gerador do plano está partido em núcleo puro e casca: `experiment_config.py`
 valida a configuração já parseada e `scenario_plan.py` a transforma no plano

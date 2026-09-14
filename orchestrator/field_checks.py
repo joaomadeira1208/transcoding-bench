@@ -1,4 +1,4 @@
-"""As primitivas de tipo que `meta_check` e `status_check` compartilham.
+"""As primitivas de tipo que os leitores de JSON do Orquestrador compartilham.
 
 Cada leitor monta a sua tabela de campos e embrulha o `FieldError` na exceção
 que nomeia o arquivo recusado; o porquê de serem compartilhadas está no

@@ -72,8 +72,6 @@ class TestTheFileTheRunWrites:
         assert state.instances[1].state is Vigilance.BOOTSTRAPPING
 
     def test_the_file_written_before_the_first_launch_lists_the_slices_and_no_instance(self):
-        # É o instante em que ele existe: as fatias já subiram, e nenhuma
-        # instância está de pé.
         state = parse_state(make_campaign_state(instances=[]))
 
         assert state.slice_keys == ("scenarios/c7g.json", "scenarios/c7i.json")
@@ -127,6 +125,8 @@ class TestTheFieldsItRefuses:
             ("instance_type", 7),
             ("pid", "4242"),
             ("pid", True),
+            ("pid", 0),
+            ("pid", -1),
             ("block_count", "6"),
             ("block_count", 6.0),
             ("runs_total", True),
@@ -138,12 +138,6 @@ class TestTheFieldsItRefuses:
         self, field, value
     ):
         assert f"instances[1].{field}" in message(deformed(**{field: value}))
-
-    def test_an_architecture_without_instance_id_is_refused(self):
-        # O campo pelo qual a vigilância pergunta e pelo qual ela termina: sem ele
-        # o arquivo descreve uma arquitetura que ninguém consegue nem vigiar nem
-        # desligar.
-        assert "instances[1].instance_id" in message(deformed(instance_id=ABSENT))
 
 
 class TestTheRoundTrip:

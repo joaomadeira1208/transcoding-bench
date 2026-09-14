@@ -99,8 +99,11 @@ def _check_list(field: str, value: Any) -> None:
 
 
 def _check_pid(field: str, value: Any) -> None:
-    if value is not None:
-        check_int(field, value)
+    if value is None:
+        return
+    check_int(field, value)
+    if value <= 0:
+        raise FieldError(f"{field}: esperava PID positivo, veio {value!r}")
 
 
 def _check_state(field: str, value: Any) -> None:

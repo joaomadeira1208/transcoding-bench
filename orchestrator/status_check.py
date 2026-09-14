@@ -7,7 +7,7 @@ sobre ele, no `orchestrator/README.md`.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +15,7 @@ from field_checks import (
     FieldError,
     check_aware_timestamp,
     check_bool,
+    check_fields,
     check_int,
     check_non_empty_str,
 )
@@ -94,17 +95,14 @@ def _checked[T](record: type[T], payload: Any, what: str, instance_id: str) -> T
     if not isinstance(payload, Mapping):
         raise StatusError(f"{what}: não é um objeto JSON: {type(payload).__name__}")
 
-    for field in fields(record):
-        if field.name not in payload:
-            raise StatusError(f"{field.name}: campo obrigatório ausente")
-        try:
-            _CHECKS[field.name](field.name, payload[field.name])
-        except FieldError as error:
-            raise StatusError(str(error)) from error
+    try:
+        values = check_fields(record, payload, _CHECKS)
+    except FieldError as error:
+        raise StatusError(str(error)) from error
 
     if payload["instance_id"] != instance_id:
         return None
-    return record(**{field.name: payload[field.name] for field in fields(record)})
+    return record(**values)
 
 
 def _index_over_total(index: int, total: int) -> str:

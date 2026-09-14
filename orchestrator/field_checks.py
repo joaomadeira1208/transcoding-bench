@@ -7,12 +7,25 @@ que nomeia o arquivo recusado; o porquê de serem compartilhadas está no
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from dataclasses import fields
 from datetime import datetime
 from typing import Any
 
 
 class FieldError(Exception):
     """Campo fora do tipo que o contrato promete, nomeado."""
+
+
+def check_fields(
+    record: type, raw: Mapping[str, Any], checks: Mapping[str, Callable[[str, Any], None]]
+) -> dict[str, Any]:
+    """Os campos do registro, presentes e do tipo prometido, como vieram."""
+    for field in fields(record):
+        if field.name not in raw:
+            raise FieldError(f"{field.name}: campo obrigatório ausente")
+        checks[field.name](field.name, raw[field.name])
+    return {field.name: raw[field.name] for field in fields(record)}
 
 
 def check_non_empty_str(field: str, value: Any) -> None:

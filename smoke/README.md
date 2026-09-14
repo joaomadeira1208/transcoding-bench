@@ -131,3 +131,6 @@ Copia as saídas cruas capturadas para onde os testes dos parsers do `analysis/`
 as leem. Sem o flag, a captura morre no `tmp_path` e nada de runtime chega perto
 do histórico. É passo manual, e a hora de rodá-lo é quando um pin do
 `docker/Dockerfile` muda.
+
+O par de `status/` que o `run_all.sh` escreve tem flag e destino próprios,
+`--status-capture-dir` — ver `orchestrator/tests/fixtures/README.md`.

@@ -69,7 +69,13 @@ Estes dois não vêm da AWS: vêm do laço de verdade sobre o bucket falso do sm
 que é onde o `run_all.sh` roda sem instância. Do Mac, no venv do `smoke/`:
 
     .venv-smoke/bin/python -m pytest smoke/tests/test_run_all.py \
-        --capture-dir=orchestrator/tests/fixtures
+        --status-capture-dir=orchestrator/tests/fixtures
+
+O flag é próprio, e não o `--capture-dir` do aceite: aquele é o destino das
+fixtures do `analysis/`, e o comando que o `smoke/README.md` documenta roda a
+suíte inteira. Um flag só depositaria este par dentro de
+`analysis/tests/fixtures/`, onde a allowlist do `.gitignore` o deixa commitável
+no diretório do papel errado.
 
 O `=` não é estilo. Sem ele o pytest lê o valor da opção como um caminho a
 coletar, carrega o `orchestrator/conftest.py` junto com o do `smoke/` e a sessão

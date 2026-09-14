@@ -101,12 +101,12 @@ CAPTURED = {PROGRESS_OBJECT: "status-progress.json", DONE_MARKER: "status-done.j
 
 
 @pytest.fixture(scope="session", autouse=True)
-def captured_status(loop, capture_dir) -> None:
-    """Deposita o par de `status/` do bloco quando se pediu `--capture-dir`."""
-    if capture_dir is None:
+def captured_status(loop, status_capture_dir) -> None:
+    """Deposita o par de `status/` do bloco quando se pediu `--status-capture-dir`."""
+    if status_capture_dir is None:
         return
     for key, name in CAPTURED.items():
-        shutil.copyfile(loop.bucket_dir() / key, capture_dir / name)
+        shutil.copyfile(loop.bucket_dir() / key, status_capture_dir / name)
 
 
 @pytest.fixture(scope="session")

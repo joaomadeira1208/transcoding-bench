@@ -14,10 +14,11 @@ Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `ffprobe`, `perf`,
 o ciclo fecha em segundos. O mesmo `pytest smoke/` é o quarto job do CI.
 
 **O smoke nunca importa; só invoca.** O gerador do plano, a CLI de validação do
-`meta.json` e o checador stdlib do orquestrador entram como subprocessos, e o que
-se inspeciona são os artefatos. Importar código de outro papel exigiria `sys.path`
-na marra ou `pip install -e`, as duas coisas que a ADR-0017 rejeitou — e tratar
-os outros papéis como caixa-preta é o correto para um smoke de qualquer forma.
+`meta.json`, o checador stdlib do orquestrador e a CLI da retomada entram como
+subprocessos, e o que se inspeciona são os artefatos. Importar código de outro
+papel exigiria `sys.path` na marra ou `pip install -e`, as duas coisas que a
+ADR-0017 rejeitou — e tratar os outros papéis como caixa-preta é o correto para
+um smoke de qualquer forma.
 
 **Um bloco do piloto atravessa o mesmo caminho.** O `config/pilot.toml` é a
 segunda definição do repositório (ADR-0019), e o plano dele sai do mesmo CLI,
@@ -65,13 +66,38 @@ disso, toda versão de cada objeto subido avulso em
 `$SMOKE_ARGV_DIR/versions/<key>/`: o bucket falso conserva só a última, como o
 S3, e `status/{instance_type}_progress` é sobrescrito a cada Execução.
 
-O shim do `aws` traduz `s3 cp` — nos dois sentidos — e `s3api list-objects-v2`
-em operações sobre `$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que
-o layout de prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
-`list-objects-v2` que o `resume.py` usará) — nunca semântica do S3, e por isso
-sem localstack. O sentido bucket → disco é o do `encode/fetch_masters.sh`, que
-baixa um objeto por Master listado no manifesto e confere o sha256 antes do
-primeiro Cenário.
+O shim do `aws` traduz `s3 cp` — nos dois sentidos —, `s3 sync` no sentido
+bucket → disco e `s3api list-objects-v2` em operações sobre
+`$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que o layout de
+prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
+`list-objects-v2` do Orquestrador e o `s3 sync` da retomada) — nunca semântica do
+S3, e por isso sem localstack. O sentido bucket → disco é o do
+`encode/fetch_masters.sh`, que baixa um objeto por Master listado no manifesto e
+confere o sha256 antes do primeiro Cenário, e é o único do `s3 sync`: o sentido
+contrário sai como não shimado. Os `--exclude`/`--include` são aplicados na ordem
+em que a CLI de verdade os aplica — o último padrão que casa decide —, porque é
+um par deles que define o que a retomada baixa. Prefixo sem objeto desce zero
+arquivos e sai com status zero; bucket inexistente falha, como o `NoSuchBucket`
+da CLI, que é o que o `resume.py` separa de "campanha que ainda não começou".
+
+**A retomada decide sobre o que o bash escreveu.** O `resume.py` é invocado como
+caixa-preta sobre o bucket falso que o `run_all.sh` acabou de encher, com o
+`--config` que gerou aquele plano: é a única prova de que a completude por bloco
+é decidida sobre os `meta.json` de verdade, e não sobre uma árvore montada pelo
+teste. São dois caminhos. Com uma Replicação falhada por `SMOKE_FFMPEG_NTH`, o
+relatório nomeia o bloco dela como pendente com o motivo "com falha", e o `--out`
+recebe uma fatia só, com aquele bloco inteiro e os mesmos 6 runs do canônico; sem
+falha nenhuma, são zero pendentes, nenhum arquivo no `--out` e status zero — "não
+há o que retomar" é um resultado, não um crash.
+
+O `--config` daí é o `config/pilot.toml` reduzido a um codec e a uma
+arquitetura, que é o que faz o plano inteiro caber nos dois blocos que o laço
+roda: contra a campanha, todo bloco que laço nenhum do smoke executa sairia
+pendente por ausência, e "uma fatia só" deixaria de ser verificável. O rastro que
+o preflight deixa em `runs/preflight/<instance-id>/`, sem apagar, entra no bucket
+falso ao lado dos blocos e prova o outro lado: relatório e fatias saem idênticos
+e sem aviso de Execução sem `meta.json`, porque o `s3 sync` da retomada só traz
+`*/meta.json` e não há `meta.json` ali.
 
 O laço fecha do outro lado: a árvore que o `run_all.sh` acabou de escrever é
 consolidada invocando `analysis/consolidate.py`, e o Parquet que sai é lido aqui.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Shim da AWS CLI: `s3://<bucket>/<key>` é `$SMOKE_S3_ROOT/<bucket>/<key>`, nos
-# dois sentidos do `s3 cp`.
+# dois sentidos do `s3 cp` e no de bucket para disco do `s3 sync`.
 
 set -euo pipefail
 
@@ -97,6 +97,71 @@ s3_cp() {
   fi
 }
 
+s3_sync() {
+  local source="" destination="" filter_flag=() filter_pattern=() bucket relative included i
+  while (($#)); do
+    case $1 in
+      --exclude | --include)
+        filter_flag+=("$1")
+        filter_pattern+=("$2")
+        shift 2
+        continue
+        ;;
+      --only-show-errors) ;;
+      # Recusa em vez de ignorar: uma flag com valor — o `--copy-props` do outro
+      # `s3 sync` do adaptador — ignorada aqui deixaria o valor dela virar a
+      # origem, e o fake responderia sobre o prefixo errado.
+      --*) fail "flag não shimada em s3 sync: $1" ;;
+      *)
+        if [[ -z $source ]]; then
+          source=$1
+        elif [[ -z $destination ]]; then
+          destination=$1
+        else
+          fail "argumento a mais em s3 sync: $1"
+        fi
+        ;;
+    esac
+    shift
+  done
+  [[ -n $source && -n $destination ]] || fail "s3 sync exige origem e destino"
+  [[ $source == s3://* && $destination != s3://* ]] ||
+    fail "s3 sync fora do sentido bucket para disco não é shimado"
+
+  bucket=${source#s3://}
+  bucket=${bucket%%/*}
+  [[ -d $SMOKE_S3_ROOT/$bucket ]] || fail "bucket inexistente: $bucket"
+
+  source=$(object_path "$source")
+  # Prefixo sem objeto é um sync de zero arquivos com status zero, como na CLI de
+  # verdade. Falhar aqui faria a campanha que morreu antes do primeiro upload —
+  # todo bloco ausente, o caso mais comum da retomada — voltar como bucket
+  # ilegível.
+  [[ -d $source ]] || return 0
+  source=${source%/}
+  destination=${destination%/}
+
+  while IFS= read -r relative; do
+    included=1
+    for ((i = 0; i < ${#filter_pattern[@]}; i++)); do
+      # Sem aspas de propósito: o padrão é glob, e o `*` do
+      # `--include '*/meta.json'` tem de atravessar a barra como o fnmatch da CLI
+      # de verdade.
+      # shellcheck disable=SC2053
+      [[ $relative == ${filter_pattern[i]} ]] || continue
+      if [[ ${filter_flag[i]} == --include ]]; then
+        included=1
+      else
+        included=""
+      fi
+    done
+    [[ -n $included ]] || continue
+    mkdir -p "$(dirname "$destination/$relative")"
+    cp "$source/$relative" "$destination/$relative"
+    printf 'download: %s to %s\n' "$source/$relative" "$destination/$relative"
+  done < <(object_keys "$source")
+}
+
 # Chaves em ordem binária e nenhuma saída quando não há objeto, como a CLI de
 # verdade: um leitor que espere sempre um documento JSON quebra aqui primeiro.
 s3api_list_objects_v2() {
@@ -134,6 +199,10 @@ case "${1:-} ${2:-}" in
   "s3 cp")
     shift 2
     s3_cp "$@"
+    ;;
+  "s3 sync")
+    shift 2
+    s3_sync "$@"
     ;;
   "s3api list-objects-v2")
     shift 2

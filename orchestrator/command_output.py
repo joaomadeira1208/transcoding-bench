@@ -116,9 +116,13 @@ def parse_dispatched_pid(raw: str) -> int:
     `0` é o process group de quem chama e `-1` todo processo alcançável.
     """
     tokens = raw.split()
-    if len(tokens) != 1 or not tokens[0].lstrip("-").isdigit():
-        raise OutputError(f"disparo: esperava um PID no stdout, veio {raw.strip()[:120]!r}")
-    pid = int(tokens[0])
+    refusal = f"disparo: esperava um PID no stdout, veio {raw.strip()[:120]!r}"
+    if len(tokens) != 1:
+        raise OutputError(refusal)
+    try:
+        pid = int(tokens[0])
+    except ValueError as error:
+        raise OutputError(refusal) from error
     if pid <= 0:
         raise OutputError(f"disparo: esperava PID positivo, veio {pid}")
     return pid

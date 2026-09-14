@@ -301,7 +301,18 @@ class TestDispatchedPid:
     def test_the_pid_the_remote_shell_echoed(self):
         assert parse_dispatched_pid("4242\n") == 4242
 
-    @pytest.mark.parametrize("raw", ["", "\n", "bash: setsid: command not found\n", "42 43\n"])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "",
+            "\n",
+            "bash: setsid: command not found\n",
+            "42 43\n",
+            "--5\n",
+            # `str.isdigit` é verdadeiro para o expoente, e `int` o recusa.
+            "\u00b2\n",
+        ],
+    )
     def test_rejects_what_is_not_a_single_pid(self, raw):
         with pytest.raises(OutputError, match="PID"):
             parse_dispatched_pid(raw)

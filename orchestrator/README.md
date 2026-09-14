@@ -625,9 +625,9 @@ Em passos:
    pergunta do `watch` tem de ser `sudo kill -0` ou `ps -p`.
 8. **Termina aqui.** Imprime o caminho do arquivo de estado e diz que a
    vigilância é o `watch` (#76). As Instâncias ficam rodando — são auto-dirigidas
-   por desenho (ADR-0010) — e a partir do primeiro disparo a regra inverte: uma
-   falha no disparo da segunda não termina a primeira, o `run` sai com erro
-   dizendo que o `watch --abort` termina todas.
+   por desenho (ADR-0010) — e a partir do primeiro `ssh` de disparo a regra
+   inverte: nenhuma falha desta fase termina instância alguma, e o `run` sai com
+   erro dizendo que o `watch --abort` termina todas.
 
 O que ganha teste é o núcleo do `campaign_launch.py`: a guarda sobre a listagem
 (vazia, só com o rastro do preflight, com Execução, truncada), a projeção do

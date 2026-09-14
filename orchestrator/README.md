@@ -707,36 +707,65 @@ tem lugar próprio na decisão. As outras arquiteturas seguem em qualquer caso
 **A tela** é uma linha por arquitetura por poll, sempre as três, sempre na mesma
 ordem — a das mortas e a das mudas inclusive, porque uma linha que sumisse seria
 lida como a arquitetura que nunca subiu. A da que está rodando é a
-`progress_line` inteira; qualquer outro estado ganha a mesma linha com a nota
-entre colchetes ao fim:
+`progress_line` inteira; qualquer outro estado de pé ganha a mesma linha com a
+nota entre colchetes ao fim; e a que já saiu do laço continua na tela com o que
+o marcador dela carregava, sem ser perguntada de novo:
 
     14:32:07 c7g  bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
              c7i  sem progresso ainda, 0/36 runs reportados  [bootstrap em curso, ainda sem PID]
-    09:12:44 c7a  bloco 2/6  run 1/6  libx264_2160p_1080p_bbb_c7a_warmup    7/36 runs, 0 falhas, 3h02m  [sem resposta no SSH (2/3 polls)]
+             c7a  finished: 36/36 runs, 0 falhas, sem teto, status 0, marcador de 09:12:44
+
+A linha de quem saiu do laço é a mesma que o resumo final imprime: as três
+colunas continuam casando, e o que muda entre o penúltimo poll e o resumo é só
+quantas arquiteturas ainda têm progresso a mostrar.
 
 **A terminação é por instância, no poll em que ela acaba** (D9): marcador válido
 — com falha ou sem, seja qual for o `exit_status` — é `terminate-instances`
 naquela hora, e a arquitetura sai do laço como `finished` com o marcador
-guardado no arquivo de estado. Uma arquitetura dada por morta é terminada pelo
-mesmo motivo e sai como `dead`: ela não é relançada (D8), e deixá-la de pé até o
-prazo faria uma `xlarge` ociosa faturar as 40 h que faltavam. A ordem é terminar
-e **depois** marcar: uma queda entre as duas linhas deixa a instância de pé no
-arquivo, e o poll seguinte refaz a chamada, que é idempotente; na ordem inversa
-sobraria uma instância faturando que nem o `watch --abort` termina mais.
+guardado no arquivo de estado.
+
+Uma arquitetura dada por morta é terminada pelo mesmo motivo e sai como `dead`.
+A D8 pede só que ela seja reportada e **não** relançada, e é isso que o laço
+faz; terminá-la é a conclusão da mesma conta que a D9 faz, porque uma `xlarge`
+que ninguém mais vigia e que o `UNANSWERED_POLL_LIMIT` já deu por abandonada
+continuaria faturando as 40 h que faltavam. O risco aceito tem nome: a morte por
+silêncio de SSH é um veredito sobre ~15 min sem resposta numa instância que o
+`describe-instances` ainda chama de `running`, e se ela estava viva o encode em
+curso vai junto. É por isso que o limite é de três polls e não de um, e é por
+isso que ele é constante e não flag.
+
+A ordem é terminar e **só então** marcar. Uma arquitetura marcada sobre um
+`terminate-instances` que falhou sai do laço e da lista do `watch --abort`, que
+é a única coisa que ainda a alcançaria: sobraria uma `xlarge` viva que nenhum
+comando termina. Falhou, ela fica de pé no arquivo e o poll seguinte tenta de
+novo — a chamada é idempotente. A exceção é o `InvalidInstanceID.NotFound`: aí
+não há o que terminar, e insistir seria vigiar uma instância que a API já não
+conhece até o prazo estourar.
 
 **O prazo** é o da D10: `--total-timeout` mais o timeout de bootstrap mais uma
-margem fixa, contado do começo do `run` (ou do `watch`). O termo do bootstrap é
-medido, não chutado — as nove corridas do preflight levaram de 19,7 a 24,6 min
-do lançamento ao container pronto, e o teto é o pior caso arredondado para 25 min
-mais 15 de folga. Ao estourar, o que resta de pé é terminado e o `run` sai com
-erro. A aritmética é função pura, e é ela que ganha teste: um prazo menor que o
-teto de cada Instância terminaria as três na véspera do fim, com as 46 h
-faturadas e nenhum marcador escrito.
+margem fixa. O termo do bootstrap é medido, não chutado — as nove corridas do
+preflight levaram de 19,7 a 24,6 min do lançamento ao container pronto, e o teto
+é o pior caso arredondado para 25 min mais 15 de folga. Ao estourar, o que resta
+de pé é terminado e o `run` sai com erro. A aritmética é função pura, e é ela que
+ganha teste: um prazo menor que o teto de cada Instância terminaria as três na
+véspera do fim, com as 46 h faturadas e nenhum marcador escrito.
+
+O relógio corre **de cada invocação**, e não do lançamento: um `watch` retomado
+ganha o prazo inteiro de novo. É deliberado, e o arquivo de estado guarda o
+`--total-timeout` justamente para que a conta seja a mesma nas duas pontas. O
+que isso não cobre — uma campanha vigiada em três sessões viver mais que um
+prazo — já está coberto onde importa: quem tem teto de verdade é o `run_all.sh`
+de cada Instância, que é a camada 2 da ADR-0012; o prazo daqui é a garantia de
+que o Orquestrador não fica vigiando para sempre, e reabrir o `watch` é o
+pesquisador decidindo continuar a vigiar.
 
 **`Ctrl-C` não termina nada** (D11). O SIGINT para só a vigilância e imprime as
 duas linhas que importam — o `watch` para voltar e o `watch --abort` para
 terminar tudo —, saindo com 130, que é o status que distingue "o pesquisador
-parou de olhar" de "a campanha tem pendência".
+parou de olhar" de "a campanha tem pendência". Só o `run` e o `watch` dizem
+isso: um `Ctrl-C` no `prepare-masters` ou no `preflight` interrompe um passo que
+lança instância e não escreve arquivo de estado nenhum, e a linha de lá manda
+conferir no `describe-instances` se a instância daquele passo ficou de pé.
 
 **O resumo e o código de saída.** Ao fim, uma linha por arquitetura com o que o
 marcador dela carregava: runs feitos sobre o total da fatia, falhas, teto e

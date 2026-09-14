@@ -10,87 +10,61 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 from campaign_state import CampaignState, TrackedInstance
-from status_check import INSTANCE_WIDTH, Progress, hour_of, progress_line
+from status_check import HOUR_WIDTH, INSTANCE_WIDTH, Progress, hour_of, progress_line
 from vigilance import UNANSWERED_POLL_LIMIT, Vigilance
 
-# O intervalo que a ADR-0010 fixou para o polling, e o que o `kill -0` aceita de
-# espera antes de virar "sem resposta": o teto é curto porque um poll que demora
-# é um poll que não aconteceu.
 POLL_INTERVAL_SECONDS = 300.0
 LIVENESS_TIMEOUT_SECONDS = 30.0
-
-# A folga do prazo de D10 sobre os dois tempos que ele já cobre: o disparo, os
-# 5 minutos de granularidade do poll e os `terminate-instances` do fim.
 DEADLINE_MARGIN_SECONDS = 3600.0
 
 RESUME_OUT_DIR = "~/work/resume"
 
-# Os dois CLIs como o `orchestrator/README.md` os invoca: as mensagens que
-# mandam o pesquisador rodar alguma coisa dizem o comando inteiro.
 ORCHESTRATOR_CLI = "python orchestrator/orchestrator.py"
 RESUME_CLI = "python orchestrator/resume.py"
 
 
-def watch_deadline_seconds(
-    *,
-    total_timeout: int,
-    bootstrap_timeout: float,
-    margin: float = DEADLINE_MARGIN_SECONDS,
-) -> float:
-    """O prazo do Orquestrador, contado do começo da vigilância (D10).
-
-    Os três termos, e não só o teto de cada Instância: o `run` começa a contar
-    antes do bootstrap, e o `run_all.sh` só começa a contar o dele quando o
-    container sobe. Um prazo de exatamente `total_timeout` terminaria as três na
-    véspera do fim, com as 46 h faturadas e nenhum marcador escrito.
-    """
-    return total_timeout + bootstrap_timeout + margin
+def watch_deadline_seconds(*, total_timeout: int, bootstrap_timeout: float) -> float:
+    """O prazo do Orquestrador, contado do começo da vigilância (D10)."""
+    return total_timeout + bootstrap_timeout + DEADLINE_MARGIN_SECONDS
 
 
 def liveness_command(pid: int) -> list[str]:
-    """O `kill -0` no PID gravado, por SSH.
-
-    Com `sudo` porque o `launch_container.sh` termina em `exec sudo docker run`:
-    o PID que o disparo ecoou é de um processo de root, e perguntar por ele como
-    `ubuntu` recebe `EPERM` — que é indistinguível de "morto" no status de saída.
-    """
+    """O `kill -0` no PID gravado, por SSH; o `sudo` está no `orchestrator/README.md`."""
     return ["sudo", "kill", "-0", str(pid)]
 
 
 def poll_line(
+    each: TrackedInstance,
     *,
-    instance: str,
     state: Vigilance,
     progress: Progress | None,
-    runs_total: int,
     unanswered_polls: int = 0,
 ) -> str:
-    """A linha daquela arquitetura neste poll — a das mortas e das mudas inclusive.
-
-    Sempre as três, sempre na mesma ordem: uma linha que sumisse por a
-    arquitetura ter morrido seria lida às 3 da manhã como a arquitetura que
-    nunca subiu.
-    """
-    line = progress_line(progress, instance=instance, runs_total=runs_total)
+    """A linha daquela arquitetura neste poll — a das mortas e das mudas inclusive."""
+    line = progress_line(progress, instance=each.instance, runs_total=each.runs_total)
     if state is Vigilance.RUNNING:
         return line
     return f"{line}  [{_note(state, unanswered_polls)}]"
 
 
+def settled_line(each: TrackedInstance) -> str:
+    """A linha de quem já saiu do laço: runs feitos, falhas, teto e estado final.
+
+    Na coluna das outras, e sem a hora, que é a do `written_at` de um progresso
+    que já não anda.
+    """
+    return f"{'':{HOUR_WIDTH}} {each.instance:<{INSTANCE_WIDTH}} {_summary(each)}"
+
+
 def summary_lines(instances: Sequence[TrackedInstance]) -> tuple[str, ...]:
-    """O resumo do fim, uma linha por arquitetura: runs feitos, falhas, teto e estado."""
-    return tuple(f"{each.instance:<{INSTANCE_WIDTH}} {_summary(each)}" for each in instances)
+    """O resumo do fim, uma linha por arquitetura, na mesma forma do último poll."""
+    return tuple(settled_line(each) for each in instances)
 
 
 def failure_reasons(
     instances: Sequence[TrackedInstance], *, deadline_blown: bool = False
 ) -> tuple[str, ...]:
-    """Vazio é o status zero; qualquer linha é o `run` saindo com erro (D8/D25).
-
-    Uma campanha em que uma arquitetura morreu, falhou runs ou bateu no teto
-    continua sendo uma campanha incompleta, e o status zero a arquivaria como
-    pronta — a falha que o `resume.py` existe para ser chamado contra.
-    """
+    """Vazio é o status zero; qualquer linha é o `run` saindo com erro (D8/D25)."""
     blown = ("o prazo do Orquestrador estourou: o que restava de pé foi terminado",)
     return (blown if deadline_blown else ()) + tuple(
         reason for each in instances for reason in _reasons(each)
@@ -138,7 +112,10 @@ def _cap(capped: bool) -> str:
 
 def _note(state: Vigilance, unanswered_polls: int) -> str:
     if state is Vigilance.UNRESPONSIVE:
-        return f"sem resposta no SSH ({unanswered_polls}/{UNANSWERED_POLL_LIMIT} polls)"
+        return (
+            f"sem resposta no SSH há {unanswered_polls} poll(s), "
+            f"morta depois de {UNANSWERED_POLL_LIMIT}"
+        )
     return _NOTES[state]
 
 

@@ -17,12 +17,13 @@ from campaign_watch import (
     failure_reasons,
     poll_line,
     resume_hint,
+    settled_line,
     summary_lines,
     watch_deadline_seconds,
 )
 from conftest import make_campaign_state, make_done_marker, make_progress, make_tracked_instance
 from instance_launch import BOOTSTRAP_TIMEOUT_SECONDS
-from status_check import check_progress
+from status_check import HOUR_WIDTH, check_progress
 from vigilance import UNANSWERED_POLL_LIMIT, Vigilance
 
 from orchestrator import TOTAL_TIMEOUT_SECONDS
@@ -50,7 +51,9 @@ def state(*instances: dict[str, Any]) -> CampaignState:
 
 class TestTheDeadlineOfTheOrchestrator:
     def test_the_deadline_is_the_sum_of_the_cap_the_bootstrap_and_the_margin(self):
-        assert watch_deadline_seconds(total_timeout=10, bootstrap_timeout=20, margin=30) == 60
+        assert watch_deadline_seconds(total_timeout=10, bootstrap_timeout=20) == (
+            30 + DEADLINE_MARGIN_SECONDS
+        )
 
     def test_the_deadline_outlasts_the_cap_of_each_instance(self):
         assert deadline(TOTAL_TIMEOUT_SECONDS) > TOTAL_TIMEOUT_SECONDS
@@ -171,10 +174,9 @@ class TestTheLineThatPointsAtTheResume:
 
 def line(state_value: Vigilance, *, progress: Any = None, unanswered_polls: int = 0) -> str:
     return poll_line(
-        instance="c7g",
+        architecture("c7g"),
         state=state_value,
         progress=progress,
-        runs_total=36,
         unanswered_polls=unanswered_polls,
     )
 
@@ -197,3 +199,13 @@ class TestTheLineOfEachPoll:
     @pytest.mark.parametrize("state_value", list(Vigilance))
     def test_every_state_the_decision_can_return_has_a_line(self, state_value: Vigilance):
         assert line(state_value).startswith(" ")
+
+    def test_the_architecture_that_left_the_loop_keeps_its_line_on_the_screen(self):
+        settled = settled_line(architecture("c7i", state=Vigilance.DEAD.value, outcome=None))
+
+        assert "c7i" in settled
+
+    def test_the_line_of_who_left_the_loop_starts_in_the_column_of_the_others(self):
+        settled = settled_line(architecture(**FINISHED))
+
+        assert settled.startswith(" " * HOUR_WIDTH)

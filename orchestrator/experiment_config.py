@@ -2,7 +2,7 @@
 
 A regra que atravessa o módulo é **nenhum default silencioso**: um
 `experiment.toml` defeituoso não estoura sozinho em lugar nenhum, produz uma
-matriz experimental errada, e o custo de descobrir isso é ~46 h de compute.
+matriz experimental errada, e o custo de descobrir isso é ~92 h de compute.
 """
 
 from __future__ import annotations

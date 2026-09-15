@@ -48,7 +48,7 @@ na ausência valem os defaults dele.
     bash encode/launch_container.sh \
         --work-dir /home/ubuntu/work --plan c7g.json --bucket "$bucket" \
         --commit "$sha" --instance-id "$id" --instance-type c7g.xlarge \
-        --run-timeout 14400 --total-timeout 259200
+        --run-timeout 14400 --total-timeout 432000
 
 O work dir é o contrato entre os três: o `bootstrap.sh` deixa lá a fatia, o
 manifesto e `masters/`; o `launch_container.sh` os encontra por esses nomes, e o
@@ -156,7 +156,7 @@ não viajam no plano:
   `run_scenario.sh` mata a árvore do encode, fecha o `meta.json` com
   `exit_code` 143 e sobe o que tem — um run morto no meio não some do
   `resume.py`.
-- `--total-timeout <segundos>` (72 h): conferido **antes de cada Cenário**; ao
+- `--total-timeout <segundos>` (120 h): conferido **antes de cada Cenário**; ao
   estourar, o laço para, escreve o marcador de término com `capped` verdadeiro e
   sai com status 1.
 

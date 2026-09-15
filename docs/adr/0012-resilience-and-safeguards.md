@@ -14,6 +14,14 @@ O encode mais longo estimado (libx265, 4K→4K, ~10 min de vídeo) leva ~60 min.
 
 `run_all.sh` registra timestamp de início. Antes de cada cenário, checa se o tempo total excedeu **72h** (esperado ~46h). Se sim, faz upload do que tem pro S3 e para. Evita instância zumbi rodando indefinidamente.
 
+**Emenda: o teto passa de 72 h para 120 h, porque as ~46 h eram estimativa e o piloto as mediu.** O piloto de 2026-09-14 rodou o par `1080p → 720p` nas três arquiteturas, e a extrapolação por pixels de saída sobre a matriz inteira (`analysis/extrapolate.py`, item 7 da ADR-0022) projeta **c7a 62,6 h, c7g 85,7 h e c7i 92,0 h** — o dobro da estimativa original. O par `2160p → 2160p` sozinho responde por metade disso, e é o único que a estimativa de ~46 h nunca teve como aproximar: ele é o encode de topo, não tem downscale, e ficou de fora do piloto justamente por custar meio dia (ADR-0022).
+
+Com o teto em 72 h, a `c7i` pararia na hora 72 com `capped` verdadeiro e cerca de 22% da fatia por fazer — uma campanha de quatro dias descobrindo no terceiro que precisa do `resume.py`. Os 120 h dão 30% de margem sobre os 92 h projetados, que é o que a crueza do modelo pede: a projeção multiplica um baseline que inclui decodificar 13 GB de FFV1 e reescalar, trabalho que o par de topo não faz.
+
+**O que não muda é a razão de o teto existir**: ele continua sendo contra a instância zumbi, não contra o experimento demorar. E o preço de estendê-lo é pequeno — a campanha inteira em 92 h são ~US$ 42 de compute nas três somadas, longe do alerta de US$ 150 da camada 3. O que muda de verdade é o relógio do pesquisador: **a campanha passa de ~2 para ~4 dias**, e é a vigilância retomável da ADR-0010 que torna isso operável.
+
+Trocar o default é hotfix **classe 2** da ADR-0021 — encanamento, não medição: nenhum parâmetro de encode muda, e o piloto não precisa ser repetido. O que a classe 2 exige (ADR-0022) é o `preflight` nos três tipos sobre o SHA novo, antes de a campanha ser disparada.
+
 ## Camada 3 — Budget alert AWS
 
 Terraform configura um AWS Budget com teto de **$150**. Se o custo acumulado ultrapassar, o proprietário recebe email. Não mata instâncias automaticamente, mas alerta.
@@ -28,7 +36,7 @@ Por isso o `aws_budgets_budget` declara o bloco `cost_types` por inteiro, com `i
 
 **Emenda.** As três camadas acima protegem a campanha em andamento. Antes de ela começar há um gate que nenhuma camada substitui: a preparação dos masters (ADR-0014) é uma execução própria, e a campanha só é disparada depois que o pesquisador confere o `masters/manifest.json` (ADR-0011) contra as ADRs 0004 e 0023 e aprova. É o mesmo instinto da retomada semi-automática abaixo e do gate de hotfix da ADR-0021: o que custa dois dias de compute se estiver errado passa por um humano uma vez.
 
-**Emenda: o segundo gate é o piloto.** Depois dos masters e do smoke AWS, roda um piloto — a campanha em escopo menor, pelo mesmo código (ADR-0022) — e a campanha só é disparada depois que o pesquisador confere a checklist do piloto e a registra num relatório commitado. O piloto é também onde os limites desta ADR ganham um número: o tempo por bloco medido nele, extrapolado para a matriz inteira, tem de caber em 60 h por arquitetura (margem sobre o teto de 72 h) e no orçamento de $150; se não couber, a decisão é tomada antes, e não pelo timeout na hora 40. Um hotfix entre o piloto e a campanha segue as classes da ADR-0021: classe 1 repete o piloto, classe 2 repete só o smoke AWS. **Emenda:** o smoke AWS saiu da escada (ADR-0022) e o degrau que a classe 2 repete é o `preflight`.
+**Emenda: o segundo gate é o piloto.** Depois dos masters e do smoke AWS, roda um piloto — a campanha em escopo menor, pelo mesmo código (ADR-0022) — e a campanha só é disparada depois que o pesquisador confere a checklist do piloto e a registra num relatório commitado. O piloto é também onde os limites desta ADR ganham um número: o tempo por bloco medido nele, extrapolado para a matriz inteira, tem de caber em 100 h por arquitetura (margem sobre o teto de 120 h, ver a emenda da camada 2) e no orçamento de $150; se não couber, a decisão é tomada antes, e não pelo timeout na hora 40. Um hotfix entre o piloto e a campanha segue as classes da ADR-0021: classe 1 repete o piloto, classe 2 repete só o smoke AWS. **Emenda:** o smoke AWS saiu da escada (ADR-0022) e o degrau que a classe 2 repete é o `preflight`.
 
 ## Retomada semi-automática
 

@@ -1,5 +1,5 @@
 # Um bloco faltando, um par trocado ou uma `scenario_id` duplicada não estouram em
-# lugar nenhum: produzem um plano executável que gasta ~46 h de compute medindo a
+# lugar nenhum: produzem um plano executável que gasta ~92 h de compute medindo a
 # coisa errada. Tudo aqui assere o plano emitido, nunca a estrutura do gerador.
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 # O que o laço de vigilância decide sem perguntar nada a ninguém (D8, D10 e D25 da
 # Spec 4). Os dois alvos falham em silêncio e custam a campanha inteira: um prazo
-# menor que o teto de cada Instância termina as três na véspera do fim, com 46 h
-# faturadas e nenhum dado; e um veredito que devolve zero com uma arquitetura
+# menor que o teto de cada Instância termina as três na véspera do fim, com quatro
+# dias faturados e nenhum dado; e um veredito que devolve zero com uma arquitetura
 # morta faz o pesquisador arquivar como completa uma campanha a que falta um
 # terço da matriz — que é exatamente o que a linha do `resume.py` existe para
 # evitar.
@@ -68,8 +68,8 @@ class TestTheDeadlineOfTheOrchestrator:
             TOTAL_TIMEOUT_SECONDS + BOOTSTRAP_TIMEOUT_SECONDS + DEADLINE_MARGIN_SECONDS
         )
 
-    def test_the_campaign_of_72h_is_watched_for_less_than_74h(self):
-        assert deadline(TOTAL_TIMEOUT_SECONDS) < 74 * HOUR
+    def test_the_campaign_of_120h_is_watched_for_less_than_122h(self):
+        assert deadline(TOTAL_TIMEOUT_SECONDS) < 122 * HOUR
 
     def test_a_shorter_cap_shortens_the_deadline_by_the_same_amount(self):
         assert deadline(TOTAL_TIMEOUT_SECONDS) - deadline(TOTAL_TIMEOUT_SECONDS - HOUR) == HOUR

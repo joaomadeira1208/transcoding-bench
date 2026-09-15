@@ -76,7 +76,7 @@ class TestTheFileTheRunWrites:
         assert outcome.runs_failed == 2
 
     def test_the_cap_the_launch_promised_each_instance_survives_in_the_file(self):
-        assert parse_state(make_campaign_state()).total_timeout == 72 * 60 * 60
+        assert parse_state(make_campaign_state()).total_timeout == 120 * 60 * 60
 
     def test_an_architecture_launched_and_not_yet_dispatched_has_no_pid(self):
         state = parse_state(make_campaign_state())
@@ -106,7 +106,7 @@ class TestTheFieldsItRefuses:
             ("bucket", None),
             ("config_path", 42),
             ("commit", ""),
-            ("total_timeout", "259200"),
+            ("total_timeout", "432000"),
             ("total_timeout", 0),
             ("total_timeout", -1),
             ("slice_keys", "scenarios/c7g.json"),

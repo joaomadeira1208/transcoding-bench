@@ -146,7 +146,7 @@ STATE_NAME = "state.json"
 LOCAL_SCENARIOS_DIR = "scenarios"
 
 RUN_TIMEOUT_SECONDS = 4 * 60 * 60
-TOTAL_TIMEOUT_SECONDS = 72 * 60 * 60
+TOTAL_TIMEOUT_SECONDS = 120 * 60 * 60
 
 # Sem teto, o `curl` do `prepare.sh` que estola pendura o CLI para sempre, com a
 # instância faturando e indistinguível das ~2 h de silêncio do caso normal.
@@ -717,7 +717,7 @@ def _poll_architecture(
 
     A falha de qualquer uma das três perguntas deixa a arquitetura como estava e
     o laço segue: apagar o `except` faz um `describe-instances` estrangulado uma
-    vez em 46 h derrubar a vigilância das outras duas.
+    vez em quatro dias derrubar a vigilância das outras duas.
     """
     try:
         described = described_instance(each.instance_id)

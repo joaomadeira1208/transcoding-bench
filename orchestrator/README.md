@@ -48,7 +48,7 @@ sumisse seria lida como uma arquitetura que não subiu.
 
 As colunas casam entre as três porque cada índice sai na largura do seu total e
 a coluna do `scenario_id` acomoda a maior que a campanha gera, que é a do
-warm-up: as três passam as 46 h em pontos diferentes da mesma sequência, e é o
+warm-up: as três passam os quatro dias em pontos diferentes da mesma sequência, e é o
 alinhamento que faz três linhas serem lidas de uma vez às 3 da manhã.
 
 Os leitores conferem os campos pelas mesmas primitivas, que moram no
@@ -78,8 +78,8 @@ de tudo, porque o fim normal é ele com o processo já morto: o `run_all.sh`
 escreve o marcador e sai, e perguntar pelo processo primeiro faria toda campanha
 bem-sucedida ser lida como morte no meio de um run. Vale qualquer que seja o
 `exit_status` que ele carrega (D9) — o trabalho daquela arquitetura acabou, o que
-falhou está no `resume.py`, e esperar a última custaria a diferença entre as 30 h
-de uma e as 46 h da outra. Vale inclusive contra a instância ausente do
+falhou está no `resume.py`, e esperar a última custaria a diferença entre as 63 h
+de uma e as 92 h da outra. Vale inclusive contra a instância ausente do
 `describe`, que é a única exceção à regra de que ausente é morta: um marcador
 válido é o trabalho terminado, e recusá-lo porque o `describe` já esqueceu a
 instância mandaria o pesquisador retomar uma fatia completa.
@@ -587,7 +587,7 @@ entre piloto e campanha, e um default de bucket é o erro da ADR-0011 esperando
 para acontecer (D5). Para este subcomando a definição deixa de ser a constante
 do `orchestrator.py`: é o `--config` que gera o plano e que dá os registros
 `[[instance]]` e a AMI de cada um. Os dois timeouts são as camadas locais da
-ADR-0012, com os mesmos defaults do `run_all.sh` (4 h e 72 h), e viajam até ele
+ADR-0012, com os mesmos defaults do `run_all.sh` (4 h e 120 h), e viajam até ele
 pelo `launch_container.sh`; o piloto roda com os mesmos (ADR-0022).
 
 Em passos:
@@ -699,7 +699,7 @@ e saem como um dos estados acima.
 
 Uma pergunta que **não pôde ser feita** não é resposta: a falha do `describe`,
 do download ou da listagem imprime a linha do erro, deixa a arquitetura como
-estava e o laço segue. Um `describe-instances` estrangulado uma vez em 46 h é
+estava e o laço segue. Um `describe-instances` estrangulado uma vez em quatro dias é
 exatamente o que não se quer ler como morte às 3 da manhã, e a falha do SSH já
 tem lugar próprio na decisão. As outras arquiteturas seguem em qualquer caso
 (D8).
@@ -748,7 +748,7 @@ preflight levaram de 19,7 a 24,6 min do lançamento ao container pronto, e o tet
 é o pior caso arredondado para 25 min mais 15 de folga. Ao estourar, o que resta
 de pé é terminado e o `run` sai com erro. A aritmética é função pura, e é ela que
 ganha teste: um prazo menor que o teto de cada Instância terminaria as três na
-véspera do fim, com as 46 h faturadas e nenhum marcador escrito.
+véspera do fim, com os quatro dias faturados e nenhum marcador escrito.
 
 O relógio corre **de cada invocação**, e não do lançamento: um `watch` retomado
 ganha o prazo inteiro de novo. É deliberado, e o arquivo de estado guarda o

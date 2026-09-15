@@ -1,5 +1,5 @@
 # Um `experiment.toml` defeituoso não estoura em lugar nenhum: produz uma matriz
-# errada, e o erro só apareceria depois de ~46 h de compute. Cada modo de falha
+# errada, e o erro só apareceria depois de ~92 h de compute. Cada modo de falha
 # ganha um teste próprio, e cada um confere que a mensagem **nomeia o registro
 # ofensor** — um `ConfigError` genérico manda procurar a agulha à mão.
 

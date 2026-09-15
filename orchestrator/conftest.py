@@ -476,7 +476,7 @@ _CAMPAIGN_STATE: dict[str, Any] = {
     "bucket": _INFRA["buckets"]["pilot"],
     "config_path": "config/pilot.toml",
     "commit": _VALID_META["commit"],
-    "total_timeout": 72 * 60 * 60,
+    "total_timeout": 120 * 60 * 60,
     "slice_keys": ["scenarios/c7g.json", "scenarios/c7i.json"],
     "instances": [
         _TRACKED_INSTANCE,

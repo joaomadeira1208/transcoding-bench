@@ -1,0 +1,26 @@
+# Preços da AWS pinados por consulta (ADR-0024). Uma seção `[[quote]]` por
+# consulta: a do piloto nunca é sobrescrita pela da campanha.
+#
+# Origem de cada número: `aws pricing get-products --service-code AmazonEC2`
+# (instâncias e EBS) e `--service-code AmazonVPC` (IPv4), com os filtros que a
+# ADR-0024 registra.
+
+[[quote]]
+consulted_at = "2026-09-15"
+covers = "piloto"
+region = "us-east-1"
+model = "on-demand"
+operating_system = "Linux"
+tenancy = "Shared"
+
+[quote.instance_usd_per_hour]
+"c7g.xlarge" = 0.1450
+"c7i.xlarge" = 0.1785
+"c7a.xlarge" = 0.20528
+"t3.micro" = 0.0104
+
+[quote.storage_usd_per_gb_month]
+gp3 = 0.08
+
+[quote.network_usd_per_hour]
+public_ipv4 = 0.005

@@ -12,7 +12,7 @@ do `ffmpeg.log`) e `run_table.py` (os derivados e o construtor da tabela).
 `validate_meta.py` e `consolidate.py`. O `conftest.py` deste nível é o que torna
 o núcleo importável pelos testes sem `pyproject.toml` nem `sys.path` manipulado.
 
-O runtime tem `pydantic` e `pyarrow`, e nada mais: o venv é próprio do papel, e é
+O runtime tem `pydantic`, `pyarrow` e `pandas`, e nada mais: o venv é próprio do papel, e é
 isso que faz o job de CI dele ter valor — uma dependência não declarada quebra no
 ambiente limpo em vez de passar porque a máquina do pesquisador tinha o pacote.
 
@@ -104,3 +104,71 @@ que a camada de aceite do `smoke/` trouxe de dentro da imagem; a factory do
 `conftest.py` fica com as variações que a ferramenta não produz sob encomenda. A
 outra âncora é o `smoke/` consolidando a árvore que o `run_all.sh` acabou de
 escrever (ADR-0022).
+
+## O gate, e a projeção da campanha
+
+Dois scripts sobre o Parquet, e nenhum deles é parte da consolidação: eles
+**decidem** se um lançamento passou, e é a ADR-0022 que lista o que decidem.
+
+    .venv-analysis/bin/python analysis/gate.py --parquet runs.parquet \
+        --config config/pilot.toml --prices analysis/prices.toml --covers piloto
+
+    aws s3 ls s3://<bucket>/runs/ --recursive | grep output.mkv > outputs.txt
+    .venv-analysis/bin/python analysis/extrapolate.py --parquet runs.parquet \
+        --config config/experiment.toml --outputs outputs.txt
+
+O `gate.py` cobre os itens que o Parquet sozinho responde — os quatro primeiros
+da checklist, mais três leituras que a checklist não pede e o piloto mostrou
+valerem: o `pcnt-running`, o coeficiente de variação e a concordância de
+bitstream. O item 5 depende do Juiz e não sai daqui. O `--config` é a definição
+do lançamento que o Parquet mediu: os frames de cada Master, os eventos e os
+pares de cada métrica saem dela, não de uma cópia no script.
+
+**Por que o `pcnt-running` é reportado em duas famílias.** Os quatro contadores
+de hardware multiplexam onde a PMU tem menos registradores que eventos; os quatro
+de software são mantidos pelo kernel e voltam sempre 100%. Uma média sobre os
+oito devolveu 75% no Graviton3 na primeira leitura do piloto, número que não
+corresponde a nada — o real é 50% nos de hardware.
+
+**O CV intra-célula** é o que sustenta as 5 Replicações da ADR-0003, que as
+fixou supondo "CV típico < 5%" sem medir. O piloto mediu **0,17%**, e com n=5
+isso detecta diferenças acima de ~0,35% — folga de duas ordens de grandeza sobre
+as diferenças arquiteturais observadas.
+
+**A concordância de bitstream** é a prévia barata do Pass de qualidade: um hash
+por Cenário entre as três arquiteturas dispensaria VMAF naquele grupo (ADR-0005).
+No piloto nenhum Cenário deu os três iguais — a divergência segue a ISA, com
+Intel e AMD concordando entre si e o ARM à parte. As Replicações dentro de uma
+mesma instância, essas sim, são bit-idênticas.
+
+O `extrapolate.py` responde os itens 7 e 8: o piloto mede um par barato e a
+campanha tem nove, então cada par é projetado **por pixels de saída**, como a
+ADR-0022 manda, sobre os tempos e tamanhos medidos. A listagem do bucket entra
+pelo tamanho de cada `output.mkv`, e nenhum deles é baixado.
+
+Os dois orçamentos são a linha que se confere **antes** de lançar, e nenhum é o
+corte que acontece durante:
+
+- **100 h por arquitetura**, contra o teto de 120 h que o `run_all.sh` aplica
+  (ADR-0012). A diferença é margem: a projeção por pixels é crua, e um alarme
+  colado no teto deixaria passar uma projeção que estoura de verdade.
+- **147 GB**, que é o livre do volume de 200 GiB medido nas três Instâncias do
+  piloto depois dos Masters (42 GiB), do Docker e do SO.
+
+E uma terceira linha, que não é orçamento e sim o teto da camada 1: a Execução
+mais longa do piloto, reescalada para o par de topo, tem de caber nas 4 h do
+`--run-timeout`. Estourar ali não para a campanha — o `run_scenario.sh` mata o
+encode e o run sobe com `exit_code` 143, um por Replicação daquele bloco.
+
+Sobre o piloto, a projeção deu 92 h e 79,5 GB para a `c7i`, a mais lenta — e foi
+ela que mostrou que as ~46 h estimadas na ADR-0012 eram metade do real, com o par
+`2160p → 2160p` respondendo sozinho por metade da campanha.
+
+## Os preços
+
+`prices.toml` guarda uma seção `[[quote]]` por consulta à Price List API, e a
+análise escolhe pelo campo `covers`. A do piloto não é sobrescrita pela da
+campanha: o relatório de cada um cita um custo, e esse número tem de continuar
+reproduzível depois de a AWS mexer na tabela. O raciocínio inteiro — por que o
+preço não é coluna do `meta.json`, e a diferença entre custo por Cenário e custo
+operacional — está na ADR-0024.

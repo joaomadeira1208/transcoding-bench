@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from status_check import check_done_marker
+from status_check import DoneMarker, check_done_marker
 
 UNANSWERED_POLL_LIMIT = 3
 
@@ -42,17 +42,31 @@ class Vigilance(Enum):
     BOOTSTRAPPING = "bootstrapping"
     RUNNING = "running"
     READY_TO_TERMINATE = "ready to terminate"
+    FINISHED = "finished"
     DEAD = "dead"
     UNRESPONSIVE = "unresponsive"
 
 
-def marker_verdict(payload: Any, *, instance_id: str) -> Marker:
-    """O marcador baixado — ou `None`, quando `status/` não tem o objeto."""
+_SETTLED = frozenset({Vigilance.FINISHED, Vigilance.DEAD})
+
+
+def is_standing(state: Vigilance) -> bool:
+    """A arquitetura que ainda fatura, e por isso ainda é perguntada e terminável."""
+    return state not in _SETTLED
+
+
+def marker_verdict(payload: Any, *, instance_id: str) -> tuple[Marker, DoneMarker | None]:
+    """O veredito sobre o marcador baixado e o registro que o sustenta, parseado uma vez.
+
+    O `payload` é `None` quando `status/` ainda não tem o objeto; o registro só
+    acompanha o veredito `VALID`, que é o único que o arquivo de estado guarda.
+    """
     if payload is None:
-        return Marker.ABSENT
-    if check_done_marker(payload, instance_id=instance_id) is None:
-        return Marker.OTHER_INSTANCE
-    return Marker.VALID
+        return Marker.ABSENT, None
+    marker = check_done_marker(payload, instance_id=instance_id)
+    if marker is None:
+        return Marker.OTHER_INSTANCE, None
+    return Marker.VALID, marker
 
 
 def decide_vigilance(

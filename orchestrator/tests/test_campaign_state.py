@@ -10,10 +10,10 @@ from typing import Any
 
 import pytest
 from campaign_state import StateError, TrackedInstance, parse_state, serialize_state
-from conftest import ABSENT, make_campaign_state, make_tracked_instance
+from conftest import ABSENT, make_campaign_state, make_done_marker, make_tracked_instance
 from vigilance import Vigilance
 
-TOP_FIELDS = ("bucket", "config_path", "commit", "slice_keys", "instances")
+TOP_FIELDS = ("bucket", "config_path", "commit", "total_timeout", "slice_keys", "instances")
 
 TRACKED_FIELDS = (
     "instance",
@@ -23,6 +23,7 @@ TRACKED_FIELDS = (
     "block_count",
     "runs_total",
     "state",
+    "outcome",
 )
 
 
@@ -63,7 +64,19 @@ class TestTheFileTheRunWrites:
             block_count=6,
             runs_total=36,
             state=Vigilance.RUNNING,
+            outcome=None,
         )
+
+    def test_the_architecture_that_finished_keeps_the_marker_that_ended_it(self):
+        listed = [make_tracked_instance(state="finished", outcome=make_done_marker(runs_failed=2))]
+
+        outcome = parse_state(make_campaign_state(instances=listed)).instances[0].outcome
+
+        assert outcome is not None
+        assert outcome.runs_failed == 2
+
+    def test_the_cap_the_launch_promised_each_instance_survives_in_the_file(self):
+        assert parse_state(make_campaign_state()).total_timeout == 72 * 60 * 60
 
     def test_an_architecture_launched_and_not_yet_dispatched_has_no_pid(self):
         state = parse_state(make_campaign_state())
@@ -93,6 +106,9 @@ class TestTheFieldsItRefuses:
             ("bucket", None),
             ("config_path", 42),
             ("commit", ""),
+            ("total_timeout", "259200"),
+            ("total_timeout", 0),
+            ("total_timeout", -1),
             ("slice_keys", "scenarios/c7g.json"),
             ("instances", {}),
             ("instances", "c7g"),
@@ -132,12 +148,21 @@ class TestTheFieldsItRefuses:
             ("runs_total", True),
             ("state", "acordada"),
             ("state", None),
+            ("outcome", "done"),
         ],
     )
     def test_an_architecture_field_of_the_wrong_type_is_refused_by_index_and_name(
         self, field, value
     ):
         assert f"instances[1].{field}" in message(deformed(**{field: value}))
+
+    def test_a_deformed_marker_is_refused_by_the_reader_that_owns_it(self):
+        assert "capped" in message(deformed(outcome=make_done_marker(capped="false")))
+
+    def test_the_marker_of_a_previous_attempt_is_refused_instead_of_ignored(self):
+        stale = make_done_marker(instance_id="i-0fedcba9876543210")
+
+        assert "outra instância" in message(deformed(outcome=stale))
 
 
 class TestTheRoundTrip:
@@ -159,6 +184,12 @@ class TestTheRoundTrip:
         }
 
         assert serialize_state(parse_state(shuffled)) == serialize_state(parse_state(payload))
+
+    def test_the_marker_survives_the_round_trip_of_a_watch_that_restarted(self):
+        listed = [make_tracked_instance(state="finished", outcome=make_done_marker(capped=True))]
+        state = parse_state(make_campaign_state(instances=listed))
+
+        assert parse_state(json.loads(serialize_state(state))) == state
 
     def test_the_file_ends_in_a_newline(self):
         assert serialize_state(parse_state(make_campaign_state())).endswith("}\n")

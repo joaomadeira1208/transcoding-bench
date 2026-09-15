@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -23,6 +24,7 @@ from campaign_launch import (
     abort_reasons,
     dispatch_command,
     full_campaign,
+    launched_instance,
     refuse_populated_runs,
     refuse_standing_instances,
     resumed_campaign,
@@ -30,12 +32,32 @@ from campaign_launch import (
     slice_name,
 )
 from campaign_state import CampaignState, StateError, TrackedInstance, parse_state, serialize_state
-from command_output import OutputError, S3Object, TruncatedListing, parse_dispatched_pid
+from campaign_watch import (
+    LIVENESS_TIMEOUT_SECONDS,
+    ORCHESTRATOR_CLI,
+    POLL_INTERVAL_SECONDS,
+    failure_reasons,
+    liveness_command,
+    poll_line,
+    resume_hint,
+    settled_line,
+    summary_lines,
+    watch_deadline_seconds,
+)
+from command_output import (
+    DescribedInstance,
+    OutputError,
+    S3Object,
+    TruncatedListing,
+    parse_dispatched_pid,
+)
 from experiment_config import ConfigError, ExperimentConfig, validate_config
 from external import (
+    INSTANCE_NOT_FOUND_ERROR_CODE,
     RUNS_PREFIX,
     CommandOutput,
     ExternalCommandError,
+    described_instance,
     git_rev_parse,
     run_instances,
     s3_cp,
@@ -50,6 +72,7 @@ from external import (
 )
 from infra_config import InfraConfig, InfraError, parse_infra
 from instance_launch import (
+    BOOTSTRAP_TIMEOUT_SECONDS,
     ENCODE_VOLUME_SIZE_GB,
     IMDS_HOP_LIMIT,
     REMOTE_REPO_DIR,
@@ -89,7 +112,15 @@ from scenario_plan import (
     serialize_plan,
     summarize_plan,
 )
-from vigilance import Vigilance
+from status_check import (
+    STATUS_PREFIX,
+    Progress,
+    StatusError,
+    check_progress,
+    done_key,
+    progress_key,
+)
+from vigilance import Liveness, Vigilance, decide_vigilance, is_standing, marker_verdict
 
 PROG = "orchestrator.py"
 
@@ -139,6 +170,12 @@ PROBE_STDERR_NAME = "perf.stderr.txt"
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
+
+# O status com que um shell reporta a morte por SIGINT, e o que distingue "o
+# pesquisador parou de olhar" de "a campanha tem pendência" (D11).
+EXIT_INTERRUPTED = 130
+
+_VIGILANT_SUBCOMMANDS = frozenset({"run", "watch"})
 
 
 class PreparationError(Exception):
@@ -270,28 +307,55 @@ def main() -> int:
     )
     watch = subcommands.add_parser(
         "watch",
-        help="a saída de emergência: --abort termina toda instância do arquivo de estado",
+        help="retoma a vigilância pelo arquivo de estado; --abort é a saída de emergência",
         description=(
-            "Lê o arquivo de estado do work dir, o valida e termina todas as instâncias "
-            "que ele lista. A vigilância sem --abort ainda não existe."
+            "Lê o arquivo de estado do work dir, o valida e volta ao mesmo laço do run, "
+            "de onde o Orquestrador caiu: as três perguntas a cada 5 minutos, a "
+            "terminação de cada arquitetura no poll em que o marcador dela aparece e o "
+            "resumo ao fim. As que o arquivo já dá por terminadas são puladas. Com "
+            "--abort não vigia: termina toda instância que o arquivo lista e sai."
         ),
     )
     watch.add_argument(
         "--abort",
         action="store_true",
-        required=True,
-        help="termina todas as instâncias do arquivo de estado e sai",
+        help="não vigia: termina todas as instâncias do arquivo de estado e sai",
     )
-    watch.set_defaults(run=lambda args, **common: watch_abort(**common))
+    watch.set_defaults(
+        run=lambda args, **common: (watch_abort if args.abort else watch_campaign)(**common)
+    )
     args = parser.parse_args()
 
     infra_path = args.infra.expanduser()
     try:
         infra = _load_infra(infra_path)
         return args.run(args, infra=infra, work_dir=infra_path.parent)
+    except KeyboardInterrupt:
+        return _interrupted(infra_path, args.subcommand)
     except _FAILURES as error:
         _fail(error)
         return EXIT_FAILURE
+
+
+def _interrupted(infra_path: Path, subcommand: str) -> int:
+    """O `Ctrl-C` para só a vigilância, e diz como voltar e como abortar (D11).
+
+    Só nos dois subcomandos que vigiam: nos outros o Ctrl-C interrompe um passo
+    que **lança** instância, e mandar rodar um `watch` que talvez não tenha
+    arquivo de estado seria a instrução errada em cima da instância esquecida.
+    """
+    if subcommand not in _VIGILANT_SUBCOMMANDS:
+        _fail(
+            f"Ctrl-C: o {subcommand} parou no meio; confira no describe-instances se a "
+            f"instância dele ficou de pé"
+        )
+        return EXIT_INTERRUPTED
+
+    watch = f"{ORCHESTRATOR_CLI} --infra {infra_path} watch"
+    _fail("Ctrl-C: a vigilância parou e nenhuma instância foi terminada (ADR-0010)")
+    _fail(f"  para voltar a vigiar:  {watch}")
+    _fail(f"  para terminar tudo:    {watch} --abort")
+    return EXIT_INTERRUPTED
 
 
 def prepare_masters(*, infra: InfraConfig, config: ExperimentConfig, work_dir: Path) -> int:
@@ -483,12 +547,14 @@ def run_campaign(
     run_timeout: int,
     total_timeout: int,
 ) -> int:
-    """A campanha até o disparo: plano no bucket, uma Instância por arquitetura, três PIDs.
+    """A campanha inteira: plano no bucket, uma Instância por arquitetura, e a vigilância.
 
     Até o último `cloud-init` qualquer falha termina tudo o que subiu (D7).
     Depois do primeiro disparo a regra inverte: as Instâncias são auto-dirigidas
-    (ADR-0010) e ficam de pé, e o que as termina é o `watch --abort`.
+    (ADR-0010) e ficam de pé, e o que as termina é o marcador de cada uma, o
+    prazo de D10 ou o `watch --abort`.
     """
+    started = time.monotonic()
     results: list[StepResult] = []
     try:
         commit = _self_check(results, infra=infra, bucket=bucket, work_dir=work_dir)
@@ -513,6 +579,7 @@ def run_campaign(
             bucket=bucket,
             config_path=str(config_path),
             commit=commit,
+            total_timeout=total_timeout,
             slice_keys=tuple(each.key for each in campaign.slices),
             instances=(),
         ),
@@ -539,9 +606,22 @@ def run_campaign(
 
     _report(
         f"{len(tracked.state.instances)} Instância(s) rodando sozinhas; o arquivo de estado é "
-        f"{tracked.path}. A vigilância é o watch (#76); a saída de emergência é o watch --abort"
+        f"{tracked.path}. Ctrl-C para a vigilância sem terminar nada, e o watch a retoma"
     )
-    return EXIT_OK
+    return _drive_vigilance(tracked, started=started)
+
+
+def watch_campaign(*, infra: InfraConfig, work_dir: Path) -> int:
+    """A vigilância retomada de onde o Orquestrador caiu, pelo arquivo de estado (D12)."""
+    started = time.monotonic()
+    tracked = _StateFile.load(work_dir / STATE_NAME)
+    settled = [each for each in tracked.state.instances if not is_standing(each.state)]
+    if settled:
+        _report(
+            f"{tracked.path}: {', '.join(each.instance for each in settled)} já "
+            f"terminada(s) no arquivo de estado, puladas"
+        )
+    return _drive_vigilance(tracked, started=started)
 
 
 def watch_abort(*, infra: InfraConfig, work_dir: Path) -> int:
@@ -557,6 +637,191 @@ def watch_abort(*, infra: InfraConfig, work_dir: Path) -> int:
         f"s3://{tracked.state.bucket}/{RUNS_PREFIX} fica lá, para o resume.py"
     )
     return EXIT_OK
+
+
+def _drive_vigilance(tracked: _StateFile, *, started: float) -> int:
+    """O laço até nada mais estar de pé, o resumo e o código de saída (D2, D8, D10)."""
+    limit = watch_deadline_seconds(
+        total_timeout=tracked.state.total_timeout,
+        bootstrap_timeout=BOOTSTRAP_TIMEOUT_SECONDS,
+    )
+    blown = _watch_loop(tracked, started=started, limit=limit)
+
+    _report("o lançamento terminou:")
+    for line in summary_lines(tracked.state.instances):
+        print(line)
+    reasons = failure_reasons(tracked.state.instances, deadline_blown=blown)
+    if not reasons:
+        _report(
+            f"as {len(tracked.state.instances)} arquiteturas terminaram sem pendência; "
+            f"as Execuções estão em s3://{tracked.state.bucket}/{RUNS_PREFIX}"
+        )
+        return EXIT_OK
+
+    _fail(_lines("a campanha terminou com pendência:", reasons))
+    for line in resume_hint(tracked.state):
+        _fail(line)
+    return EXIT_FAILURE
+
+
+def _watch_loop(tracked: _StateFile, *, started: float, limit: float) -> bool:
+    """Pergunta a cada 5 minutos até nada restar de pé; devolve se o prazo estourou."""
+    unanswered: dict[str, int] = {}
+    while _standing(tracked):
+        _poll(tracked, unanswered)
+        if not _standing(tracked):
+            return False
+        if time.monotonic() - started >= limit:
+            _fail(f"o prazo de {limit / 3600:.1f} h do Orquestrador estourou (D10)")
+            _terminate_all(tracked)
+            return True
+        time.sleep(POLL_INTERVAL_SECONDS)
+    return False
+
+
+def _standing(tracked: _StateFile) -> list[TrackedInstance]:
+    """As arquiteturas que ainda faturam: são elas que o poll pergunta e que ele termina."""
+    return [each for each in tracked.state.instances if is_standing(each.state)]
+
+
+def _poll(tracked: _StateFile, unanswered: dict[str, int]) -> None:
+    """As três perguntas por arquitetura de pé, e uma linha para cada arquitetura (D2)."""
+    listed = _status_listing(tracked)
+
+    for each in tracked.state.instances:
+        if not is_standing(each.state):
+            print(settled_line(each))
+        elif listed is None:
+            _fail(f"{each.instance}: o poll não pôde ser feito desta vez, sem a listagem")
+        else:
+            _poll_architecture(tracked, each, listed=listed, unanswered=unanswered)
+
+
+def _status_listing(tracked: _StateFile) -> set[str] | None:
+    """A listagem de `status/`, uma só para as três, ou `None` se ela não pôde ser feita."""
+    try:
+        return {entry.key for entry in s3_list_prefix(tracked.state.bucket, STATUS_PREFIX)}
+    except _FAILURES as error:
+        _fail(f"s3://{tracked.state.bucket}/{STATUS_PREFIX}: a listagem falhou neste poll: {error}")
+        return None
+
+
+def _poll_architecture(
+    tracked: _StateFile,
+    each: TrackedInstance,
+    *,
+    listed: set[str],
+    unanswered: dict[str, int],
+) -> None:
+    """O poll de uma arquitetura, e o que ele decide sobre ela.
+
+    A falha de qualquer uma das três perguntas deixa a arquitetura como estava e
+    o laço segue: apagar o `except` faz um `describe-instances` estrangulado uma
+    vez em 46 h derrubar a vigilância das outras duas.
+    """
+    try:
+        described = described_instance(each.instance_id)
+        liveness = _liveness(each, described)
+        payload = _status_object(tracked, done_key(each.instance_type), listed)
+        marker, outcome = marker_verdict(payload, instance_id=each.instance_id)
+        progress = _progress(tracked, each, listed)
+    except _FAILURES as error:
+        _fail(f"{each.instance}: o poll não pôde ser feito desta vez: {error}")
+        return
+
+    silent = unanswered.get(each.instance, 0) + 1 if liveness is Liveness.NO_ANSWER else 0
+    unanswered[each.instance] = silent
+    state = decide_vigilance(
+        described_state=described.state if described else None,
+        liveness=liveness,
+        marker=marker,
+        unanswered_polls=silent,
+    )
+    print(poll_line(each, state=state, progress=progress, unanswered_polls=silent))
+
+    if state is Vigilance.READY_TO_TERMINATE:
+        _remember(tracked, each.instance, state=state, outcome=outcome)
+        _terminate_architecture(tracked, each, Vigilance.FINISHED)
+    elif state is Vigilance.DEAD:
+        _terminate_architecture(tracked, each, Vigilance.DEAD)
+    elif state is not each.state:
+        _remember(tracked, each.instance, state=state)
+
+
+def _liveness(each: TrackedInstance, described: DescribedInstance | None) -> Liveness:
+    """O `kill -0` no PID gravado: "sem resposta" é um resultado, e não uma exceção (D2)."""
+    if each.pid is None:
+        return Liveness.NOT_DISPATCHED
+    if described is None or described.private_ip is None:
+        return Liveness.NO_ANSWER
+
+    try:
+        probe = ssh_capture(
+            described.private_ip, liveness_command(each.pid), timeout=LIVENESS_TIMEOUT_SECONDS
+        )
+    except ExternalCommandError as error:
+        _report(f"{each.instance}: o kill -0 não respondeu ({error})")
+        return Liveness.NO_ANSWER
+    return Liveness.ALIVE if probe.returncode == 0 else Liveness.DEAD
+
+
+def _status_object(tracked: _StateFile, key: str, listed: set[str]) -> Any:
+    """O objeto de `status/` baixado e parseado, ou `None` enquanto o bucket não o tem."""
+    if key not in listed:
+        return None
+    local = tracked.path.parent / key
+    local.parent.mkdir(parents=True, exist_ok=True)
+    s3_cp(f"s3://{tracked.state.bucket}/{key}", str(local))
+    return json.loads(local.read_text(encoding="utf-8"))
+
+
+def _progress(tracked: _StateFile, each: TrackedInstance, listed: set[str]) -> Progress | None:
+    """O progresso desta Instância; o da tentativa anterior chega como `None` e some.
+
+    Apagar o `except` faz um objeto de progresso deformado — telemetria, que o
+    `run_all.sh` também trata como descartável — esconder o marcador, e a fatia
+    só acabaria no prazo de D10.
+    """
+    payload = _status_object(tracked, progress_key(each.instance_type), listed)
+    if payload is None:
+        return None
+    try:
+        return check_progress(payload, instance_id=each.instance_id)
+    except StatusError as error:
+        _report(f"{each.instance}: o objeto de progresso veio deformado ({error})")
+        return None
+
+
+def _terminate_architecture(tracked: _StateFile, each: TrackedInstance, state: Vigilance) -> None:
+    """Termina aquela arquitetura, e só a marca quando a chamada voltou (D9).
+
+    Nessa ordem, e só assim: uma arquitetura marcada sobre um terminate que
+    falhou sai do laço e da lista do `watch --abort`, que é a única coisa que
+    ainda a alcançaria — a `xlarge` viva que ninguém mais termina. Deixada de pé,
+    ela volta no poll seguinte, e o `terminate-instances` é idempotente. A
+    exceção é a instância que a API já não conhece: aí não há o que terminar.
+    """
+    _report(f"{each.instance_id} ({each.instance}): terminando, {state.value}")
+    try:
+        terminate_instances([each.instance_id])
+    except _FAILURES as error:
+        if INSTANCE_NOT_FOUND_ERROR_CODE not in str(error):
+            _fail(
+                f"{each.instance_id}: o terminate-instances falhou ({error}); ela segue "
+                f"no arquivo de estado, e o próximo poll tenta de novo"
+            )
+            return
+    _remember(tracked, each.instance, state=state)
+
+
+def _remember(tracked: _StateFile, instance: str, **changes: Any) -> None:
+    """A mudança de uma arquitetura, que vai para o disco na hora (D12)."""
+    tracked.update(
+        [
+            replace(each, **changes) if each.instance == instance else each
+            for each in tracked.state.instances
+        ]
+    )
 
 
 @dataclass
@@ -654,20 +919,7 @@ def _launch_all(
     """Uma Instância por fatia, cada uma no arquivo de estado assim que tem id."""
     for each in campaign.slices:
         instance_id = _launch_architecture(each, state=tracked.state, infra=infra, config=config)
-        tracked.update(
-            [
-                *tracked.state.instances,
-                TrackedInstance(
-                    instance=each.instance.id,
-                    instance_id=instance_id,
-                    instance_type=each.instance.instance_type,
-                    pid=None,
-                    block_count=each.block_count,
-                    runs_total=each.runs_total,
-                    state=Vigilance.BOOTSTRAPPING,
-                ),
-            ]
-        )
+        tracked.update([*tracked.state.instances, launched_instance(each, instance_id)])
         _report(
             f"{instance_id}: {each.instance.id} ({each.instance.instance_type}) lançada no "
             f"commit {tracked.state.commit}, fatia em {each.key}"
@@ -750,18 +1002,20 @@ def _dispatch_all(
 
 
 def _terminate_all(tracked: _StateFile) -> int:
-    """Termina o que está de pé, numa chamada só, e o marca morto; devolve quantas eram."""
-    standing = [
-        architecture
-        for architecture in tracked.state.instances
-        if architecture.state is not Vigilance.DEAD
-    ]
+    """Termina o que está de pé, numa chamada só, e o marca morto; devolve quantas eram.
+
+    O `replace` sobre **todas** apagaria, da arquitetura que o marcador já
+    encerrou, o `outcome` de que saem o resumo final e o código de saída.
+    """
+    standing = _standing(tracked)
     if standing:
         _report(f"terminando {', '.join(architecture.instance_id for architecture in standing)}")
         terminate_instances([architecture.instance_id for architecture in standing])
         tracked.update(
             [
                 replace(architecture, state=Vigilance.DEAD)
+                if is_standing(architecture.state)
+                else architecture
                 for architecture in tracked.state.instances
             ]
         )
@@ -985,6 +1239,7 @@ _FAILURES = (
     PreflightError,
     CampaignError,
     StateError,
+    StatusError,
     OSError,
     json.JSONDecodeError,
     tomllib.TOMLDecodeError,

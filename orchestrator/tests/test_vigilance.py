@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from command_output import parse_describe_instances
 from conftest import captured, make_done_marker
-from status_check import StatusError
+from status_check import StatusError, check_done_marker
 from vigilance import (
     UNANSWERED_POLL_LIMIT,
     Liveness,
@@ -78,7 +78,7 @@ class TestTheArchitectureThatFinished:
     def test_the_exit_status_the_marker_carries_does_not_change_the_decision(
         self, exit_status, capped
     ):
-        verdict = marker_verdict(
+        verdict, _ = marker_verdict(
             make_done_marker(exit_status=exit_status, capped=capped), instance_id=LAUNCHED
         )
 
@@ -146,14 +146,29 @@ class TestTheArchitectureStillComingUp:
 
 class TestTheVerdictAboutTheMarker:
     def test_no_object_in_status_is_an_absent_marker(self):
-        assert marker_verdict(None, instance_id=LAUNCHED) is Marker.ABSENT
+        assert marker_verdict(None, instance_id=LAUNCHED) == (Marker.ABSENT, None)
 
     def test_the_marker_of_the_launched_instance_is_valid(self):
-        assert marker_verdict(make_done_marker(), instance_id=LAUNCHED) is Marker.VALID
+        verdict, marker = marker_verdict(make_done_marker(), instance_id=LAUNCHED)
+
+        assert verdict is Marker.VALID
+        assert marker == check_done_marker(make_done_marker(), instance_id=LAUNCHED)
+
+    def test_the_valid_verdict_carries_what_the_state_file_guards(self):
+        # O registro sai do mesmo parse do veredito: um segundo
+        # `check_done_marker` sobre o mesmo objeto abriria a chance de o estado
+        # guardar um marcador que não é o que encerrou a fatia.
+        _, marker = marker_verdict(
+            make_done_marker(exit_status=1, runs_failed=2), instance_id=LAUNCHED
+        )
+
+        assert marker is not None
+        assert (marker.exit_status, marker.runs_failed) == (1, 2)
 
     def test_the_marker_of_the_previous_attempt_is_of_another_instance(self):
-        assert marker_verdict(make_done_marker(), instance_id=PREVIOUS_ATTEMPT) is (
-            Marker.OTHER_INSTANCE
+        assert marker_verdict(make_done_marker(), instance_id=PREVIOUS_ATTEMPT) == (
+            Marker.OTHER_INSTANCE,
+            None,
         )
 
     def test_a_malformed_marker_is_refused_by_the_reader_that_owns_it(self):

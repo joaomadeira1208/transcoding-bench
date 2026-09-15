@@ -29,6 +29,8 @@ SCENARIO_WIDTH = len(LONGEST_SCENARIO_ID) + 1
 SECONDS_PER_HOUR = 3600
 SECONDS_PER_MINUTE = 60
 
+STATUS_PREFIX = "status/"
+
 
 class StatusError(Exception):
     """Objeto de `status/` que o Orquestrador recusa a ler, com o campo ofensor nomeado."""
@@ -62,6 +64,16 @@ class Progress:
     written_at: str
 
 
+def done_key(instance_type: str) -> str:
+    """A chave do marcador daquela fatia, a mesma em toda tentativa (D3)."""
+    return f"{STATUS_PREFIX}{instance_type}_done"
+
+
+def progress_key(instance_type: str) -> str:
+    """A chave do progresso daquela fatia, sobrescrita a cada Execução (D4)."""
+    return f"{STATUS_PREFIX}{instance_type}_progress"
+
+
 def check_done_marker(payload: Any, *, instance_id: str) -> DoneMarker | None:
     """O marcador, ou `None` quando ele é o da tentativa anterior."""
     return _checked(DoneMarker, payload, "marcador", instance_id)
@@ -81,13 +93,18 @@ def progress_line(progress: Progress | None, *, instance: str, runs_total: int) 
         )
 
     return (
-        f"{_hour(progress.written_at)} {instance:<{INSTANCE_WIDTH}} "
+        f"{hour_of(progress.written_at)} {instance:<{INSTANCE_WIDTH}} "
         f"bloco {_index_over_total(progress.block_index, progress.block_count)}  "
         f"run {_index_over_total(progress.run_index, progress.run_count)}  "
         f"{progress.scenario_id:<{SCENARIO_WIDTH}}"
         f"{_index_over_total(progress.runs_total, runs_total)} runs, "
         f"{progress.runs_failed} falhas, {_elapsed(progress.elapsed_seconds)}"
     )
+
+
+def hour_of(timestamp: str) -> str:
+    """A hora no relógio da própria Instância, que é o offset que ela escreveu."""
+    return datetime.fromisoformat(timestamp).strftime("%H:%M:%S")
 
 
 def _checked[T](record: type[T], payload: Any, what: str, instance_id: str) -> T | None:
@@ -108,11 +125,6 @@ def _checked[T](record: type[T], payload: Any, what: str, instance_id: str) -> T
 def _index_over_total(index: int, total: int) -> str:
     """`i/n` com o `i` na largura do `n`."""
     return f"{index:>{len(str(total))}}/{total}"
-
-
-def _hour(written_at: str) -> str:
-    """A hora no relógio da própria Instância, que é o offset que ela escreveu."""
-    return datetime.fromisoformat(written_at).strftime("%H:%M:%S")
 
 
 def _elapsed(seconds: int) -> str:

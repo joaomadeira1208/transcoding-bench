@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -20,18 +21,20 @@ from campaign_launch import (
     CampaignError,
     abort_reasons,
     full_campaign,
+    launched_instance,
     refuse_populated_runs,
     refuse_standing_instances,
     resumed_campaign,
     slice_key,
 )
-from campaign_state import parse_state
+from campaign_state import CampaignState, parse_state, serialize_state
 from command_output import S3Object, TruncatedListing
 from conftest import make_campaign_state, make_tracked_instance, real_config, real_pilot_config
 from scenario_plan import build_canonical_plan, build_instance_slices
 from vigilance import Vigilance
 
 PREFLIGHT_PREFIX = "runs/preflight/"
+INSTANCE_ID = "i-0123456789abcdef0"
 
 DECLARED = ("c7g", "c7i", "c7a")
 
@@ -106,6 +109,9 @@ class TestTheGuardOverTheStateFile:
 
     def test_a_launch_that_the_watch_abort_already_ended_passes(self):
         assert standing(tracked(c7g=Vigilance.DEAD, c7i=Vigilance.DEAD)) is None
+
+    def test_a_campaign_that_ran_to_the_end_passes(self):
+        assert standing(tracked(c7g=Vigilance.FINISHED, c7i=Vigilance.DEAD)) is None
 
     @pytest.mark.parametrize(
         "state",
@@ -182,6 +188,48 @@ class TestTheFullCampaign:
 
 def campaign_upload(config: Any, key: str) -> dict[str, Any]:
     return full_campaign(config).uploads[key]
+
+
+class TestTheArchitectureAsTheStateFileGuardsIt:
+    def test_it_is_born_bootstrapping_without_pid_and_without_marker(self):
+        each = full_campaign(real_pilot_config()).slices[0]
+
+        launched = launched_instance(each, INSTANCE_ID)
+
+        assert (launched.state, launched.pid, launched.outcome) == (
+            Vigilance.BOOTSTRAPPING,
+            None,
+            None,
+        )
+
+    def test_it_carries_the_record_that_launched_it_and_the_totals_of_its_slice(self):
+        each = full_campaign(real_pilot_config()).slices[0]
+
+        launched = launched_instance(each, INSTANCE_ID)
+
+        assert (launched.instance, launched.instance_type) == (
+            each.instance.id,
+            each.instance.instance_type,
+        )
+        assert (launched.block_count, launched.runs_total) == (each.block_count, each.runs_total)
+
+    def test_the_launch_of_the_three_round_trips_through_the_state_file(self):
+        # O round-trip inteiro, e não só a construção: um campo novo do
+        # `TrackedInstance` que o `launched_instance` não preenchesse estouraria
+        # um `TypeError` com a `xlarge` já de pé e ainda fora do arquivo — a
+        # instância que nem o `watch --abort` nem o poll alcançam.
+        campaign = full_campaign(real_pilot_config())
+        written = CampaignState(
+            **{
+                **make_campaign_state(),
+                "slice_keys": tuple(each.key for each in campaign.slices),
+                "instances": tuple(
+                    launched_instance(each, f"i-{each.instance.id}") for each in campaign.slices
+                ),
+            }
+        )
+
+        assert parse_state(json.loads(serialize_state(written))) == written
 
 
 def reduced(instance: str, blocks: int) -> dict[str, Any]:

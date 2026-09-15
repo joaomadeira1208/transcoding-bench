@@ -41,9 +41,7 @@ IMDS_HOP_LIMIT = 2
 
 READY_TIMEOUT_SECONDS = 600.0
 
-# O bootstrap dos papéis de medição termina no `docker build`, que compila o
-# FFmpeg da ADR-0008 (10 a 20 min, ADR-0013).
-BOOTSTRAP_TIMEOUT_SECONDS = 3600.0
+BOOTSTRAP_TIMEOUT_SECONDS = 40 * 60.0
 
 
 class LaunchError(Exception):

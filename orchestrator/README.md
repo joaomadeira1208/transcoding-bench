@@ -65,6 +65,14 @@ gravado respondeu por SSH, o veredito do `status_check` sobre o marcador e
 quantos polls seguidos ficaram sem resposta, e devolve um dos cinco estados —
 bootstrapping, rodando, pronta para terminar, morta, sem resposta.
 
+O sexto estado, `finished`, não sai dessa decisão: é o que o laço escreve depois
+de o `terminate-instances` de uma arquitetura pronta ter voltado. Ele existe
+porque `dead` já significa outra coisa — a arquitetura que morreu antes do
+marcador —, e o resumo final e o código de saída distinguem as duas. O que as
+une é o `is_standing`, que é o predicado de "ainda fatura": as duas saem do laço,
+nenhuma é perguntada de novo, nenhuma é terminada de novo, e nenhuma delas
+segura um `run` novo na guarda do arquivo de estado.
+
 A precedência entre as respostas é a decisão inteira. O marcador válido vem antes
 de tudo, porque o fim normal é ele com o processo já morto: o `run_all.sh`
 escreve o marcador e sai, e perguntar pelo processo primeiro faria toda campanha
@@ -106,6 +114,17 @@ fatias já subiram e nenhuma arquitetura está de pé, e é por isso que as chav
 são de topo e a lista de arquiteturas nasce vazia — e o reescreve a cada mudança
 de estado; o `watch` o lê e volta ao mesmo laço. Mora ao lado do arquivo de
 infra, em `~/work/state.json`, e um `run` novo o sobrescreve.
+
+O `total_timeout` está no arquivo porque o prazo do Orquestrador sai dele (D10):
+sem esse campo, o `watch` retomado teria de recebê-lo por flag, e uma flag que o
+pesquisador tem de lembrar de repetir às 4 da manhã é uma campanha vigiada com um
+prazo diferente do que ela prometeu. O `outcome` é o marcador que encerrou aquela
+fatia, guardado inteiro no poll em que ele apareceu, e nulo até lá: ele é o que
+diz quantos runs a arquitetura fez, quantos falharam e se o teto disparou, e sem
+ele um `watch` que retomasse depois de a `c7g` já ter terminado sairia com
+status zero sobre uma fatia com falhas. Ele é conferido pelo `status_check` na
+leitura, identidade inclusive: um marcador de outra instância guardado ali daria
+por completa uma fatia que não rodou.
 
 O `pid` é o único campo que aceita nulo, e é o intervalo entre o lançamento e o
 disparo; o `instance_id` não aceita, porque é por ele que a vigilância pergunta e
@@ -367,6 +386,7 @@ junto. São quatro:
         --instance-type c7g.xlarge
     python orchestrator/orchestrator.py --infra ~/work/infra.json run \
         --config config/pilot.toml --bucket <piloto>
+    python orchestrator/orchestrator.py --infra ~/work/infra.json watch
     python orchestrator/orchestrator.py --infra ~/work/infra.json watch --abort
 
 A escada em que eles se encaixam, cada degrau disparado pelo pesquisador
@@ -555,8 +575,8 @@ do sistema não vê diferença. O argv fica sem teste, como o resto do adaptador
 
 ### O `run`
 
-O terceiro subcomando é a campanha até o disparo, e o piloto atravessa
-exatamente este caminho com o `pilot.toml` e o bucket do piloto:
+O terceiro subcomando é a campanha inteira — do plano ao resumo final —, e o
+piloto atravessa exatamente este caminho com o `pilot.toml` e o bucket do piloto:
 
     python orchestrator/orchestrator.py --infra ~/work/infra.json run \
         --config config/pilot.toml --bucket <piloto> \
@@ -577,15 +597,16 @@ Em passos:
    é saída sem lançamento (D6).
 2. **A guarda do arquivo de estado** (D12). Antes de qualquer escrita, o `run`
    lê o `~/work/state.json` que já esteja lá e recusa se ele listar alguma
-   arquitetura que não esteja morta, nomeando os `instance_id` e mandando rodar
+   arquitetura ainda de pé, nomeando os `instance_id` e mandando rodar
    o `watch --abort` primeiro. O arquivo é a saída de emergência — é *por causa
    dele* que os ids não são caçados no console —, e um `run` novo que o
    sobrescreva deixa o lançamento anterior de pé sem ninguém que saiba os ids.
    A guarda do `runs/` não cobre esse caso: com `--slices` ela nem roda, e sem
    ela só recusa depois da primeira Execução concluída, isto é, depois do
    bootstrap inteiro (~2 h) mais um encode — uma janela inteira em que um
-   segundo `run` passaria e zeraria o arquivo. Um arquivo cujas instâncias estão
-   todas mortas passa: é o rastro de uma campanha encerrada.
+   segundo `run` passaria e zeraria o arquivo. Um arquivo cujas instâncias
+   saíram todas do laço — mortas ou terminadas pelo marcador — passa: é o rastro
+   de uma campanha encerrada.
 3. **A guarda do bucket** (D13). Sem `--slices`, o `run` lista `runs/` do bucket
    e recusa se houver qualquer objeto **fora de `runs/preflight/`**: cobre o
    `pilot.toml` contra o bucket da campanha e a campanha disparada duas vezes.
@@ -613,8 +634,9 @@ Em passos:
    sobre a fatia que sobe, e não sobre a definição, porque na retomada são os da
    fatia reduzida que a linha de progresso divide.
 5. **O arquivo de estado** é escrito antes do primeiro lançamento, com as chaves
-   das fatias e nenhuma arquitetura, e reescrito a cada instância lançada (com
-   `pid` nulo e estado `bootstrapping`) e a cada disparo (com o PID e `running`).
+   das fatias, o `--total-timeout` deste lançamento e nenhuma arquitetura, e
+   reescrito a cada instância lançada (com `pid` nulo e estado `bootstrapping`),
+   a cada disparo (com o PID e `running`) e a cada mudança que o laço decide.
 6. **Uma Instância de encode por arquitetura**, pelo `instance_launch.py`: AMI
    pela `arch`, perfil `encode`, 200 GB gp3, hop limit 2, e as tags `role`,
    `commit` e `Name=transcoding-bench-encode-{id}` (D14).
@@ -635,11 +657,12 @@ Em passos:
    sudo docker run`, de modo que o PID gravado passa a ser de um processo de
    root: quem perguntar por ele com `kill -0` como `ubuntu` recebe `EPERM`, e a
    pergunta do `watch` tem de ser `sudo kill -0` ou `ps -p`.
-9. **Termina aqui.** Imprime o caminho do arquivo de estado e diz que a
-   vigilância é o `watch` (#76). As Instâncias ficam rodando — são auto-dirigidas
-   por desenho (ADR-0010) — e a partir do primeiro `ssh` de disparo a regra
-   inverte: nenhuma falha desta fase termina instância alguma, e o `run` sai com
-   erro dizendo que o `watch --abort` termina todas.
+9. **A vigilância**, no mesmo processo e com o mesmo laço do `watch`, abaixo.
+   A partir do primeiro `ssh` de disparo a regra inverte: nenhuma falha desta
+   fase termina instância alguma por si, e uma falha antes do laço sai com erro
+   dizendo que o `watch --abort` termina todas. O `run` só volta quando as três
+   saíram do laço, ou quando o prazo estoura, e o código de saída dele é o
+   veredito sobre o que elas deixaram.
 
 O que ganha teste é o núcleo do `campaign_launch.py`: a guarda sobre a listagem
 (vazia, só com o rastro do preflight, com Execução, truncada), a guarda sobre o
@@ -650,16 +673,123 @@ arquitetura recusados) e a decisão de abortar tudo sobre os três status de
 bootstrap; mais o parser do PID no `command_output.py`. Laço, comandos remotos
 e renderização são escritos direto (ADR-0022).
 
-### O `watch --abort`
+### O `watch` e o laço de vigilância
 
-O quarto subcomando nasce só com `--abort`, e é a saída de emergência que não é
-o console da AWS (D12): lê `~/work/state.json`, o valida pelo `campaign_state.py`
-— campo defeituoso é recusado pelo nome, e uma vigilância nunca termina a
-instância errada — e termina, numa chamada só, todas as instâncias que ele lista
-e ainda não estão como mortas, marcando-as mortas em seguida. O que já está em
-`runs/` fica lá, para o `resume.py`. Um arquivo sem instância de pé é "nada a
-terminar", com status zero. O `watch` sem `--abort` — o laço de vigilância — é o
-#76.
+O quarto subcomando é o mesmo laço do `run`, começando do arquivo de estado em
+vez de começar de um lançamento:
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json watch
+
+Lê `~/work/state.json`, o valida pelo `campaign_state.py` — campo defeituoso é
+recusado pelo nome, e uma vigilância nunca pergunta pela instância errada —,
+pula as arquiteturas que o arquivo já dá por terminadas e entra no laço pelas
+que sobraram. É isso que torna verdade a propriedade que a ADR-0010 promete: o
+`tmux` fechado, a t3.micro reiniciada ou o `run` morto custam o tempo até o
+pesquisador reabrir a sessão, e nada mais.
+
+**O poll.** A cada 5 minutos, e por arquitetura ainda de pé, as três perguntas
+da D2: o `describe-instances` daquele `instance_id`; o `kill -0` no PID gravado,
+por SSH, com teto curto e com **"sem resposta" como resultado**, e não como
+exceção — o `sudo` do comando é obrigatório, porque o disparo termina em `exec
+sudo docker run` e o PID gravado é de um processo de root; e a listagem de
+`status/`, de onde saem o marcador e o objeto de progresso, baixados e lidos
+pelo `status_check.py`. A listagem é uma só para as três: são dois objetos por
+arquitetura no mesmo prefixo. As respostas vão inteiras para o `decide_vigilance`
+e saem como um dos estados acima.
+
+Uma pergunta que **não pôde ser feita** não é resposta: a falha do `describe`,
+do download ou da listagem imprime a linha do erro, deixa a arquitetura como
+estava e o laço segue. Um `describe-instances` estrangulado uma vez em 46 h é
+exatamente o que não se quer ler como morte às 3 da manhã, e a falha do SSH já
+tem lugar próprio na decisão. As outras arquiteturas seguem em qualquer caso
+(D8).
+
+**A tela** é uma linha por arquitetura por poll, sempre as três, sempre na mesma
+ordem — a das mortas e a das mudas inclusive, porque uma linha que sumisse seria
+lida como a arquitetura que nunca subiu. A da que está rodando é a
+`progress_line` inteira; qualquer outro estado de pé ganha a mesma linha com a
+nota entre colchetes ao fim; e a que já saiu do laço continua na tela com o que
+o marcador dela carregava, sem ser perguntada de novo:
+
+    14:32:07 c7g  bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
+             c7i  sem progresso ainda, 0/36 runs reportados  [bootstrap em curso, ainda sem PID]
+             c7a  finished: 36/36 runs, 0 falhas, sem teto, status 0, marcador de 09:12:44
+
+A linha de quem saiu do laço é a mesma que o resumo final imprime: as três
+colunas continuam casando, e o que muda entre o penúltimo poll e o resumo é só
+quantas arquiteturas ainda têm progresso a mostrar.
+
+**A terminação é por instância, no poll em que ela acaba** (D9): marcador válido
+— com falha ou sem, seja qual for o `exit_status` — é `terminate-instances`
+naquela hora, e a arquitetura sai do laço como `finished` com o marcador
+guardado no arquivo de estado.
+
+Uma arquitetura dada por morta é terminada pelo mesmo motivo e sai como `dead`.
+A D8 pede só que ela seja reportada e **não** relançada, e é isso que o laço
+faz; terminá-la é a conclusão da mesma conta que a D9 faz, porque uma `xlarge`
+que ninguém mais vigia e que o `UNANSWERED_POLL_LIMIT` já deu por abandonada
+continuaria faturando as 40 h que faltavam. O risco aceito tem nome: a morte por
+silêncio de SSH é um veredito sobre ~15 min sem resposta numa instância que o
+`describe-instances` ainda chama de `running`, e se ela estava viva o encode em
+curso vai junto. É por isso que o limite é de três polls e não de um, e é por
+isso que ele é constante e não flag.
+
+A ordem é terminar e **só então** marcar. Uma arquitetura marcada sobre um
+`terminate-instances` que falhou sai do laço e da lista do `watch --abort`, que
+é a única coisa que ainda a alcançaria: sobraria uma `xlarge` viva que nenhum
+comando termina. Falhou, ela fica de pé no arquivo e o poll seguinte tenta de
+novo — a chamada é idempotente. A exceção é o `InvalidInstanceID.NotFound`: aí
+não há o que terminar, e insistir seria vigiar uma instância que a API já não
+conhece até o prazo estourar.
+
+**O prazo** é o da D10: `--total-timeout` mais o timeout de bootstrap mais uma
+margem fixa. O termo do bootstrap é medido, não chutado — as nove corridas do
+preflight levaram de 19,7 a 24,6 min do lançamento ao container pronto, e o teto
+é o pior caso arredondado para 25 min mais 15 de folga. Ao estourar, o que resta
+de pé é terminado e o `run` sai com erro. A aritmética é função pura, e é ela que
+ganha teste: um prazo menor que o teto de cada Instância terminaria as três na
+véspera do fim, com as 46 h faturadas e nenhum marcador escrito.
+
+O relógio corre **de cada invocação**, e não do lançamento: um `watch` retomado
+ganha o prazo inteiro de novo. É deliberado, e o arquivo de estado guarda o
+`--total-timeout` justamente para que a conta seja a mesma nas duas pontas. O
+que isso não cobre — uma campanha vigiada em três sessões viver mais que um
+prazo — já está coberto onde importa: quem tem teto de verdade é o `run_all.sh`
+de cada Instância, que é a camada 2 da ADR-0012; o prazo daqui é a garantia de
+que o Orquestrador não fica vigiando para sempre, e reabrir o `watch` é o
+pesquisador decidindo continuar a vigiar.
+
+**`Ctrl-C` não termina nada** (D11). O SIGINT para só a vigilância e imprime as
+duas linhas que importam — o `watch` para voltar e o `watch --abort` para
+terminar tudo —, saindo com 130, que é o status que distingue "o pesquisador
+parou de olhar" de "a campanha tem pendência". Só o `run` e o `watch` dizem
+isso: um `Ctrl-C` no `prepare-masters` ou no `preflight` interrompe um passo que
+lança instância e não escreve arquivo de estado nenhum, e a linha de lá manda
+conferir no `describe-instances` se a instância daquele passo ficou de pé.
+
+**O resumo e o código de saída.** Ao fim, uma linha por arquitetura com o que o
+marcador dela carregava: runs feitos sobre o total da fatia, falhas, teto e
+status de saída; a que morreu diz que não tem marcador. O status é zero só se
+nenhuma morreu, nenhuma falhou run, nenhuma bateu no teto e o prazo não estourou;
+qualquer uma dessas imprime o motivo, o comando do `resume.py` com a definição e
+o bucket **deste** lançamento, e o `run --slices` que vem depois dele. A decisão
+é função pura e ganha teste pelo mesmo motivo que o prazo: um status zero sobre
+uma campanha à qual falta um terço da matriz é a falha que o `resume.py` existe
+para ser chamado contra.
+
+O laço, os comandos remotos e os downloads são escritos direto (ADR-0022); o que
+ganha teste é o `campaign_watch.py` — o prazo, o veredito final, o resumo e a
+linha de cada poll — mais a decisão do `vigilance.py` e o arquivo de estado.
+
+### A saída de emergência: `watch --abort`
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json watch --abort
+
+Com `--abort` o subcomando não vigia: termina, numa chamada só, todas as
+instâncias que o arquivo de estado lista e ainda dá como de pé, marcando-as
+mortas em seguida, e sai. É a saída de emergência que não é o console da AWS
+(D12). O que já está em `runs/` fica lá, para o `resume.py`. Um arquivo sem
+instância de pé é "nada a terminar", com status zero.
 
 ## A retomada: `resume.py`
 

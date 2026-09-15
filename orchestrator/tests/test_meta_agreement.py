@@ -3,12 +3,17 @@
 # evidência de que o bash está escrevendo JSON errado.
 #
 # Por isso este teste **mora duas vezes**, uma em cada papel, com as fixtures
-# escritas à mão nos dois: os venvs são separados e não há módulo comum.
+# escritas à mão nos dois: os venvs são separados e não há módulo comum. A âncora
+# que o bash escreveu é um arquivo, não um módulo, e por isso é uma só, lida pelo
+# caminho a partir dos dois papéis.
 
 from __future__ import annotations
 
 import pytest
+from conftest import REPO_ROOT
 from meta_check import MetaError, check_meta
+
+ANCHOR = REPO_ROOT / "analysis" / "tests" / "fixtures" / "campaign_meta.json"
 
 # Escrito à mão, não vindo da factory do papel: a factory é Python validando
 # Python, e o que este teste persegue é a divergência entre os dois leitores.
@@ -65,6 +70,14 @@ EMPTY_COMMIT_JSON = VALID_META_JSON.replace(
 
 def test_the_valid_meta_is_accepted():
     assert check_meta(VALID_META_JSON)["warmup"] is False
+
+
+def test_the_meta_the_bash_wrote_in_the_pilot_is_accepted():
+    meta = check_meta(ANCHOR.read_bytes())
+
+    assert meta["warmup"] is False
+    assert meta["scenario_id"] == "libx265_1080p_720p_bbb_c7a_rep1"
+    assert meta["exit_code"] == 0
 
 
 def test_the_invalid_meta_is_rejected():

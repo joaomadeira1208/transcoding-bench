@@ -8,8 +8,13 @@
 from __future__ import annotations
 
 import pytest
+from conftest import CAPTURES
 from pydantic import ValidationError
 from run_meta import load_meta
+
+# O `meta.json` que o bash escreveu na primeira Execução do piloto — a âncora do
+# contrato, e a única entrada deste arquivo que nenhuma mão em Python digitou.
+ANCHOR = CAPTURES / "campaign_meta.json"
 
 # Escrito à mão, não vindo da factory do papel: a factory é Python validando
 # Python, e o que este teste persegue é a divergência entre os dois leitores.
@@ -66,6 +71,14 @@ EMPTY_COMMIT_JSON = VALID_META_JSON.replace(
 
 def test_the_valid_meta_is_accepted():
     assert load_meta(VALID_META_JSON).warmup is False
+
+
+def test_the_meta_the_bash_wrote_in_the_pilot_is_accepted():
+    meta = load_meta(ANCHOR.read_bytes())
+
+    assert meta.warmup is False
+    assert meta.scenario_id == "libx265_1080p_720p_bbb_c7a_rep1"
+    assert meta.exit_code == 0
 
 
 def test_the_invalid_meta_is_rejected():

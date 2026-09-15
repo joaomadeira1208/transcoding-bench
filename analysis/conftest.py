@@ -33,7 +33,8 @@ def read_capture(encoder: str, artifact: str) -> str:
 
 # Âncora fraca de propósito: escrita em Python, pelo mesmo raciocínio que
 # escreveu o modelo, ela valida Python contra Python. A âncora do contrato
-# cross-language é um `meta.json` que o bash produziu, e vem do smoke.
+# cross-language é um `meta.json` que o bash produziu no primeiro bloco do piloto:
+# `tests/fixtures/campaign_meta.json`, lido pelo `test_meta_agreement.py`.
 _VALID: dict[str, Any] = {
     "schema_version": "1",
     "scenario_id": "libx264_2160p_1080p_bbb_c7g_rep1",

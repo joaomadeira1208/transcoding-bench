@@ -1,0 +1,43 @@
+{
+  "schema_version": "1",
+  "scenario_id": "libx265_1080p_720p_bbb_c7a_rep1",
+  "warmup": false,
+  "seed": 20260808,
+  "codec": "h265",
+  "encoder": "libx265",
+  "input_res": "1080p",
+  "output_res": "720p",
+  "video": "bbb",
+  "instance": "c7a",
+  "master": "bbb_1080p.mkv",
+  "output_width": 1280,
+  "output_height": 720,
+  "preset": "medium",
+  "crf": 28,
+  "encoder_args": [
+    "-x265-params",
+    "scenecut=0"
+  ],
+  "threads": 0,
+  "gop_size": 48,
+  "pix_fmt": "yuv420p",
+  "strip_audio": true,
+  "container": "mkv",
+  "scale_flags": "lanczos",
+  "run_id": "9cde31d6-77d5-4894-8e57-b567d6152dcd",
+  "started_at": "2026-09-14T21:31:53+00:00",
+  "finished_at": "2026-09-14T21:39:26+00:00",
+  "exit_code": 0,
+  "commit": "0233e0f2f9aba349cf0cb3e87688683e37e14ee5",
+  "instance_id": "i-0123456789abcdef0",
+  "instance_type": "c7a.xlarge",
+  "versions": {
+    "base_image": "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
+    "ffmpeg": "n8.1.2",
+    "libx264": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+    "libx265": "4.2",
+    "libsvtav1": "v4.1.0",
+    "libvmaf": "v3.1.0",
+    "aws_cli": "2.36.38"
+  }
+}

@@ -23,7 +23,17 @@ Como o preço por hora é praticamente proporcional entre as três arquiteturas,
 
 ## O custo operacional por lançamento
 
-As tags `role` e `commit` foram ativadas como cost allocation tags em 2026-09-15. Elas **não são retroativas**: o custo operacional do piloto é calculado à mão, das horas de lançamento e término, e a Cost Explorer entra só como conferência por tipo de instância na janela de datas. Da campanha em diante, `--group-by Type=TAG,Key=commit` isola o lançamento de tudo o mais na conta sem depender de janela — o `commit` serve como discriminador porque o Orquestrador já o aplica a cada Instância de encode (ADR-0021), e piloto e campanha rodam SHAs diferentes.
+As tags `role` e `commit` foram ativadas como cost allocation tags em 2026-09-15. Elas **não são retroativas**: o custo operacional do piloto é calculado à mão, das horas de lançamento e término, e a Cost Explorer entra só como conferência por tipo de instância na janela de datas. Da campanha em diante, `--group-by Type=TAG,Key=commit` isola o lançamento de tudo o mais na conta sem depender de janela — o `commit` serve como discriminador porque o Orquestrador já o aplica a cada Instância de encode (ADR-0021), e piloto e campanha rodam SHAs diferentes. Ativar a tag é ajuste do lado do faturamento: nenhum código muda, porque as Instâncias já nascem etiquetadas.
+
+**A consulta pede `RECORD_TYPE = Usage`, e sem ele devolve zero.** A conta tem crédito promocional, e a Cost Explorer abate o crédito do `UnblendedCost` por default — a consulta sem o filtro devolveu `US$ 0,0000` em toda linha do piloto, sobre 22 h de instância que existiram. É a mesma armadilha que a camada 3 da ADR-0012 descreve para o `aws_budgets_budget`, do outro lado: lá o teto mediria líquido, aqui a conferência mede líquido. Nos dois casos o que se quer é **consumo**, porque é ele que o orçamento calibrou e é ele que o crédito, sendo finito, apenas adia.
+
+    aws ce get-cost-and-usage --granularity DAILY \
+      --metrics UnblendedCost UsageQuantity \
+      --time-period Start=<início> End=<fim> \
+      --group-by Type=TAG,Key=commit \
+      --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}'
+
+O sintoma de esquecê-lo não é erro: é zero, que se lê como "não custou nada".
 
 ## Considered Options
 

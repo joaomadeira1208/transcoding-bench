@@ -7,7 +7,6 @@ compartilhado, e `test_judge_agreement.py` é o que impede os dois de divergirem
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any
 
@@ -16,8 +15,9 @@ from field_checks import (
     FieldError,
     check_aware_timestamp,
     check_int,
+    check_json_record,
     check_non_empty_str,
-    check_record,
+    check_schema_version,
 )
 
 # Um `judge.json` de forma antiga continua no bucket depois de o Pass ser
@@ -33,26 +33,7 @@ class JudgementError(Exception):
 
 def check_judgement(raw: str | bytes) -> dict[str, Any]:
     """Valida os bytes crus de um `judge.json` e devolve o objeto já parseado."""
-    try:
-        judgement = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise JudgementError(f"{JUDGE_FILENAME} não é JSON válido: {error}") from error
-
-    if not isinstance(judgement, dict):
-        raise JudgementError(f"{JUDGE_FILENAME} não é um objeto JSON: {type(judgement).__name__}")
-
-    try:
-        check_record(judgement, _CHECKS)
-    except FieldError as error:
-        raise JudgementError(str(error)) from error
-
-    return judgement
-
-
-def _check_schema_version(field: str, value: Any) -> None:
-    if type(value) is not str or value not in KNOWN_SCHEMA_VERSIONS:
-        known = ", ".join(sorted(KNOWN_SCHEMA_VERSIONS))
-        raise FieldError(f"{field}: esperava uma das versões conhecidas ({known}), veio {value!r}")
+    return check_json_record(raw, JUDGE_FILENAME, _CHECKS, JudgementError)
 
 
 def _check_sha256(field: str, value: Any) -> None:
@@ -63,7 +44,7 @@ def _check_sha256(field: str, value: Any) -> None:
 
 
 _CHECKS: dict[str, Callable[[str, Any], None]] = {
-    "schema_version": _check_schema_version,
+    "schema_version": check_schema_version(KNOWN_SCHEMA_VERSIONS),
     "run_id": check_non_empty_str,
     "sha256": _check_sha256,
     "exit_code": check_int,

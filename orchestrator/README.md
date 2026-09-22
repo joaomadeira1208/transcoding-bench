@@ -90,6 +90,13 @@ exato" e "ISO-8601 com offset" não são regra de contrato nenhum, e a duplicaç
 que a ADR-0022 licencia é **entre papéis**: aqui é o mesmo papel e o mesmo venv,
 e duplicar não compraria verificação independente de nada.
 
+Pela mesma régua, a casca de um arquivo inteiro — parsear, exigir um objeto e
+reerguer o `FieldError` com o nome do arquivo na frente — é o `check_json_record`,
+e o campo de versão é o `check_schema_version(known)`, que recebe as versões
+conhecidas de quem o monta: o `meta_check` e o `judgement_check` continuam
+decidindo cada um sobre o seu eixo de `schema_version`, e o que deixou de existir
+em duas cópias é o mecanismo, não a regra.
+
 Pela mesma razão, a árvore que o `s3 sync` baixa é lida uma vez só: o
 `run_tree.py` devolve os `meta.json` já validados, os `output.sha256` como estão
 e um aviso por diretório de run sem meta, e é dele que a retomada e o triage do

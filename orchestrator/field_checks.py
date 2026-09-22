@@ -7,6 +7,7 @@ que nomeia o arquivo recusado; o porquê de serem compartilhadas está no
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import fields
 from datetime import datetime
@@ -36,6 +37,42 @@ def check_record(record: Any, checks: Mapping[str, Callable[[str, Any], None]]) 
         if field not in record:
             raise FieldError(f"{field}: campo obrigatório ausente")
         check(field, record[field])
+
+
+def check_json_record(
+    raw: str | bytes,
+    filename: str,
+    checks: Mapping[str, Callable[[str, Any], None]],
+    error: type[Exception],
+) -> dict[str, Any]:
+    """Os bytes crus de um arquivo do contrato, validados campo a campo, como objeto."""
+    try:
+        record = json.loads(raw)
+    except json.JSONDecodeError as problem:
+        raise error(f"{filename} não é JSON válido: {problem}") from problem
+
+    if not isinstance(record, dict):
+        raise error(f"{filename} não é um objeto JSON: {type(record).__name__}")
+
+    try:
+        check_record(record, checks)
+    except FieldError as problem:
+        raise error(str(problem)) from problem
+
+    return record
+
+
+def check_schema_version(known: frozenset[str]) -> Callable[[str, Any], None]:
+    """O checador do campo de versão, contra as versões que aquele leitor conhece."""
+
+    def check(field: str, value: Any) -> None:
+        if type(value) is not str or value not in known:
+            versions = ", ".join(sorted(known))
+            raise FieldError(
+                f"{field}: esperava uma das versões conhecidas ({versions}), veio {value!r}"
+            )
+
+    return check
 
 
 def check_non_empty_str(field: str, value: Any) -> None:

@@ -259,13 +259,12 @@ def failed_block_id(loop: Loop) -> str:
     return block_id_of(failed["scenario_id"])
 
 
-def seed_preflight_trail(trail: ShimTrail, instance_id: str) -> Path:
+def seed_preflight_trail(trail: ShimTrail, instance_id: str) -> None:
     """O rastro do preflight no bucket falso, ao lado dos blocos da campanha."""
     preflight = trail.bucket_dir() / "runs" / "preflight" / instance_id
     preflight.mkdir(parents=True)
     for name, content in PREFLIGHT_ARTIFACTS.items():
         (preflight / name).write_text(content, encoding="utf-8")
-    return preflight
 
 
 def sync_with_the_shim(shim_bin: Path, s3_root: Path, workdir: Path, *filters: str) -> list[str]:

@@ -18,7 +18,6 @@ encodes_so_far() {
   wc -l <"$SMOKE_ARGV_DIR/ffmpeg.encodes" | tr -d ' '
 }
 
-# Um `_NTH` vazio vale para todo encode do laço; com valor, só para aquele.
 nth_matches() {
   [[ -z $1 || $1 == "$(encodes_so_far)" ]]
 }

@@ -15,8 +15,9 @@ import sys
 from pathlib import Path
 
 import pyarrow.parquet as pq
+from json_contract import offending_fields
 from pydantic import ValidationError
-from run_meta import load_meta, offending_fields
+from run_meta import load_meta
 from run_table import RawRun, consolidate_runs, summarize
 
 EXIT_OK = 0

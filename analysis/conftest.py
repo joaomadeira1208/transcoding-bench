@@ -13,6 +13,7 @@ from typing import Any
 ROLE_ROOT = Path(__file__).resolve().parent
 
 META_SCHEMA_PATH = ROLE_ROOT / "meta.schema.json"
+JUDGE_SCHEMA_PATH = ROLE_ROOT / "judge.schema.json"
 
 CAPTURES = ROLE_ROOT / "tests" / "fixtures"
 
@@ -116,6 +117,66 @@ def make_meta(**overrides: Any) -> dict[str, Any]:
 def make_meta_json(**overrides: Any) -> str:
     """O mesmo, já serializado — é sobre os **bytes crus** que o modelo roda."""
     return json.dumps(make_meta(**overrides), indent=2) + "\n"
+
+
+# O `judge.json` que o Juiz escreve por output julgado (D14 da Spec 5): a entrada
+# do plano projetada verbatim mais o que ele cunha. Âncora fraca pelo mesmo
+# motivo da do `meta.json` — a real sai do Pass do piloto, e até lá o teste de
+# concordância carrega a sua própria, escrita à mão nos dois papéis.
+_VALID_JUDGEMENT: dict[str, Any] = {
+    "schema_version": "1",
+    "run_id": "4b1d8e07-2c36-4a59-9f80-51ac7e2d6b43",
+    "scenario_id": "libx265_1080p_720p_tos_c7i_rep1",
+    "codec": "h265",
+    "encoder": "libx265",
+    "input_res": "1080p",
+    "output_res": "720p",
+    "video": "tos",
+    "instance": "c7i",
+    "sha256": "3d2f7c1a90b4e5d68f2a1c0b7e9d4a35c6f8091b2d3e4f5061728394a5b6c7d8",
+    "master": "tos_1080p.mkv",
+    "output_width": 1280,
+    "output_height": 720,
+    "scale_flags": "lanczos",
+    "container": "mkv",
+    "frames": 17616,
+    "shared_by": [
+        {
+            "instance": "c7i",
+            "scenario_id": "libx265_1080p_720p_tos_c7i_rep1",
+            "run_id": "4b1d8e07-2c36-4a59-9f80-51ac7e2d6b43",
+        },
+        {
+            "instance": "c7a",
+            "scenario_id": "libx265_1080p_720p_tos_c7a_rep1",
+            "run_id": "7e5a2c91-08bd-4f36-b1c7-3d9e04a82f65",
+        },
+    ],
+    "cell_divergent": False,
+    "started_at": "2026-09-14T11:02:00+00:00",
+    "finished_at": "2026-09-14T11:43:18+00:00",
+    "exit_code": 0,
+    "commit": "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900",
+    "instance_id": "i-0123456789abcdef0",
+    "instance_type": "c7i.4xlarge",
+    "versions": {
+        "ffmpeg": "n7.1",
+        "libx264": "31e19f92",
+        "libx265": "4.1",
+        "libsvtav1": "v2.3.0",
+        "libvmaf": "v3.0.0",
+    },
+}
+
+
+def make_judgement(**overrides: Any) -> dict[str, Any]:
+    """Um `judge.json` válido como dict, com overrides por campo de topo."""
+    return _with_overrides(_VALID_JUDGEMENT, overrides)
+
+
+def make_judgement_json(**overrides: Any) -> str:
+    """O mesmo, já serializado — é sobre os **bytes crus** que o modelo roda."""
+    return json.dumps(make_judgement(**overrides), indent=2) + "\n"
 
 
 def make_time_json(**overrides: Any) -> str:

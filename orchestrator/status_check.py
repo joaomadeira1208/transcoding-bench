@@ -21,7 +21,9 @@ from field_checks import (
     check_non_empty_str,
 )
 
-INSTANCE_WIDTH = 4
+# O que a coluna tem de acomodar não é um id de arquitetura e sim o `judge`, que
+# é o mais largo dos quatro nomes que o resumo do fim põe um debaixo do outro.
+INSTANCE_WIDTH = 5
 HOUR_WIDTH = 8
 
 LONGEST_SCENARIO_ID = "libsvtav1_2160p_2160p_bbb_c7g_warmup"
@@ -77,6 +79,21 @@ class Progress:
 
 
 @dataclass(frozen=True)
+class JudgeProgress:
+    """O progresso de `status/` do Juiz: que output do plano ele está julgando."""
+
+    instance_id: str
+    output_index: int
+    output_count: int
+    run_id: str
+    scenario_id: str
+    runs_total: int
+    runs_failed: int
+    elapsed_seconds: int
+    written_at: str
+
+
+@dataclass(frozen=True)
 class StatusKeys:
     """As duas chaves de `status/` de uma entrada: o marcador (D3) e o progresso (D4)."""
 
@@ -103,6 +120,11 @@ def check_progress(payload: Any, *, instance_id: str) -> Progress | None:
     return _checked(Progress, payload, "progresso", instance_id)
 
 
+def check_judge_progress(payload: Any, *, instance_id: str) -> JudgeProgress | None:
+    """O progresso do Juiz, ou `None` quando ele é o do Pass anterior — a ignorar."""
+    return _checked(JudgeProgress, payload, "progresso do Juiz", instance_id)
+
+
 def progress_line(progress: Progress | None, *, instance: str, runs_total: int) -> str:
     """A linha daquela arquitetura, do objeto mais o total de runs da fatia."""
     if progress is None:
@@ -117,6 +139,23 @@ def progress_line(progress: Progress | None, *, instance: str, runs_total: int) 
         f"run {_index_over_total(progress.run_index, progress.run_count)}  "
         f"{progress.scenario_id:<{SCENARIO_WIDTH}}"
         f"{_index_over_total(progress.runs_total, runs_total)} runs, "
+        f"{progress.runs_failed} falhas, {_elapsed(progress.elapsed_seconds)}"
+    )
+
+
+def judge_progress_line(progress: JudgeProgress | None) -> str:
+    """A linha do Juiz, só do objeto: o plano inteiro foi para ele, e o total é dele."""
+    if progress is None:
+        return (
+            f"{'':{HOUR_WIDTH}} {JUDGE_STEM:<{INSTANCE_WIDTH}} "
+            f"sem progresso ainda, nenhum output julgado"
+        )
+
+    return (
+        f"{hour_of(progress.written_at)} {JUDGE_STEM:<{INSTANCE_WIDTH}} "
+        f"output {_index_over_total(progress.output_index, progress.output_count)}  "
+        f"{progress.scenario_id:<{SCENARIO_WIDTH}}"
+        f"{_index_over_total(progress.runs_total, progress.output_count)} runs, "
         f"{progress.runs_failed} falhas, {_elapsed(progress.elapsed_seconds)}"
     )
 
@@ -163,6 +202,9 @@ _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "block_count": check_int,
     "run_index": check_int,
     "run_count": check_int,
+    "run_id": check_non_empty_str,
+    "output_index": check_int,
+    "output_count": check_int,
     "runs_total": check_int,
     "runs_failed": check_int,
     "elapsed_seconds": check_int,

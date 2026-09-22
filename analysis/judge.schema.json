@@ -1,0 +1,197 @@
+{
+  "$defs": {
+    "Sharer": {
+      "additionalProperties": false,
+      "description": "Uma Execução que produziu o mesmo bitstream, o representante incluído.",
+      "properties": {
+        "instance": {
+          "minLength": 1,
+          "title": "Instance",
+          "type": "string"
+        },
+        "scenario_id": {
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance",
+        "scenario_id",
+        "run_id"
+      ],
+      "title": "Sharer",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Um output julgado, como o `run_quality.sh` o registra.\n\nOs campos até `cell_divergent` são a entrada do `quality/plan.json`, e os\ntipos aqui são os do leitor do plano: afrouxá-los faria este papel aceitar\num `frames: 0` que o `orchestrator/` recusa na origem.",
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "scenario_id": {
+      "minLength": 1,
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "codec": {
+      "minLength": 1,
+      "title": "Codec",
+      "type": "string"
+    },
+    "encoder": {
+      "minLength": 1,
+      "title": "Encoder",
+      "type": "string"
+    },
+    "input_res": {
+      "minLength": 1,
+      "title": "Input Res",
+      "type": "string"
+    },
+    "output_res": {
+      "minLength": 1,
+      "title": "Output Res",
+      "type": "string"
+    },
+    "video": {
+      "minLength": 1,
+      "title": "Video",
+      "type": "string"
+    },
+    "instance": {
+      "minLength": 1,
+      "title": "Instance",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "master": {
+      "minLength": 1,
+      "title": "Master",
+      "type": "string"
+    },
+    "output_width": {
+      "exclusiveMinimum": 0,
+      "title": "Output Width",
+      "type": "integer"
+    },
+    "output_height": {
+      "exclusiveMinimum": 0,
+      "title": "Output Height",
+      "type": "integer"
+    },
+    "scale_flags": {
+      "minLength": 1,
+      "title": "Scale Flags",
+      "type": "string"
+    },
+    "container": {
+      "minLength": 1,
+      "title": "Container",
+      "type": "string"
+    },
+    "frames": {
+      "exclusiveMinimum": 0,
+      "title": "Frames",
+      "type": "integer"
+    },
+    "shared_by": {
+      "items": {
+        "$ref": "#/$defs/Sharer"
+      },
+      "minItems": 1,
+      "title": "Shared By",
+      "type": "array"
+    },
+    "cell_divergent": {
+      "title": "Cell Divergent",
+      "type": "boolean"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "finished_at": {
+      "format": "date-time",
+      "title": "Finished At",
+      "type": "string"
+    },
+    "exit_code": {
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "commit": {
+      "minLength": 1,
+      "title": "Commit",
+      "type": "string"
+    },
+    "instance_id": {
+      "minLength": 1,
+      "title": "Instance Id",
+      "type": "string"
+    },
+    "instance_type": {
+      "minLength": 1,
+      "title": "Instance Type",
+      "type": "string"
+    },
+    "versions": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Versions",
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "scenario_id",
+    "codec",
+    "encoder",
+    "input_res",
+    "output_res",
+    "video",
+    "instance",
+    "sha256",
+    "master",
+    "output_width",
+    "output_height",
+    "scale_flags",
+    "container",
+    "frames",
+    "shared_by",
+    "cell_divergent",
+    "started_at",
+    "finished_at",
+    "exit_code",
+    "commit",
+    "instance_id",
+    "instance_type",
+    "versions"
+  ],
+  "title": "Judgement",
+  "type": "object"
+}

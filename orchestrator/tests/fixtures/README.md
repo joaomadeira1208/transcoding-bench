@@ -89,6 +89,20 @@ offset qualquer em vez de casar um prefixo de string.
 
 A hora de fazer isso é quando o `run_all.sh` mudar o que escreve em `status/`.
 
+## O que ainda não está aqui: o `judge.json` e o par do Juiz
+
+O `judge.json` e os dois objetos de `status/` que o Juiz escreve têm leitores
+neste papel — `judgement_check.py` e o `check_judge_progress` do
+`status_check.py` — e **nenhuma captura ainda**: o `run_quality.sh` não existe,
+e as três chegam do Pass do piloto (execução I, #103), com o mesmo scrub de
+`instance_id` da tabela abaixo.
+
+Até lá os testes rodam sobre as factories do `conftest.py`, e o válido do
+`test_judge_agreement.py` é escrito à mão aqui e no `analysis/`. É o estado em
+que o `meta.json` esteve antes do piloto: a concordância entre os dois leitores
+já é verificável sem a âncora, e o que falta é a prova de que o shell escreve os
+nomes, a ordem e os tipos que os dois esperam.
+
 ## O scrub
 
 Trocado de forma consistente entre todos os arquivos, com os mesmos placeholders

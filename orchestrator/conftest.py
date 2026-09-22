@@ -216,6 +216,33 @@ def make_quality_plan_json(**overrides: Any) -> str:
     return json.dumps(make_quality_plan(**overrides), indent=2) + "\n"
 
 
+# O `judge.json` que o Juiz escreve por output julgado (D14 da Spec 5), e o lado
+# montado à mão dele. Duplicado em relação ao do `analysis/` pelo motivo do
+# `_VALID_META`: o checador daqui olha cinco campos, mas um `judge.json` de teste
+# com só cinco campos não é um `judge.json`.
+_VALID_JUDGEMENT: dict[str, Any] = {
+    "schema_version": "1",
+    **copy.deepcopy(_VALID_PLAN_OUTPUT),
+    "started_at": "2026-09-14T11:02:00+00:00",
+    "finished_at": "2026-09-14T11:43:18+00:00",
+    "exit_code": 0,
+    "commit": _VALID_META["commit"],
+    "instance_id": "i-0123456789abcdef0",
+    "instance_type": "c7i.4xlarge",
+    "versions": copy.deepcopy(_VALID_META["versions"]),
+}
+
+
+def make_judgement(**overrides: Any) -> dict[str, Any]:
+    """Um `judge.json` válido como dict, com overrides por campo de topo."""
+    return _overridden(_VALID_JUDGEMENT, overrides)
+
+
+def make_judgement_json(**overrides: Any) -> str:
+    """O mesmo, já serializado — o checador recebe os bytes que o Juiz escreveu."""
+    return json.dumps(make_judgement(**overrides), indent=2) + "\n"
+
+
 # Os dois objetos de `status/` que o `run_all.sh` escreve (D3/D4 da Spec 4). As
 # fixtures capturadas do bash estão em `tests/fixtures/`; estas factories são o
 # lado montado à mão, de onde saem os casos que o bash não produz.
@@ -240,6 +267,24 @@ _VALID_DONE_MARKER: dict[str, Any] = {
     "capped": False,
     "exit_status": 0,
 }
+
+
+_VALID_JUDGE_PROGRESS: dict[str, Any] = {
+    "instance_id": "i-0123456789abcdef0",
+    "output_index": 7,
+    "output_count": 13,
+    "run_id": "4b1d8e07-2c36-4a59-9f80-51ac7e2d6b43",
+    "scenario_id": "libx265_1080p_720p_tos_c7i_rep1",
+    "runs_total": 7,
+    "runs_failed": 0,
+    "elapsed_seconds": 2460,
+    "written_at": "2026-09-14T14:32:07+00:00",
+}
+
+
+def make_judge_progress(**overrides: Any) -> dict[str, Any]:
+    """Um `status/judge_progress` válido como dict."""
+    return _overridden(_VALID_JUDGE_PROGRESS, overrides)
 
 
 def make_progress(**overrides: Any) -> dict[str, Any]:

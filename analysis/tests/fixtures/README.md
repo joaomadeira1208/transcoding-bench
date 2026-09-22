@@ -48,3 +48,17 @@ O modelo o declara `NonEmptyStr`, sem formato, então o placeholder exercita a
 mesma validação; o que a âncora prova — os nomes, a ordem e os tipos que o bash
 escreveu, `warmup` booleano à frente de todos — não passa por ele. Todo o resto
 do arquivo é o que a Instância gravou.
+
+## O que ainda não está aqui: a âncora do `judge.json`
+
+O `judge.json` é o segundo arquivo do repositório escrito por um script de shell
+e lido por um modelo `pydantic`, e o contrato dele tem os mesmos dois leitores
+(D14 da Spec 5). A âncora real — um arquivo que o `run_quality.sh` escreveu
+numa instância — **chega com o Pass do piloto** (execução I, #103), pelo mesmo
+scrub de `instance_id` de `campaign_meta.json`, e junto com ela vêm o
+`quality/plan.json` e o par de `status/` do Juiz.
+
+Até lá, o válido que o `test_judge_agreement.py` aceita é escrito à mão, duas
+vezes — uma neste papel e outra no `orchestrator/` —, exatamente como foi com o
+`meta.json` antes do piloto. Duas cópias à mão é o preço de não haver módulo
+comum entre os venvs, e é o que o teste de concordância existe para pagar.

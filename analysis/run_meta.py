@@ -2,26 +2,18 @@
 
 from __future__ import annotations
 
-import json
-from typing import Annotated, Any, Literal
+from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from json_contract import NonEmptyStr, Strict, json_schema
+from pydantic import AwareDatetime
 
 # Eixo próprio, independente do `schema_version` do plano: os dois valem "1" hoje
 # e evoluem por motivos diferentes.
 SCHEMA_VERSION = "1"
 
-# `jq -r` sobre uma chave presente e vazia devolve string vazia, e uma
-# `scenario_id` vazia casaria com nada na consolidação em vez de estourar.
-NonEmptyStr = Annotated[str, Field(min_length=1)]
 
-
-class RunMeta(BaseModel):
+class RunMeta(Strict):
     """Uma Execução, como o `run_scenario.sh` a registra."""
-
-    # `extra="forbid"`: campo novo é mudança de forma, e tem que passar pelo
-    # `schema_version` em vez de entrar em silêncio.
-    model_config = ConfigDict(strict=True, extra="forbid")
 
     schema_version: Literal[SCHEMA_VERSION]
 
@@ -72,15 +64,6 @@ def load_meta(raw: str | bytes) -> RunMeta:
     return RunMeta.model_validate_json(raw)
 
 
-def offending_fields(error: ValidationError) -> list[str]:
-    """Uma entrada `campo: motivo` por campo ofensor."""
-    return [
-        f"{'.'.join(str(part) for part in item['loc']) or '<raiz>'}: {item['msg']}"
-        for item in error.errors()
-    ]
-
-
 def render_json_schema() -> str:
     """O JSON Schema do modelo, na forma exata em que fica commitado."""
-    schema: dict[str, Any] = RunMeta.model_json_schema()
-    return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"
+    return json_schema(RunMeta)

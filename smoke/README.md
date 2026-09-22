@@ -55,7 +55,10 @@ não entraria no histórico. Cada comportamento induzido é uma variável de amb
 (`SMOKE_FFMPEG_EXIT`, `SMOKE_FFMPEG_HANG`, `SMOKE_PERF_EXIT`,
 `SMOKE_PERF_UNSUPPORTED`, `SMOKE_ENCODER_INVISIBLE`, `SMOKE_BITSTREAM`,
 `SMOKE_AWS_EXIT`); `SMOKE_FFMPEG_NTH` restringe o do `ffmpeg` ao N-ésimo encode,
-que é como um run falha no meio de um bloco cujos vizinhos seguem bem, e
+que é como um run falha no meio de um bloco cujos vizinhos seguem bem,
+`SMOKE_BITSTREAM_NTH` restringe o `SMOKE_BITSTREAM` do mesmo jeito — só o
+N-ésimo encode devolve o bitstream pedido, e os outros ficam com o default —, que
+é como uma Replicação diverge das outras quatro da mesma Instância, e
 `SMOKE_AWS_FAIL_KEY` restringe o do `aws` a uma chave, que é como só o objeto de
 progresso deixa de subir.
 

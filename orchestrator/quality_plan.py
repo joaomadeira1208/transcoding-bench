@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from experiment_config import SHA256_DIGITS, ExperimentConfig, is_sha256
 from external import RUN_HASH_FILENAME, RUNS_PREFIX
-from field_checks import FieldError, check_bool, check_int, check_non_empty_str
+from field_checks import FieldError, check_bool, check_int, check_non_empty_str, check_record
 from resume_plan import block_id, winning_replications
 
 SCHEMA_VERSION = "1"
@@ -150,7 +150,7 @@ def triage(
     )
 
 
-def build_plan(config: ExperimentConfig, judged: Triage) -> dict[str, Any]:
+def build_plan(config: ExperimentConfig, triaged: Triage) -> dict[str, Any]:
     """O `quality/plan.json`: o que julgar, com que modelo e contra que limiares."""
     frames = {video.slug: video.frames for video in config.videos}
     return {
@@ -160,12 +160,12 @@ def build_plan(config: ExperimentConfig, judged: Triage) -> dict[str, Any]:
             "vmaf_delta_max": config.quality.vmaf_delta_max,
             "ssim_delta_max": config.quality.ssim_delta_max,
         },
-        "outputs": [_output(bitstream, frames) for bitstream in judged.outputs],
+        "outputs": [_output(bitstream, frames) for bitstream in triaged.outputs],
     }
 
 
-def render_report(judged: Triage) -> str:
-    return "\n".join(_report_lines(judged))
+def render_report(triaged: Triage) -> str:
+    return "\n".join(_report_lines(triaged))
 
 
 def check_plan(raw: str | bytes) -> dict[str, Any]:
@@ -255,30 +255,29 @@ def _output(bitstream: Bitstream, frames: Mapping[str, int]) -> dict[str, Any]:
     }
 
 
-def _report_lines(judged: Triage) -> Iterable[str]:
-    width = max((len(group.group_id) for group in judged.groups), default=0)
-    for group in judged.groups:
+def _report_lines(triaged: Triage) -> Iterable[str]:
+    width = max((len(group.group_id) for group in triaged.groups), default=0)
+    for group in triaged.groups:
         yield (
             f"{group.group_id:<{width}}  {_plural(len(group.bitstreams), 'bitstream')}  "
             f"{_architectures(group)}"
         )
 
-    histogram = Counter(len(group.bitstreams) for group in judged.groups)
+    histogram = Counter(len(group.bitstreams) for group in triaged.groups)
     yield "bitstreams distintos por grupo: " + ", ".join(
         f"{_plural(distinct, 'bitstream')}: {_plural(histogram[distinct], 'grupo')}"
         for distinct in sorted(histogram)
     )
 
-    cells = [name for group in judged.groups for name in group.divergent_cells]
+    cells = [name for group in triaged.groups for name in group.divergent_cells]
     if cells:
         yield f"células divergentes, julgadas por inteiro ({len(cells)}):"
         yield from (f"  {name}" for name in cells)
     else:
         yield "nenhuma célula divergente: as Replicações de cada Instância são bit-idênticas"
 
-    yield (
-        f"{_plural(len(judged.groups), 'grupo')}, {_plural(len(judged.outputs), 'output')} a julgar"
-    )
+    groups = _plural(len(triaged.groups), "grupo")
+    yield f"{groups}, {_plural(len(triaged.outputs), 'output')} a julgar"
 
 
 def _architectures(group: ScenarioGroup) -> str:
@@ -308,24 +307,15 @@ def _check_outputs(plan: Mapping[str, Any]) -> None:
         raise PlanError(f"outputs: esperava uma lista não-vazia, veio {outputs!r}")
     for index, output in enumerate(outputs):
         try:
-            _check_record(output, _OUTPUT_CHECKS)
+            check_record(output, _OUTPUT_CHECKS)
         except FieldError as error:
             raise PlanError(f"outputs[{index}]: {error}") from error
-
-
-def _check_record(record: Any, checks: Mapping[str, Callable[[str, Any], None]]) -> None:
-    if not isinstance(record, Mapping):
-        raise FieldError(f"esperava um objeto JSON, veio {record!r}")
-    for field, check in checks.items():
-        if field not in record:
-            raise FieldError(f"{field}: campo obrigatório ausente")
-        check(field, record[field])
 
 
 def _check_quality(plan: Mapping[str, Any]) -> None:
     """O modelo e os dois limiares, copiados da definição: o Juiz nunca os escolhe."""
     try:
-        _check_record(plan.get("quality"), _QUALITY_CHECKS)
+        check_record(plan.get("quality"), _QUALITY_CHECKS)
     except FieldError as error:
         raise PlanError(f"quality: {error}") from error
 

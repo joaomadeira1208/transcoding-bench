@@ -28,6 +28,16 @@ def check_fields(
     return {field.name: raw[field.name] for field in fields(record)}
 
 
+def check_record(record: Any, checks: Mapping[str, Callable[[str, Any], None]]) -> None:
+    """O mesmo laço, quando o registro é a própria tabela de campos e não uma dataclass."""
+    if not isinstance(record, Mapping):
+        raise FieldError(f"esperava um objeto JSON, veio {record!r}")
+    for field, check in checks.items():
+        if field not in record:
+            raise FieldError(f"{field}: campo obrigatório ausente")
+        check(field, record[field])
+
+
 def check_non_empty_str(field: str, value: Any) -> None:
     if type(value) is not str or not value:
         raise FieldError(f"{field}: esperava str não-vazia, veio {value!r}")

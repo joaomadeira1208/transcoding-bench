@@ -103,8 +103,8 @@ def meta_of(metas: list[dict[str, Any]], scenario_id: str) -> dict[str, Any]:
     return matches[0]
 
 
-def representatives(judged) -> list[str]:
-    return [bitstream.representative.scenario_id for bitstream in judged.outputs]
+def representatives(triaged) -> list[str]:
+    return [bitstream.representative.scenario_id for bitstream in triaged.outputs]
 
 
 @pytest.fixture
@@ -120,29 +120,29 @@ def one_scenario(make_raw_config):
 
 class TestDistinctBitstreams:
     def test_a_hash_per_architecture_is_three_outputs(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, per_cell))
+        triaged = triage(one_scenario, *executions(one_scenario, per_cell))
 
-        assert len(judged.groups) == 1
-        assert len(judged.outputs) == 3
+        assert len(triaged.groups) == 1
+        assert len(triaged.outputs) == 3
 
     def test_the_two_x86_agreeing_is_two_outputs(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, x86_together))
+        triaged = triage(one_scenario, *executions(one_scenario, x86_together))
 
-        assert len(judged.outputs) == 2
+        assert len(triaged.outputs) == 2
 
     def test_the_three_agreeing_is_a_single_output(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, all_equal))
+        triaged = triage(one_scenario, *executions(one_scenario, all_equal))
 
-        assert len(judged.outputs) == 1
+        assert len(triaged.outputs) == 1
 
     def test_a_group_is_never_judged_zero_times(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, all_equal))
+        triaged = triage(one_scenario, *executions(one_scenario, all_equal))
 
-        assert all(group.bitstreams for group in judged.groups)
+        assert all(group.bitstreams for group in triaged.groups)
 
     def test_the_sharers_of_a_bitstream_include_the_representative(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, all_equal))
-        (bitstream,) = judged.outputs
+        triaged = triage(one_scenario, *executions(one_scenario, all_equal))
+        (bitstream,) = triaged.outputs
 
         assert bitstream.representative in bitstream.shared_by
         assert len(bitstream.shared_by) == 15
@@ -150,8 +150,8 @@ class TestDistinctBitstreams:
     def test_the_architecture_of_a_shared_bitstream_is_every_one_that_produced_it(
         self, one_scenario
     ):
-        judged = triage(one_scenario, *executions(one_scenario, x86_together))
-        arm, x86 = judged.outputs
+        triaged = triage(one_scenario, *executions(one_scenario, x86_together))
+        arm, x86 = triaged.outputs
 
         assert {each.instance for each in arm.shared_by} == {"c7g"}
         assert {each.instance for each in x86.shared_by} == {"c7i", "c7a"}
@@ -159,18 +159,18 @@ class TestDistinctBitstreams:
 
 class TestTheRepresentative:
     def test_it_is_the_smallest_replication_of_the_first_declared_architecture(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, all_equal))
+        triaged = triage(one_scenario, *executions(one_scenario, all_equal))
 
-        assert representatives(judged) == ["libx264_1080p_1080p_bbb_c7g_rep1"]
+        assert representatives(triaged) == ["libx264_1080p_1080p_bbb_c7g_rep1"]
 
     def test_swapping_the_order_of_instance_swaps_the_representative(self, make_raw_config):
         c7g, c7i, c7a = three_architectures()
         pair = [{"input_res": "1080p", "output_res": "1080p"}]
         plan = plan_of(make_raw_config(instance=[c7i, c7g, c7a], pair=pair))
 
-        judged = triage(plan, *executions(plan, all_equal))
+        triaged = triage(plan, *executions(plan, all_equal))
 
-        assert representatives(judged) == ["libx264_1080p_1080p_bbb_c7i_rep1"]
+        assert representatives(triaged) == ["libx264_1080p_1080p_bbb_c7i_rep1"]
 
     def test_it_is_not_the_smallest_run_id(self, one_scenario):
         metas, hashes = executions(one_scenario, all_equal)
@@ -178,18 +178,18 @@ class TestTheRepresentative:
         hashes["00000000-0000-4000-8000-000000000000"] = hashes.pop(winner["run_id"])
         winner["run_id"] = "00000000-0000-4000-8000-000000000000"
 
-        judged = triage(one_scenario, metas, hashes)
+        triaged = triage(one_scenario, metas, hashes)
 
-        assert representatives(judged) == ["libx264_1080p_1080p_bbb_c7g_rep1"]
+        assert representatives(triaged) == ["libx264_1080p_1080p_bbb_c7g_rep1"]
 
     def test_it_is_not_the_earliest_started_at(self, one_scenario):
         metas, hashes = executions(one_scenario, all_equal)
         earliest = meta_of(metas, "libx264_1080p_1080p_bbb_c7a_rep5")
         earliest["started_at"] = "2020-01-01T00:00:00+00:00"
 
-        judged = triage(one_scenario, metas, hashes)
+        triaged = triage(one_scenario, metas, hashes)
 
-        assert representatives(judged) == ["libx264_1080p_1080p_bbb_c7g_rep1"]
+        assert representatives(triaged) == ["libx264_1080p_1080p_bbb_c7g_rep1"]
 
 
 class TestTheWinningReplications:
@@ -199,10 +199,10 @@ class TestTheWinningReplications:
             lambda run: sha_of("warmup") if run["warmup"] else all_equal(run),
         )
 
-        judged = triage(one_scenario, metas, hashes)
+        triaged = triage(one_scenario, metas, hashes)
 
-        assert [bitstream.sha256 for bitstream in judged.outputs] != [sha_of("warmup")]
-        assert len(judged.outputs) == 1
+        assert [bitstream.sha256 for bitstream in triaged.outputs] != [sha_of("warmup")]
+        assert len(triaged.outputs) == 1
 
     def test_a_failed_replication_is_not_a_bitstream_to_judge(self, one_scenario):
         metas, hashes = executions(one_scenario, all_equal)
@@ -210,10 +210,10 @@ class TestTheWinningReplications:
         failed["exit_code"] = 1
         hashes[failed["run_id"]] = sha_of("failed")
 
-        judged = triage(one_scenario, metas, hashes)
+        triaged = triage(one_scenario, metas, hashes)
 
-        assert len(judged.outputs) == 1
-        assert failed["run_id"] not in {each.run_id for each in judged.outputs[0].shared_by}
+        assert len(triaged.outputs) == 1
+        assert failed["run_id"] not in {each.run_id for each in triaged.outputs[0].shared_by}
 
     def test_the_later_instant_wins_even_when_the_string_sorts_the_other_way(self, one_scenario):
         metas, hashes = executions(one_scenario, all_equal)
@@ -227,9 +227,9 @@ class TestTheWinningReplications:
         )
         hashes[remade["run_id"]] = hashes[superseded["run_id"]]
 
-        judged = triage(one_scenario, [*metas, remade], hashes)
+        triaged = triage(one_scenario, [*metas, remade], hashes)
 
-        assert judged.outputs[0].shared_by[0].run_id == remade["run_id"]
+        assert triaged.outputs[0].shared_by[0].run_id == remade["run_id"]
 
 
 class TestTheDivergentCell:
@@ -240,19 +240,19 @@ class TestTheDivergentCell:
             lambda run: sha_of("odd") if run["scenario_id"] == odd else all_equal(run),
         )
 
-        judged = triage(one_scenario, metas, hashes)
-        (group,) = judged.groups
+        triaged = triage(one_scenario, metas, hashes)
+        (group,) = triaged.groups
 
-        assert len(judged.outputs) == 2
+        assert len(triaged.outputs) == 2
         assert group.divergent_cells == ("libx264_1080p_1080p_bbb_c7g",)
-        assert all(bitstream.cell_divergent for bitstream in judged.outputs)
+        assert all(bitstream.cell_divergent for bitstream in triaged.outputs)
 
     def test_a_cell_that_holds_together_is_not_named(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, per_cell))
-        (group,) = judged.groups
+        triaged = triage(one_scenario, *executions(one_scenario, per_cell))
+        (group,) = triaged.groups
 
         assert group.divergent_cells == ()
-        assert not any(bitstream.cell_divergent for bitstream in judged.outputs)
+        assert not any(bitstream.cell_divergent for bitstream in triaged.outputs)
 
     def test_the_divergent_cell_is_judged_whole(self, one_scenario):
         odd = "libx264_1080p_1080p_bbb_c7g_rep3"
@@ -261,9 +261,9 @@ class TestTheDivergentCell:
             lambda run: sha_of("odd") if run["scenario_id"] == odd else per_cell(run),
         )
 
-        judged = triage(one_scenario, metas, hashes)
+        triaged = triage(one_scenario, metas, hashes)
 
-        assert representatives(judged) == [
+        assert representatives(triaged) == [
             "libx264_1080p_1080p_bbb_c7g_rep1",
             "libx264_1080p_1080p_bbb_c7g_rep3",
             "libx264_1080p_1080p_bbb_c7i_rep1",
@@ -315,9 +315,9 @@ class TestThePlanFile:
                 pair=[{"input_res": "1080p", "output_res": "1080p"}],
             )
         )
-        judged = triage(one_scenario, *executions(one_scenario, x86_together))
+        triaged = triage(one_scenario, *executions(one_scenario, x86_together))
 
-        plan = build_plan(config, judged)
+        plan = build_plan(config, triaged)
 
         assert plan["schema_version"] == SCHEMA_VERSION
         assert plan["quality"] == {
@@ -354,9 +354,9 @@ class TestThePlanFile:
                 pair=[{"input_res": "1080p", "output_res": "1080p"}],
             )
         )
-        judged = triage(one_scenario, *executions(one_scenario, x86_together))
+        triaged = triage(one_scenario, *executions(one_scenario, x86_together))
 
-        shared = build_plan(config, judged)["outputs"][1]["shared_by"]
+        shared = build_plan(config, triaged)["outputs"][1]["shared_by"]
 
         assert len(shared) == 10
         assert set(shared[0]) == {"instance", "scenario_id", "run_id"}
@@ -365,9 +365,9 @@ class TestThePlanFile:
     def test_the_outputs_follow_the_order_of_the_canonical_plan(self, make_raw_config):
         plan = plan_of(make_raw_config(instance=three_architectures()))
         config = validate_config(make_raw_config(instance=three_architectures()))
-        judged = triage(plan, *executions(plan, per_cell))
+        triaged = triage(plan, *executions(plan, per_cell))
 
-        ordered = [output["scenario_id"] for output in build_plan(config, judged)["outputs"]]
+        ordered = [output["scenario_id"] for output in build_plan(config, triaged)["outputs"]]
         canonical = [run["scenario_id"] for block in plan["blocks"] for run in block["runs"]]
 
         assert _is_subsequence(ordered, canonical)
@@ -391,9 +391,9 @@ class TestThePlanFile:
                 pair=[{"input_res": "1080p", "output_res": "1080p"}],
             )
         )
-        judged = triage(one_scenario, *executions(one_scenario, x86_together))
+        triaged = triage(one_scenario, *executions(one_scenario, x86_together))
 
-        raw = serialize_plan(build_plan(config, judged))
+        raw = serialize_plan(build_plan(config, triaged))
 
         assert check_plan(raw) == json.loads(raw)
 
@@ -405,32 +405,32 @@ def _is_subsequence(ordered: list[str], canonical: list[str]) -> bool:
 
 class TestTheReport:
     def test_it_names_every_group_with_the_architecture_of_each_bitstream(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, x86_together))
+        triaged = triage(one_scenario, *executions(one_scenario, x86_together))
 
-        report = render_report(judged)
+        report = render_report(triaged)
 
         assert "libx264_1080p_1080p_bbb" in report
         assert "c7g | c7i=c7a" in report
 
     def test_the_histogram_counts_groups_by_distinct_bitstreams(self, make_raw_config):
         plan = plan_of(make_raw_config(instance=three_architectures()))
-        judged = triage(plan, *executions(plan, x86_together))
+        triaged = triage(plan, *executions(plan, x86_together))
 
-        assert "2 bitstreams: 2 grupos" in render_report(judged)
+        assert "2 bitstreams: 2 grupos" in render_report(triaged)
 
     def test_a_single_group_of_a_single_bitstream_is_said_in_the_singular(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, all_equal))
+        triaged = triage(one_scenario, *executions(one_scenario, all_equal))
 
-        report = render_report(judged)
+        report = render_report(triaged)
 
         assert "bitstreams distintos por grupo: 1 bitstream: 1 grupo" in report
         assert "1 grupo, 1 output a julgar" in report
 
     def test_the_total_of_outputs_to_judge_is_in_the_report(self, make_raw_config):
         plan = plan_of(make_raw_config(instance=three_architectures()))
-        judged = triage(plan, *executions(plan, x86_together))
+        triaged = triage(plan, *executions(plan, x86_together))
 
-        assert "2 grupos, 4 outputs a julgar" in render_report(judged)
+        assert "2 grupos, 4 outputs a julgar" in render_report(triaged)
 
     def test_a_divergent_cell_is_named_in_the_report(self, one_scenario):
         odd = "libx264_1080p_1080p_bbb_c7g_rep3"
@@ -444,38 +444,38 @@ class TestTheReport:
         assert "libx264_1080p_1080p_bbb_c7g" in report.splitlines()[-2]
 
     def test_no_divergent_cell_is_said_out_loud(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, per_cell))
+        triaged = triage(one_scenario, *executions(one_scenario, per_cell))
 
-        assert "nenhuma célula divergente" in render_report(judged)
+        assert "nenhuma célula divergente" in render_report(triaged)
 
     def test_the_report_carries_no_bytes(self, one_scenario):
-        judged = triage(one_scenario, *executions(one_scenario, per_cell))
+        triaged = triage(one_scenario, *executions(one_scenario, per_cell))
 
-        assert ".mkv" not in render_report(judged)
+        assert ".mkv" not in render_report(triaged)
 
 
 class TestTheRealDefinitions:
     def test_the_campaign_has_fifty_four_groups(self):
         plan = build_canonical_plan(real_config())
 
-        judged = triage(plan, *executions(plan, x86_together))
+        triaged = triage(plan, *executions(plan, x86_together))
 
-        assert len(judged.groups) == 54
-        assert len(judged.outputs) == 108
+        assert len(triaged.groups) == 54
+        assert len(triaged.outputs) == 108
 
     def test_the_pilot_has_six_groups(self):
         plan = build_canonical_plan(real_pilot_config())
 
-        judged = triage(plan, *executions(plan, x86_together))
+        triaged = triage(plan, *executions(plan, x86_together))
 
-        assert len(judged.groups) == 6
-        assert len(judged.outputs) == 12
+        assert len(triaged.groups) == 6
+        assert len(triaged.outputs) == 12
 
     def test_the_real_plan_is_what_the_reader_accepts(self):
         config = real_pilot_config()
         plan = build_canonical_plan(config)
-        judged = triage(plan, *executions(plan, per_cell))
+        triaged = triage(plan, *executions(plan, per_cell))
 
-        raw = serialize_plan(build_plan(config, judged))
+        raw = serialize_plan(build_plan(config, triaged))
 
         assert len(check_plan(raw)["outputs"]) == 18

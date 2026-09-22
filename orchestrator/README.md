@@ -61,11 +61,20 @@ alinhamento que faz três linhas serem lidas de uma vez às 3 da manhã.
 
 Os leitores conferem os campos pelas mesmas primitivas, que moram no
 `field_checks.py` e levantam um `FieldError` que cada um embrulha na sua exceção,
-e pelo mesmo laço: o `check_fields` percorre os campos do registro exigindo
-presença e tipo e devolve os valores crus a quem sabe montá-lo. "Inteiro exato" e
-"ISO-8601 com offset" não são regra de contrato nenhum, e a duplicação que a
-ADR-0022 licencia é **entre papéis**: aqui é o mesmo papel e o mesmo venv, e
-duplicar não compraria verificação independente de nada.
+e pelo mesmo laço, em duas formas: o `check_fields` percorre os campos de uma
+dataclass exigindo presença e tipo e devolve os valores crus a quem sabe montá-la,
+e o `check_record` faz o mesmo quando o registro é a própria tabela de campos —
+é o laço do `meta_check` e o dos dois registros do `quality/plan.json`. "Inteiro
+exato" e "ISO-8601 com offset" não são regra de contrato nenhum, e a duplicação
+que a ADR-0022 licencia é **entre papéis**: aqui é o mesmo papel e o mesmo venv,
+e duplicar não compraria verificação independente de nada.
+
+Pela mesma razão, a árvore que o `s3 sync` baixa é lida uma vez só: o
+`run_tree.py` devolve os `meta.json` já validados, os `output.sha256` como estão
+e um aviso por diretório de run sem meta, e é dele que a retomada e o triage do
+Pass leem. O hash é decodificado com `replace` e julgado adiante: bytes que não
+sejam UTF-8 são recusa nomeando o run, e não traceback num CLI que promete não
+lançar nada.
 
 O `vigilance.py` é a decisão de um poll sobre uma arquitetura (D2/D8/D9 da
 Spec 4): recebe o que o `describe-instances` disse, o que o `kill -0` no PID
@@ -909,8 +918,8 @@ reportando equivalência entre dois bitstreams em vez de três.
 
 **Completude antes de agrupar, pelas funções da retomada.** O triage reusa a
 dedup (`winning_replications`) e a completude por bloco (`resume`) do
-`resume_plan`, dentro do papel e no mesmo venv: a duplicação que a ADR-0022
-licencia é entre papéis, não dentro de um. Qualquer bloco pendente recusa o
+`resume_plan` — e a leitura da árvore, do `run_tree` — dentro do papel e no mesmo
+venv: a duplicação que a ADR-0022 licencia é entre papéis, não dentro de um. Qualquer bloco pendente recusa o
 triage com o relatório da retomada e o comando do `resume.py` no `stderr`. Um
 Pass sobre matriz incompleta seria refeito depois da retomada, e a retenção teria
 apagado antes disso os `output.mkv` de que o Pass refeito precisa.

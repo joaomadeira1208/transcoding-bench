@@ -12,32 +12,24 @@ from typing import Any
 
 import pytest
 from conftest import (
+    ARCHITECTURES,
+    ARM,
+    ARM_BITSTREAM,
     BUCKET,
-    PILOT,
-    PILOT_TOML,
     PLAN_LINE,
     QUALITY_PLAN_FILENAME,
     RUNS_SOURCE,
+    X86,
     Loop,
     Triage,
     block_id_of,
+    blocks_of,
     failed_block_id,
-    generate_plan,
-    keep_first_record,
+    instance_id_of,
+    instance_type_of,
     seed_preflight_trail,
     sync_with_the_shim,
 )
-
-# As três arquiteturas do `config/pilot.toml`, na ordem em que ele as declara: é
-# essa ordem que decide o representante de um bitstream compartilhado (ADR-0025).
-# O ARM é o que diverge dos dois x86, que é o que o piloto mediu.
-ARM = "c7g"
-X86 = ("c7i", "c7a")
-ARCHITECTURES = (ARM, *X86)
-
-# O bitstream que só o laço do ARM devolve. Os dois x86 ficam com o default do
-# shim: é o que faz o hash deles coincidir sem nenhuma combinação entre os laços.
-ARM_BITSTREAM = "arm64"
 
 # O encode que os dois desvios escolhem — o bitstream que diverge e o run que
 # falha: o segundo do laço é a primeira Replicação do primeiro bloco. Uma
@@ -60,25 +52,6 @@ RUN_FILTERS = (
 )
 
 EXIT_REFUSED = 1
-
-
-def instance_id_of(architecture: str) -> str:
-    """Um id por máquina: as três escrevem no mesmo bucket, e dois `meta.json` com
-    o mesmo `instance_id` seriam uma máquina só."""
-    return f"i-{ARCHITECTURES.index(architecture):017x}"
-
-
-def instance_type_of(architecture: str) -> str:
-    (record,) = [each for each in PILOT["instance"] if each["id"] == architecture]
-    return record["instance_type"]
-
-
-def bitstream_environment(architecture: str) -> dict[str, str]:
-    return {"SMOKE_BITSTREAM": ARM_BITSTREAM} if architecture == ARM else {}
-
-
-def blocks_of(plan: dict[str, Any], architecture: str) -> list[dict[str, Any]]:
-    return [block for block in plan["blocks"] if block["instance"] == architecture]
 
 
 def block_name(block: dict[str, Any]) -> str:
@@ -134,58 +107,6 @@ def outputs_of(triage: Triage, scenario: str) -> list[dict[str, Any]]:
         for output in triage.plan()["outputs"]
         if scenario_of(output["scenario_id"]) == scenario
     ]
-
-
-@pytest.fixture(scope="session")
-def one_codec_toml(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """O `config/pilot.toml` reduzido a um codec: dois Cenários nas três arquiteturas.
-
-    A mesma redução do `test_resume.py`, sem recortar `[[instance]]`: o que o Pass
-    agrupa é um Cenário atravessando as arquiteturas, e com uma só não haveria
-    bitstream compartilhado nem representante a escolher.
-    """
-    text = keep_first_record(PILOT_TOML.read_text(encoding="utf-8"), "codec")
-    path = tmp_path_factory.mktemp("triage-config") / PILOT_TOML.name
-    path.write_text(text, encoding="utf-8")
-    return path
-
-
-@pytest.fixture(scope="session")
-def campaign_plan(tmp_path_factory: pytest.TempPathFactory, one_codec_toml: Path) -> dict[str, Any]:
-    """O canônico da configuração reduzida, pelo mesmo CLI e do mesmo jeito."""
-    return generate_plan(one_codec_toml, tmp_path_factory.mktemp("triage-scenarios"))
-
-
-@pytest.fixture(scope="session")
-def campaign(campaign_plan: dict[str, Any], run_all) -> dict[str, Loop]:
-    """Um laço por arquitetura, todos no mesmo bucket falso e na ordem do canônico.
-
-    Um bucket só porque é o que a campanha faz: as três máquinas sobem para
-    `runs/` sem saber uma da outra, e quem as reúne é o triage.
-    """
-    loops: dict[str, Loop] = {}
-    s3_root = None
-    for architecture in ARCHITECTURES:
-        loops[architecture] = run_all(
-            campaign_plan,
-            blocks_of(campaign_plan, architecture),
-            s3_root=s3_root,
-            instance_id=instance_id_of(architecture),
-            instance_type=instance_type_of(architecture),
-            **bitstream_environment(architecture),
-        )
-        s3_root = loops[architecture].s3_root
-    return loops
-
-
-@pytest.fixture(scope="session")
-def triaged(campaign: dict[str, Loop], one_codec_toml: Path, quality_triage) -> Triage:
-    """O triage sobre a matriz inteira e sã.
-
-    O rastro é o do primeiro laço porque os três compartilham o bucket; qualquer
-    um deles chega ao mesmo lugar.
-    """
-    return quality_triage(campaign[ARM], one_codec_toml)
 
 
 @pytest.fixture(scope="session")

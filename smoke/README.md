@@ -1,9 +1,9 @@
 # smoke/
 
-O que o Mac do pesquisador roda para saber que o caminho de encode e a preparação
-dos Masters funcionam (ADR-0022). Diretório de topo porque o critério da ADR-0017
-é *quem roda aquilo*, e quem roda isto é o Mac — mesmo dono de `analysis/` e do
-futuro `infra/`.
+O que o Mac do pesquisador roda para saber que o caminho de encode, a preparação
+dos Masters e o Pass de qualidade funcionam (ADR-0022). Diretório de topo porque
+o critério da ADR-0017 é *quem roda aquilo*, e quem roda isto é o Mac — mesmo
+dono de `analysis/` e do futuro `infra/`.
 
     python -m venv .venv-smoke
     .venv-smoke/bin/pip install -r smoke/requirements-dev.txt
@@ -13,12 +13,12 @@ Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `ffprobe`, `perf`,
 `pidstat`, `aws`, `curl`, `unzip` e `/usr/bin/time` são substituídos por shims, e
 o ciclo fecha em segundos. O mesmo `pytest smoke/` é o quarto job do CI.
 
-**O smoke nunca importa; só invoca.** O gerador do plano, a CLI de validação do
-`meta.json`, o checador stdlib do orquestrador e as CLIs da retomada e do triage
-entram como subprocessos, e o que se inspeciona são os artefatos. Importar
-código de outro papel exigiria `sys.path` na marra ou `pip install -e`, as duas
-coisas que a ADR-0017 rejeitou — e tratar os outros papéis como caixa-preta é o
-correto para um smoke de qualquer forma.
+**O smoke nunca importa; só invoca.** O gerador do plano, as CLIs de validação
+do `meta.json` e do `judge.json`, os checadores stdlib do orquestrador e as CLIs
+da retomada e do triage entram como subprocessos, e o que se inspeciona são os
+artefatos. Importar código de outro papel exigiria `sys.path` na marra ou
+`pip install -e`, as duas coisas que a ADR-0017 rejeitou — e tratar os outros
+papéis como caixa-preta é o correto para um smoke de qualquer forma.
 
 **Um bloco do piloto atravessa o mesmo caminho.** O `config/pilot.toml` é a
 segunda definição do repositório (ADR-0019), e o plano dele sai do mesmo CLI,
@@ -54,13 +54,24 @@ substituem num diretório temporário que entra no PATH: a allowlist do
 não entraria no histórico. Cada comportamento induzido é uma variável de ambiente
 (`SMOKE_FFMPEG_EXIT`, `SMOKE_FFMPEG_HANG`, `SMOKE_PERF_EXIT`,
 `SMOKE_PERF_UNSUPPORTED`, `SMOKE_ENCODER_INVISIBLE`, `SMOKE_BITSTREAM`,
-`SMOKE_AWS_EXIT`); `SMOKE_FFMPEG_NTH` restringe o do `ffmpeg` ao N-ésimo encode,
-que é como um run falha no meio de um bloco cujos vizinhos seguem bem,
-`SMOKE_BITSTREAM_NTH` restringe o `SMOKE_BITSTREAM` do mesmo jeito — só o
-N-ésimo encode devolve o bitstream pedido, e os outros ficam com o default —, que
-é como uma Replicação diverge das outras quatro da mesma Instância, e
-`SMOKE_AWS_FAIL_KEY` restringe o do `aws` a uma chave, que é como só o objeto de
-progresso deixa de subir.
+`SMOKE_VMAF`, `SMOKE_AWS_EXIT`); `SMOKE_FFMPEG_NTH` restringe o do `ffmpeg` ao
+N-ésimo encode — ou ao N-ésimo julgamento, que conta à parte —, que é como um
+run falha no meio de um bloco cujos vizinhos seguem bem, `SMOKE_BITSTREAM_NTH`
+restringe o `SMOKE_BITSTREAM` do mesmo jeito — só o N-ésimo encode devolve o
+bitstream pedido, e os outros ficam com o default —, que é como uma Replicação
+diverge das outras quatro da mesma Instância, e `SMOKE_AWS_FAIL_KEY` restringe o
+do `aws` a uma chave, que é como só o objeto de progresso deixa de subir.
+
+O shim do `ffmpeg` atende três invocações, e a do Juiz **não** se discrimina pelo
+último argumento: o `-f null -` do `run_quality.sh` termina no mesmo `-` da
+extração do bitstream. O que a distingue é o `libvmaf=` no filtergraph, e é de lá
+que sai o `log_path` em que o shim escreve. O log tem a forma do `libvmaf` v3 —
+`frames[].metrics` com `vmaf` e `float_ssim`, mais o `pooled_metrics` — com o
+VMAF de cada frame valendo `SMOKE_VMAF` e o SSIM derivado dele, para que um
+grupo equivalente e um divergente sejam encenáveis pela variável. Um julgamento
+induzido a falhar **não** escreve log nenhum: um `libvmaf` que não terminou não
+deixa série por frame, e escrever uma aqui faria o julgamento falho parecer
+legível.
 
 Todo shim registra o argv que recebeu em `$SMOKE_ARGV_DIR/<tool>.argv` e o seu
 nome em `$SMOKE_ARGV_DIR/sequence`, a linha do tempo comum entre ferramentas —
@@ -128,6 +139,30 @@ marcada no plano, e o bitstream a mais vira um output a mais. Com um run falhado
 (`SMOKE_FFMPEG_EXIT` mais `SMOKE_FFMPEG_NTH`), o triage recusa a matriz
 incompleta nomeando o bloco e imprimindo o comando da retomada, e não escreve
 plano nenhum — o Pass só decide sobre blocos completos.
+
+**O Juiz julga o plano que o triage escreveu.** O `judge/run_quality.sh` é
+dirigido de verdade sobre o `plan.json` daquele triage, com `ffmpeg` e `aws`
+shimados, e é o elo que fecha o Pass: o que o Python decidiu vira argv de FFmpeg
+sem ninguém transcrever nada no meio. A campanha de três laços e o triage sobre
+ela são fixtures do `conftest.py` justamente porque têm dois consumidores.
+
+A asserção central é a do **argv**, e ela é feita contra a **definição** — a
+geometria do tier daquele vídeo, o `scale_flags` do `[encode]`, o modelo do
+`[quality]` —, nunca contra o plano: comparar com o plano pularia o elo
+`pilot.toml` → triage → `jq` → filtergraph que se quer verificar. Junto com ela,
+que os dois `-i` chegam na ordem output/Master e que o distorcido é a primeira
+entrada do `libvmaf`: invertê-los reporta como qualidade do encoder um número que
+não é dele.
+
+O resto é o que o Pass deixa. Cada output deixa `vmaf.json`, `judge.json` e
+`ffmpeg.log` sob `quality/results/{run_id}/` no bucket falso; o `judge.json`
+passa pela CLI do `analysis/` e pelo checador stdlib do `orchestrator/`, pelos
+mesmos subprocessos com que o `meta.json` já passa; o `.mkv` baixado some do work
+dir depois de julgado; o progresso é sobrescrito a cada output e o marcador tem a
+forma do marcador do encode. Os quatro caminhos — o são, a falha induzida, o
+travamento com `--output-timeout` e o teto — rodam cada um sobre uma **cópia** do
+bucket: os quatro escrevem os mesmos `quality/results/` e o mesmo par de
+`status/`, e no bucket compartilhado o último apagaria a evidência dos outros.
 
 O laço fecha do outro lado: a árvore que o `run_all.sh` acabou de escrever é
 consolidada invocando `analysis/consolidate.py`, e o Parquet que sai é lido aqui.

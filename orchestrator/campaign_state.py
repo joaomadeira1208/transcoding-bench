@@ -15,7 +15,16 @@ from enum import Enum
 from typing import Any
 
 from field_checks import FieldError, check_fields, check_int, check_non_empty_str
-from status_check import DoneMarker, StatusError, check_done_marker
+from status_check import (
+    DoneMarker,
+    Progress,
+    Role,
+    StatusError,
+    StatusKeys,
+    check_done_marker,
+    check_progress,
+    progress_line,
+)
 from vigilance import Vigilance
 
 
@@ -25,8 +34,9 @@ class StateError(Exception):
 
 @dataclass(frozen=True)
 class TrackedInstance:
-    """Uma arquitetura do lançamento: o que se pergunta e o que se responde por ela."""
+    """Uma entrada do lançamento: o que se pergunta e o que se responde por ela."""
 
+    role: Role
     instance: str
     instance_id: str
     instance_type: str
@@ -35,6 +45,19 @@ class TrackedInstance:
     runs_total: int
     state: Vigilance
     outcome: DoneMarker | None
+
+    @property
+    def status_keys(self) -> StatusKeys:
+        """Os dois objetos de `status/` desta entrada, nomeados pelo papel dela."""
+        return StatusKeys.of(self.role, self.instance_type)
+
+    def read_progress(self, payload: Any) -> Progress | None:
+        """O objeto de progresso desta entrada, pelo leitor que ela escolhe."""
+        return check_progress(payload, instance_id=self.instance_id)
+
+    def render_progress(self, progress: Progress | None) -> str:
+        """A linha desta entrada neste poll, com o total de runs da fatia dela."""
+        return progress_line(progress, instance=self.instance, runs_total=self.runs_total)
 
 
 @dataclass(frozen=True)
@@ -70,10 +93,12 @@ def serialize_state(state: CampaignState) -> str:
 
 
 def _tracked(payload: Any, where: str) -> TrackedInstance:
-    values = _values(TrackedInstance, _object(payload, where), f"{where}.")
+    raw = {"role": Role.ENCODE.value, **_object(payload, where)}
+    values = _values(TrackedInstance, raw, f"{where}.")
     return TrackedInstance(
         **{
             **values,
+            "role": Role(values["role"]),
             "state": Vigilance(values["state"]),
             "outcome": _outcome(values["outcome"], values["instance_id"], f"{where}.outcome"),
         }
@@ -151,6 +176,13 @@ def _check_state(field: str, value: Any) -> None:
         raise FieldError(f"{field}: estado desconhecido: {value!r}") from error
 
 
+def _check_role(field: str, value: Any) -> None:
+    try:
+        Role(value)
+    except ValueError as error:
+        raise FieldError(f"{field}: papel desconhecido: {value!r}") from error
+
+
 def _enum_value(value: Any) -> str:
     if not isinstance(value, Enum):
         raise TypeError(f"{type(value).__name__} não é serializável no arquivo de estado")
@@ -164,6 +196,7 @@ _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "total_timeout": _check_timeout,
     "slice_keys": _check_list,
     "instances": _check_list,
+    "role": _check_role,
     "instance": check_non_empty_str,
     "instance_id": check_non_empty_str,
     "instance_type": check_non_empty_str,

@@ -116,9 +116,6 @@ from status_check import (
     STATUS_PREFIX,
     Progress,
     StatusError,
-    check_progress,
-    done_key,
-    progress_key,
 )
 from vigilance import Liveness, Vigilance, decide_vigilance, is_standing, marker_verdict
 
@@ -722,7 +719,7 @@ def _poll_architecture(
     try:
         described = described_instance(each.instance_id)
         liveness = _liveness(each, described)
-        payload = _status_object(tracked, done_key(each.instance_type), listed)
+        payload = _status_object(tracked, each.status_keys.done, listed)
         marker, outcome = marker_verdict(payload, instance_id=each.instance_id)
         progress = _progress(tracked, each, listed)
     except _FAILURES as error:
@@ -782,11 +779,11 @@ def _progress(tracked: _StateFile, each: TrackedInstance, listed: set[str]) -> P
     `run_all.sh` também trata como descartável — esconder o marcador, e a fatia
     só acabaria no prazo de D10.
     """
-    payload = _status_object(tracked, progress_key(each.instance_type), listed)
+    payload = _status_object(tracked, each.status_keys.progress, listed)
     if payload is None:
         return None
     try:
-        return check_progress(payload, instance_id=each.instance_id)
+        return each.read_progress(payload)
     except StatusError as error:
         _report(f"{each.instance}: o objeto de progresso veio deformado ({error})")
         return None

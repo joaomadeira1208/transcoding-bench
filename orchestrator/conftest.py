@@ -462,6 +462,7 @@ def make_infra(**overrides: Any) -> dict[str, Any]:
 # `README.md` ilustra.
 
 _TRACKED_INSTANCE: dict[str, Any] = {
+    "role": "encode",
     "instance": "c7g",
     "instance_id": "i-0123456789abcdef0",
     "instance_type": "c7g.xlarge",
@@ -495,7 +496,7 @@ _CAMPAIGN_STATE: dict[str, Any] = {
 
 
 def make_tracked_instance(**overrides: Any) -> dict[str, Any]:
-    """Uma arquitetura do arquivo de estado como dict, com overrides por campo."""
+    """Uma entrada do arquivo de estado como dict, com overrides por campo."""
     return _overridden(_TRACKED_INSTANCE, overrides)
 
 

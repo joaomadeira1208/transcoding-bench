@@ -33,6 +33,14 @@ não é sinal. Campo ausente ou de tipo errado é recusado nomeando o campo, e
 recusado **antes** da comparação de identidade: o `instance_id` pelo qual se
 compararia é um dos campos a conferir.
 
+Quem **nomeia** os dois objetos é a entrada rastreada, pelo papel dela, e não o
+`instance_type` solto: o `StatusKeys.of` devolve `status/{instance_type}_done` e
+`status/{instance_type}_progress` para uma entrada `encode`, e `status/judge_done`
+— a chave que a ADR-0011 fixou para o Juiz — mais `status/judge_progress` para o
+Juiz. O laço pergunta o leitor e o renderizador do progresso à entrada pela
+mesma razão, e não ao `status_check` direto: hoje há um leitor só, e o do objeto
+que o Juiz escreve entra sem um ramo por papel no poll.
+
 O `progress_line` é a linha por arquitetura que o `run` e o `watch` imprimem a
 cada poll, renderizada do objeto mais o **total de runs da fatia**, que é
 argumento e nunca sai do objeto — a Instância sabe quantos runs fez, e só o
@@ -107,13 +115,19 @@ seria abandonada viva, acima a morte de verdade demora a aparecer na tela.
 
 O `campaign_state.py` é o arquivo de estado (D12), o JSON no work dir do
 Orquestrador: o bucket, o caminho da definição, o SHA e as chaves das fatias que
-este lançamento subiu e, por arquitetura, o `instance_id`, o `instance_type`, o
-PID remoto, os totais de blocos e de runs da fatia e o estado corrente, que é o
-do `vigilance.py`. O `run` o escreve antes do primeiro lançamento — quando as
-fatias já subiram e nenhuma arquitetura está de pé, e é por isso que as chaves
-são de topo e a lista de arquiteturas nasce vazia — e o reescreve a cada mudança
-de estado; o `watch` o lê e volta ao mesmo laço. Mora ao lado do arquivo de
-infra, em `~/work/state.json`, e um `run` novo o sobrescreve.
+este lançamento subiu e, por entrada, o papel — `encode` ou `judge` —, o
+`instance_id`, o `instance_type`, o PID remoto, os totais de blocos e de runs da
+fatia e o estado corrente, que é o do `vigilance.py`. O `run` o escreve antes do
+primeiro lançamento — quando as fatias já subiram e nenhuma arquitetura está de
+pé, e é por isso que as chaves são de topo e a lista de arquiteturas nasce
+vazia — e o reescreve a cada mudança de estado; o `watch` o lê e volta ao mesmo
+laço. Mora ao lado do arquivo de infra, em `~/work/state.json`, e um `run` novo
+o sobrescreve.
+
+O papel é o campo mais novo do arquivo, e o `run` escreve `encode` em toda
+arquitetura que lança. Um arquivo escrito antes dele — o `state.json` do piloto,
+que é evidência daquele lançamento e não se regenera — é lido como `encode` e
+reescrito com o campo.
 
 O `total_timeout` está no arquivo porque o prazo do Orquestrador sai dele (D10):
 sem esse campo, o `watch` retomado teria de recebê-lo por flag, e uma flag que o

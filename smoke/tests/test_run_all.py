@@ -12,7 +12,15 @@ from datetime import datetime
 from typing import Any
 
 import pytest
-from conftest import BUCKET, INSTANCE_ID, INSTANCE_TYPE, Loop
+from conftest import (
+    BUCKET,
+    DONE_MARKER_TYPES,
+    INSTANCE_ID,
+    INSTANCE_TYPE,
+    Loop,
+    offset_aware,
+    typed_fields,
+)
 from test_run_scenario import ARTIFACTS, UUID4
 
 DONE_MARKER = f"status/{INSTANCE_TYPE}_done"
@@ -31,15 +39,6 @@ PROGRESS_TYPES = {
     "runs_failed": int,
     "elapsed_seconds": int,
     "written_at": str,
-}
-
-DONE_TYPES = {
-    "instance_id": str,
-    "finished_at": str,
-    "runs_total": int,
-    "runs_failed": int,
-    "capped": bool,
-    "exit_status": int,
 }
 
 # Único por processo: a asserção de que o encode travado morreu procura este
@@ -78,14 +77,6 @@ def progress_versions(loop: Loop) -> list[dict[str, Any]]:
 
 def done_marker(loop: Loop) -> dict[str, Any]:
     return json.loads((loop.bucket_dir() / DONE_MARKER).read_text(encoding="utf-8"))
-
-
-def typed_fields(payload: dict[str, Any]) -> dict[str, type]:
-    return {name: type(value) for name, value in payload.items()}
-
-
-def offset_aware(timestamp: str) -> bool:
-    return datetime.fromisoformat(timestamp).utcoffset() is not None
 
 
 def elapsed_s(meta: dict[str, Any]) -> float:
@@ -336,7 +327,7 @@ class TestProgress:
 
 class TestDoneMarker:
     def test_the_fields_and_their_types_are_the_contract(self, loop):
-        assert typed_fields(done_marker(loop)) == DONE_TYPES
+        assert typed_fields(done_marker(loop)) == DONE_MARKER_TYPES
 
     def test_it_carries_the_identity_the_resume_needs(self, loop):
         marker = done_marker(loop)

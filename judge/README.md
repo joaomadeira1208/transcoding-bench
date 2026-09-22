@@ -140,27 +140,37 @@ contrato dele tem os dois leitores do `meta.json` — o modelo `pydantic` de
 
 Um output falho **não interrompe o Pass**: o próximo acontece, e o status de
 saída do `run_quality.sh` (1 se algum falhou ou o teto disparou, 0 se não) é o
-que diz ao Orquestrador que há algo para olhar. É `exit_code != 0` no
-`judge.json`, nunca aviso — um Pass que terminasse "com sucesso" escondendo
-outputs não medidos é exatamente o que a ADR-0005 manda documentar:
+que diz ao Orquestrador que há algo para olhar. Nunca é aviso — um Pass que
+terminasse "com sucesso" escondendo outputs não medidos é exatamente o que a
+ADR-0005 manda documentar. São quatro modos:
 
 - download do `.mkv` que falha;
-- FFmpeg com status não-zero;
+- FFmpeg com status não-zero, o timeout por output incluído;
 - log do `libvmaf` ausente ou ilegível — um FFmpeg que sai zero sem deixar série
   por frame não julgou nada;
 - upload do resultado que falha, porque um julgamento que não chegou ao bucket
   não existe para o leitor.
 
-A falha do upload do **progresso** é a única que não conta: telemetria não
-derruba medição, e fica no log. A assimetria é a mesma do `encode/README.md`, e
-o marcador de término continua sem folga — é o único jeito de o Orquestrador
+Os três primeiros entram no `judge.json` como `exit_code != 0`. O quarto **não**,
+e não por esquecimento: o `judge.json` é escrito antes do upload, porque é ele um
+dos arquivos que sobem. Um upload falho conta em `runs_failed`, vai para o
+marcador e para o status de saída — mas o `judge.json`, se algum byte dele
+chegou ao bucket, ainda diz `exit_code: 0`. A ordem é a mesma do `meta.json` no
+`encode/run_scenario.sh`, e quem fecha essa porta é o leitor: um `run_id` do
+plano sem resultado em `quality/results/` é output não julgado.
+
+A falha do upload do **progresso** é a única que não conta para nada: telemetria
+não derruba medição, e fica no log. A assimetria é a mesma do `encode/README.md`,
+e o marcador de término continua sem folga — é o único jeito de o Orquestrador
 saber que o Pass acabou.
 
 As duas camadas locais são flags, com defaults operacionais e não do plano:
 
-- `--output-timeout <segundos>` (4 h): cada output recebe SIGTERM ao estourar,
-  entra no `judge.json` como falho e o laço segue. Um `libvmaf` travado não
-  segura o Juiz faturando.
+- `--output-timeout <segundos>` (4 h): o **orçamento do output**, e não de cada
+  comando dele. O download, a passada do `libvmaf` e o upload correm sob o que
+  resta dele; o que estourar recebe SIGTERM, o output entra no `judge.json` como
+  falho e o laço segue. Um teto por comando deixaria um download que consumisse a
+  janela inteira seguido de um `libvmaf` com uma janela nova.
 - `--total-timeout <segundos>` (24 h): conferido **antes de cada output**; ao
   estourar, o laço para, escreve o marcador com `capped` verdadeiro e sai com 1.
 

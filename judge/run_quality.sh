@@ -10,9 +10,8 @@ SCHEMA_VERSION=1
 FFMPEG_COMMAND=ffmpeg
 AWS_COMMAND=aws
 
-# Operacionais, e não do plano. O teto não é o das 120 h da ADR-0012: aquele foi
-# calibrado para uma campanha de quatro dias, e o Pass inteiro é de horas
-# (ADR-0025) — 120 h aqui seriam cinco dias de Juiz faturando sem guarda.
+# Harmonizar o teto com as 120 h da ADR-0012 dá cinco dias de Juiz faturando sem
+# guarda: aquele número é o de uma campanha de quatro dias, e o Pass é de horas.
 OUTPUT_TIMEOUT_SECONDS=$((4 * 60 * 60))
 TOTAL_TIMEOUT_SECONDS=$((24 * 60 * 60))
 
@@ -44,7 +43,7 @@ log() {
 start_watchdog() {
   (
     trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
-    sleep "$OUTPUT_TIMEOUT_SECONDS" &
+    sleep "$2" &
     sleeper=$!
     wait "$sleeper" || true
     kill -TERM "$1" 2>/dev/null || true
@@ -59,13 +58,35 @@ stop_watchdog() {
   watchdog_pid=""
 }
 
+# O que resta do orçamento **do output**, nunca o timeout inteiro: um teto por
+# comando deixaria um download que consumisse a janela toda seguido de um
+# `libvmaf` com uma janela nova, e o output inteiro passaria do dobro do timeout.
+remaining_seconds() {
+  local left=$((output_deadline - SECONDS))
+  ((left > 0)) || left=1
+  printf '%s\n' "$left"
+}
+
+# Deixa em `guarded_status` em vez de devolver: o chamador é que sabe o que aquela
+# falha significa, e um `wait` sem guarda derrubaria o Pass no primeiro output
+# falho.
+guard() {
+  guarded_pid=$1
+  start_watchdog "$guarded_pid" "$(remaining_seconds)"
+
+  guarded_status=0
+  wait "$guarded_pid" || guarded_status=$?
+  guarded_pid=""
+  stop_watchdog
+}
+
 # shellcheck disable=SC2329 # invocada pelos `trap TERM` e `trap INT`
 abort() {
   trap - TERM INT
   stop_watchdog
-  if [[ -n ${ffmpeg_pid:-} ]]; then
-    kill -TERM "$ffmpeg_pid" 2>/dev/null || true
-    wait "$ffmpeg_pid" 2>/dev/null || true
+  if [[ -n ${guarded_pid:-} ]]; then
+    kill -TERM "$guarded_pid" 2>/dev/null || true
+    wait "$guarded_pid" 2>/dev/null || true
   fi
   exit "$1"
 }
@@ -76,18 +97,17 @@ output_field() {
     <<<"$output"
 }
 
-# O Master escalado pelo **mesmo** `scale=W:H:flags=` que produziu o output, e no
-# mesmo filtergraph do `libvmaf`: medir o encoder, e não a cadeia de downscale
-# (ADR-0005). O output é a primeira entrada e a referência a segunda, que é a
-# ordem em que o filtro lê distorcido e referência.
 filtergraph() {
   printf '[1:v]scale=%s:%s:flags=%s[ref];[0:v][ref]libvmaf=model=version=%s:feature=name=float_ssim:n_threads=%s:log_fmt=json:log_path=%s' \
     "$output_width" "$output_height" "$scale_flags" \
     "$vmaf_model" "$threads" "$vmaf_log"
 }
 
-# Deixa em `ffmpeg_status` em vez de devolver: chamada sob `if`, a função perderia
-# o `set -e` por dentro.
+download_output() {
+  "$AWS_COMMAND" s3 cp "s3://$bucket/$key" "$local_output" &
+  guard $!
+}
+
 measure_quality() {
   "$FFMPEG_COMMAND" \
     -nostdin \
@@ -96,13 +116,12 @@ measure_quality() {
     -i "$masters_dir/$master" \
     -filter_complex "$(filtergraph)" \
     -f null - >/dev/null 2>"$ffmpeg_log" &
-  ffmpeg_pid=$!
-  start_watchdog "$ffmpeg_pid"
+  guard $!
+}
 
-  ffmpeg_status=0
-  wait "$ffmpeg_pid" || ffmpeg_status=$?
-  ffmpeg_pid=""
-  stop_watchdog
+upload_results() {
+  "$AWS_COMMAND" s3 cp "$result_dir/" "s3://$bucket/$RESULTS_PREFIX/$run_id/" --recursive &
+  guard $!
 }
 
 # Projeção, e não campos remontados um a um: `jq` copia cada valor com o tipo que
@@ -139,7 +158,7 @@ write_judgement() {
 # Deixa em `exit_code`, `run_id` e `scenario_id` em vez de devolver: o objeto de
 # progresso escrito logo depois nomeia o output que acabou.
 judge_output() {
-  local index=$1 started elapsed key
+  local index=$1
 
   output=$(jq -c --argjson index "$index" '.outputs[$index]' "$plan")
   run_id=$(output_field run_id)
@@ -159,24 +178,19 @@ judge_output() {
   local_output=$work_dir/$run_id.$container
   key=runs/$run_id/output.$container
 
+  local started=$SECONDS
+  output_deadline=$((started + OUTPUT_TIMEOUT_SECONDS))
   started_at=$(date -Iseconds)
   exit_code=0
 
-  if ! "$AWS_COMMAND" s3 cp "s3://$bucket/$key" "$local_output"; then
+  download_output
+  if ((guarded_status != 0)); then
     log "$run_id: o download de s3://$bucket/$key falhou"
     exit_code=$EXIT_DOWNLOAD
   else
-    started=$SECONDS
     measure_quality
-    elapsed=$((SECONDS - started))
-    if ((elapsed >= OUTPUT_TIMEOUT_SECONDS)); then
-      log "$run_id: excedeu o timeout de ${OUTPUT_TIMEOUT_SECONDS}s (status $ffmpeg_status)"
-    else
-      log "$run_id: status $ffmpeg_status em ${elapsed}s"
-    fi
-
-    if ((ffmpeg_status != 0)); then
-      exit_code=$ffmpeg_status
+    if ((guarded_status != 0)); then
+      exit_code=$guarded_status
     elif ! jq -e '.frames | type == "array" and length > 0' "$vmaf_log" >/dev/null 2>&1; then
       log "$run_id: o libvmaf não deixou log legível em $vmaf_log"
       exit_code=$EXIT_VMAF_LOG
@@ -186,15 +200,22 @@ judge_output() {
   finished_at=$(date -Iseconds)
   write_judgement
 
-  if ! "$AWS_COMMAND" s3 cp "$result_dir/" "s3://$bucket/$RESULTS_PREFIX/$run_id/" --recursive; then
+  upload_results
+  if ((guarded_status != 0)); then
     log "$run_id: o upload de $result_dir falhou"
     if ((exit_code == 0)); then
       exit_code=$EXIT_UPLOAD
     fi
   fi
 
-  # Fora do `if` do download: o Pass da campanha só cabe em 100 GB se o `.mkv`
-  # sair do disco em todo caminho, e não apenas no do output julgado com sucesso.
+  if ((SECONDS >= output_deadline)); then
+    log "$run_id: excedeu o timeout de ${OUTPUT_TIMEOUT_SECONDS}s (status $exit_code)"
+  else
+    log "$run_id: status $exit_code em $((SECONDS - started))s"
+  fi
+
+  # Mover para dentro do `else` apaga só o `.mkv` do output que chegou ao FFmpeg,
+  # e um Pass com falhas enche os 100 GB no meio.
   rm -f "$local_output"
 }
 

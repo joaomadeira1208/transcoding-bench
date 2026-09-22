@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ MASTERS_PREFIX = "masters/"
 MANIFEST_SCHEMA_VERSION = "1"
 QUALITY_PLAN_FILENAME = "plan.json"
 QUALITY_RESULTS_PREFIX = "quality/results"
+RESULTS_DIR_NAME = "results"
 JUDGE_FILENAME = "judge.json"
 RUNS_SOURCE = f"s3://{BUCKET}/runs/"
 
@@ -251,6 +253,10 @@ class Pass(ShimTrail):
         """Onde o shim do `aws` deixou a cópia de `quality/results/{run_id}/`."""
         return self.bucket_dir() / QUALITY_RESULTS_PREFIX / run_id
 
+    def local_results(self, run_id: str) -> Path:
+        """O diretório do resultado no work dir, antes de o upload acontecer."""
+        return self.work_dir / RESULTS_DIR_NAME / run_id
+
     def judgement(self, run_id: str) -> dict[str, Any]:
         return json.loads((self.results(run_id) / JUDGE_FILENAME).read_text(encoding="utf-8"))
 
@@ -261,6 +267,28 @@ class Pass(ShimTrail):
 
 def _report_without(stdout: str, written_line: str) -> list[str]:
     return [line for line in stdout.splitlines() if not line.startswith(written_line)]
+
+
+# A forma do marcador de `status/`, que o Juiz repete campo a campo para que o
+# leitor do Orquestrador e a decisão de vigilância sirvam aos dois sem ramo. Uma
+# cópia por papel deixaria um dos dois divergir sem nada avisar.
+DONE_MARKER_TYPES = {
+    "instance_id": str,
+    "finished_at": str,
+    "runs_total": int,
+    "runs_failed": int,
+    "capped": bool,
+    "exit_status": int,
+}
+
+
+def typed_fields(payload: dict[str, Any]) -> dict[str, type]:
+    """O tipo de cada campo: `bool` não é `int` do lado de quem lê."""
+    return {name: type(value) for name, value in payload.items()}
+
+
+def offset_aware(timestamp: str) -> bool:
+    return datetime.fromisoformat(timestamp).utcoffset() is not None
 
 
 def keep_first_record(text: str, table: str) -> str:
@@ -1177,19 +1205,17 @@ def check_with_preflight(perf_json: Path) -> subprocess.CompletedProcess[str]:
 
 
 def validate_with_cli(meta_path: Path) -> subprocess.CompletedProcess[str]:
-    """A CLI de validação do `analysis/`, invocada como caixa-preta."""
-    return subprocess.run(
-        [sys.executable, str(VALIDATE_META), str(meta_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    return _validate_with_cli(meta_path, VALIDATE_META)
 
 
 def validate_judgement_with_cli(judge_path: Path) -> subprocess.CompletedProcess[str]:
-    """A CLI do contrato do `judge.json`, do `analysis/`, invocada do mesmo jeito."""
+    return _validate_with_cli(judge_path, VALIDATE_JUDGE)
+
+
+def _validate_with_cli(path: Path, cli: Path) -> subprocess.CompletedProcess[str]:
+    """A CLI de contrato do `analysis/` daquele artefato, invocada como caixa-preta."""
     return subprocess.run(
-        [sys.executable, str(VALIDATE_JUDGE), str(judge_path)],
+        [sys.executable, str(cli), str(path)],
         capture_output=True,
         text=True,
         check=False,

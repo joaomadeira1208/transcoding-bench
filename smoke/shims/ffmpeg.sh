@@ -26,11 +26,6 @@ counted() {
   wc -l <"$SMOKE_ARGV_DIR/$1" | tr -d ' '
 }
 
-tallied() {
-  printf '%s\n' "$2" >>"$SMOKE_ARGV_DIR/$1"
-  counted "$1"
-}
-
 nth_matches() {
   [[ -z $1 || $1 == "$2" ]]
 }
@@ -64,7 +59,8 @@ for argument in "$@"; do
 done
 
 if [[ -n $log_path ]]; then
-  if nth_matches "${SMOKE_FFMPEG_NTH:-}" "$(tallied ffmpeg.judgements "$log_path")"; then
+  printf '%s\n' "$log_path" >>"$SMOKE_ARGV_DIR/ffmpeg.judgements"
+  if nth_matches "${SMOKE_FFMPEG_NTH:-}" "$(counted ffmpeg.judgements)"; then
     induced=1
   else
     induced=""
@@ -101,7 +97,9 @@ if [[ $last == - ]]; then
   exit 0
 fi
 
-if nth_matches "${SMOKE_FFMPEG_NTH:-}" "$(tallied ffmpeg.encodes "$last")"; then
+printf '%s\n' "$last" >>"$SMOKE_ARGV_DIR/ffmpeg.encodes"
+
+if nth_matches "${SMOKE_FFMPEG_NTH:-}" "$(counted ffmpeg.encodes)"; then
   induced=1
 else
   induced=""

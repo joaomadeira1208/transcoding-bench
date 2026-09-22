@@ -1,18 +1,13 @@
 # Smoke do `judge/run_quality.sh`: o laço do Juiz de verdade sobre o plano que o
 # `quality_triage.py` acabou de escrever, com `ffmpeg` e `aws` shimados, sem
-# Docker, sem AWS e sem FFmpeg (ADR-0022).
-#
-# A asserção central é a do **argv**, e ela é feita contra a **definição** — a
-# geometria do tier daquele vídeo, o `scale_flags` do `[encode]`, o modelo do
-# `[quality]` —, nunca contra o plano: comparar com o plano pularia justamente o
-# elo `experiment.toml` → triage → `jq` → filtergraph que se quer verificar.
+# Docker, sem AWS e sem FFmpeg (ADR-0022). O que este módulo exercita e por quê
+# está no `smoke/README.md`.
 
 from __future__ import annotations
 
 import json
 import os
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +16,18 @@ from conftest import (
     ARM,
     BUCKET,
     COMMIT,
+    DONE_MARKER_TYPES,
+    JUDGE_FILENAME,
     JUDGE_INSTANCE_ID,
     JUDGE_INSTANCE_TYPE,
     JUDGE_THREADS,
     PILOT,
+    QUALITY_RESULTS_PREFIX,
     VERSIONS,
     Pass,
     check_judgement_with_stdlib_checker,
+    offset_aware,
+    typed_fields,
     validate_judgement_with_cli,
 )
 
@@ -35,11 +35,10 @@ JUDGE_PROGRESS = "status/judge_progress"
 JUDGE_DONE = "status/judge_done"
 
 VMAF_LOG = "vmaf.json"
-JUDGEMENT = "judge.json"
 FFMPEG_LOG = "ffmpeg.log"
 
 # Os três artefatos por output julgado da ADR-0011.
-ARTIFACTS = frozenset({VMAF_LOG, JUDGEMENT, FFMPEG_LOG})
+ARTIFACTS = frozenset({VMAF_LOG, JUDGE_FILENAME, FFMPEG_LOG})
 
 # O VMAF que o shim devolve no Pass são: um valor escolhido, e não o default,
 # porque o que se verifica é que o log do bucket é o que o `libvmaf` escreveu.
@@ -57,16 +56,6 @@ PROGRESS_TYPES = {
     "runs_failed": int,
     "elapsed_seconds": int,
     "written_at": str,
-}
-
-# A mesma forma do marcador do encode (D15): cada output julgado é um run do Juiz.
-DONE_TYPES = {
-    "instance_id": str,
-    "finished_at": str,
-    "runs_total": int,
-    "runs_failed": int,
-    "capped": bool,
-    "exit_status": int,
 }
 
 # Único por processo, como no `test_run_all.py`: a asserção de que o julgamento
@@ -151,14 +140,6 @@ def exit_codes(judged: Pass) -> list[int]:
     return [judged.judgement(output["run_id"])["exit_code"] for output in judged.outputs()]
 
 
-def typed_fields(payload: dict[str, Any]) -> dict[str, type]:
-    return {name: type(value) for name, value in payload.items()}
-
-
-def offset_aware(timestamp: str) -> bool:
-    return datetime.fromisoformat(timestamp).utcoffset() is not None
-
-
 @pytest.fixture(scope="session")
 def judged(triaged, campaign, run_quality) -> Pass:
     """O Pass inteiro e são sobre o plano do triage."""
@@ -193,6 +174,17 @@ def judged_with_a_hung_output(triaged, campaign, run_quality) -> Pass:
 def judged_with_no_progress_upload(triaged, campaign, run_quality) -> Pass:
     """Todo `s3 cp` do objeto de progresso falha; os dos resultados seguem bem."""
     return run_quality(campaign[ARM], triaged.plan(), SMOKE_AWS_FAIL_KEY=JUDGE_PROGRESS)
+
+
+@pytest.fixture(scope="session")
+def judged_with_no_result_upload(triaged, campaign, run_quality) -> Pass:
+    """O upload do resultado do segundo output falha; os outros três sobem bem."""
+    failed = triaged.plan()["outputs"][1]["run_id"]
+    return run_quality(
+        campaign[ARM],
+        triaged.plan(),
+        SMOKE_AWS_FAIL_KEY=f"{QUALITY_RESULTS_PREFIX}/{failed}/",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -279,7 +271,7 @@ class TestArgv:
             ]
 
             assert "log_fmt=json" in options
-            assert Path(log_path) == judged.work_dir / "results" / output["run_id"] / VMAF_LOG
+            assert Path(log_path) == judged.local_results(output["run_id"]) / VMAF_LOG
 
     def test_nothing_is_encoded_and_the_output_is_discarded(self, judged):
         for argv in judged.argv("ffmpeg"):
@@ -347,14 +339,14 @@ class TestTheArtifacts:
 class TestTheJudgement:
     def test_the_cli_of_the_analysis_accepts_it(self, judged):
         for output in judged.outputs():
-            written = judged.results(output["run_id"]) / JUDGEMENT
+            written = judged.results(output["run_id"]) / JUDGE_FILENAME
             validated = validate_judgement_with_cli(written)
 
             assert validated.returncode == 0, validated.stderr
 
     def test_the_stdlib_checker_of_the_orchestrator_accepts_it(self, judged):
         for output in judged.outputs():
-            written = judged.results(output["run_id"]) / JUDGEMENT
+            written = judged.results(output["run_id"]) / JUDGE_FILENAME
             checked = check_judgement_with_stdlib_checker(written)
 
             assert checked.returncode == 0, checked.stderr
@@ -448,7 +440,7 @@ class TestProgress:
 
 class TestDoneMarker:
     def test_the_fields_and_their_types_are_the_contract(self, judged):
-        assert typed_fields(done_marker(judged)) == DONE_TYPES
+        assert typed_fields(done_marker(judged)) == DONE_MARKER_TYPES
 
     def test_it_carries_the_identity_the_vigilance_needs(self, judged):
         marker = done_marker(judged)
@@ -488,7 +480,7 @@ class TestFailedOutput:
 
         # Sem o log do `libvmaf`: o FFmpeg que falhou não terminou de escrevê-lo,
         # e é o `judge.json` que carrega a falha para quem lê o Pass.
-        assert {path.name for path in results.iterdir()} == {JUDGEMENT, FFMPEG_LOG}
+        assert {path.name for path in results.iterdir()} == {JUDGE_FILENAME, FFMPEG_LOG}
 
     def test_the_mkv_of_the_failed_output_is_deleted_too(self, judged_with_a_failed_output):
         judged = judged_with_a_failed_output
@@ -502,6 +494,41 @@ class TestFailedOutput:
         assert marker["runs_total"] == len(judged.outputs())
         assert marker["runs_failed"] == 1
         assert marker["capped"] is False
+        assert marker["exit_status"] == judged.returncode
+        assert marker["exit_status"] != 0
+
+
+class TestFailedResultUpload:
+    def test_the_next_output_is_judged_anyway(self, judged_with_no_result_upload):
+        judged = judged_with_no_result_upload
+
+        assert judged_run_ids(judged) == [output["run_id"] for output in judged.outputs()]
+
+    def test_that_result_never_reaches_the_bucket_and_the_others_do(
+        self, judged_with_no_result_upload
+    ):
+        judged = judged_with_no_result_upload
+        reached = [judged.results(output["run_id"]).is_dir() for output in judged.outputs()]
+
+        assert reached == [True, False, True, True]
+
+    def test_the_judgement_it_wrote_locally_still_says_it_measured(
+        self, judged_with_no_result_upload
+    ):
+        # O `judge.json` é escrito **antes** do upload, então o `exit_code` dele não
+        # pode carregar a falha do upload: quem a carrega é o marcador. Narrar isso
+        # ao contrário no README foi o que a revisão pegou.
+        judged = judged_with_no_result_upload
+        written = judged.local_results(judged.outputs()[1]["run_id"]) / JUDGE_FILENAME
+
+        assert json.loads(written.read_text(encoding="utf-8"))["exit_code"] == 0
+
+    def test_the_failure_reaches_the_marker(self, judged_with_no_result_upload):
+        judged = judged_with_no_result_upload
+        marker = done_marker(judged)
+
+        assert marker["runs_total"] == len(judged.outputs())
+        assert marker["runs_failed"] == 1
         assert marker["exit_status"] == judged.returncode
         assert marker["exit_status"] != 0
 

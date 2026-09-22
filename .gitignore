@@ -15,7 +15,11 @@
 !ruff.toml
 !.gitignore
 !.pre-commit-config.yaml
+# Os dois schemas commitados que vão para o anexo do artigo (ADR-0019). Por
+# nome, e não por extensão: `.json` na raiz de um papel é o `meta.json` e o
+# `scenarios.json` de runtime, que ficam fora.
 !meta.schema.json
+!judge.schema.json
 
 # `.yml` não entra por extensão.
 !.github/workflows/*.yml

@@ -22,6 +22,15 @@ decide, e não o arquivo inteiro: `schema_version`, `scenario_id`, `warmup`,
 retomada, que desempata a dedup pelo `run_id` e compara o `commit` com o
 `--exclude-commit`.
 
+O `judgement_check.py` é o mesmo arranjo para o `judge.json`: o `clean` decide
+sobre esse arquivo e também não pode importar o modelo pydantic do `analysis/`,
+e `tests/test_judge_agreement.py` mora igual nos dois papéis. Ele cobre os cinco
+campos sobre os quais a retenção decide — `schema_version`, `run_id`, `sha256`,
+`exit_code` e `finished_at`. O `sha256` é conferido como digest inteiro e
+minúsculo, e não como string não-vazia: é a chave pela qual o `clean` acha as
+cópias bit-idênticas a apagar, e um truncado casa com nenhuma delas, o que
+deixaria as cinco no bucket sem uma linha de aviso.
+
 O `status_check.py` é o lado leitor do contrato de `status/` que o
 `encode/README.md` documenta campo a campo: `check_done_marker` e
 `check_progress` recebem o JSON já parseado e o `instance_id` da instância que
@@ -41,13 +50,25 @@ Juiz. O laço pergunta o leitor e o renderizador do progresso à entrada pela
 mesma razão, e não ao `status_check` direto: hoje há um leitor só, e o do objeto
 que o Juiz escreve entra sem um ramo por papel no poll.
 
+O **marcador** do Juiz é o objeto do encode, sem nada de próprio: cada output
+julgado conta como um run, e é isso que faz o `check_done_marker` e a decisão de
+vigilância servirem sem um ramo por papel. O **progresso**, esse, é objeto
+próprio — o Juiz não tem blocos —, com o seu `check_judge_progress` e a mesma
+regra de identidade: numa repetição do Pass os objetos do anterior continuam no
+bucket, e é o `instance_id` que os torna inertes.
+
 O `progress_line` é a linha por arquitetura que o `run` e o `watch` imprimem a
 cada poll, renderizada do objeto mais o **total de runs da fatia**, que é
 argumento e nunca sai do objeto — a Instância sabe quantos runs fez, e só o
-Orquestrador sabe quantos ela recebeu, porque foi ele quem subiu a fatia:
+Orquestrador sabe quantos ela recebeu, porque foi ele quem subiu a fatia. O
+`judge_progress_line` não recebe total nenhum: o Juiz recebeu o plano inteiro, e
+o `output_count` é dele.
 
-    14:32:07 c7g  bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
-             c7i  sem progresso ainda, 0/36 runs reportados
+    14:32:07 c7g   bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
+             c7i   sem progresso ainda, 0/36 runs reportados
+    14:32:07 judge output  7/13  libx265_1080p_720p_tos_c7i_rep1       7/13 runs, 0 falhas, 41m
+
+A coluna do nome tem cinco casas, que é o que o `judge` ocupa.
 
 A hora é a do `written_at`, e não a do poll: uma hora que não anda entre dois
 polls é a Instância que parou de reportar. A arquitetura que ainda não escreveu

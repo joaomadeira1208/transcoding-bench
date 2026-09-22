@@ -12,8 +12,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from json_contract import offending_fields
 from pydantic import BaseModel, ConfigDict, ValidationError
-from run_meta import offending_fields
 
 
 class ArtifactError(Exception):

@@ -1,16 +1,24 @@
 # analysis/
 
 Python que roda no Mac do pesquisador (ADR-0017): o lado que **lê** o que as
-Instâncias produziram — o contrato do `meta.json` e a tabela analítica que o
-artigo reporta.
+Instâncias produziram — os contratos do `meta.json` e do `judge.json` e a tabela
+analítica que o artigo reporta.
 
 O papel repete o seam do `orchestrator/`. **Núcleo puro**, que recebe dado já
 lido e devolve estrutura: `run_meta.py` (o modelo do `meta.json`),
-`run_artifacts.py` (os parsers do `time.json`, do `perf.json`, da `pidstat.txt` e
-do `ffmpeg.log`) e `run_table.py` (os derivados e o construtor da tabela).
-**Casca fina**, que abre arquivo e traduz erro em código de saída:
-`validate_meta.py` e `consolidate.py`. O `conftest.py` deste nível é o que torna
-o núcleo importável pelos testes sem `pyproject.toml` nem `sys.path` manipulado.
+`judgement.py` (o modelo do `judge.json`), `run_artifacts.py` (os parsers do
+`time.json`, do `perf.json`, da `pidstat.txt` e do `ffmpeg.log`) e `run_table.py`
+(os derivados e o construtor da tabela). **Casca fina**, que abre arquivo e
+traduz erro em código de saída: `validate_meta.py`, `validate_judge.py` e
+`consolidate.py`. O `conftest.py` deste nível é o que torna o núcleo importável
+pelos testes sem `pyproject.toml` nem `sys.path` manipulado.
+
+Os dois modelos e as duas CLIs de validação saem do `json_contract.py`: o modo
+estrito, as anotações de campo, o `offending_fields` e a casca de `argparse` são
+os mesmos. A duplicação que a ADR-0022 licencia é entre **papéis** — o modelo
+daqui e o checador stdlib do `orchestrator/`, que rodam em venvs separados e
+verificam o contrato de forma independente. Dentro deste papel, duas cópias do
+mesmo `argparse` não verificariam nada duas vezes.
 
 O runtime tem `pydantic`, `pyarrow` e `pandas`, e nada mais: o venv é próprio do papel, e é
 isso que faz o job de CI dele ter valor — uma dependência não declarada quebra no
@@ -20,6 +28,8 @@ ambiente limpo em vez de passar porque a máquina do pesquisador tinha o pacote.
     .venv-analysis/bin/pip install -r analysis/requirements-dev.txt
     .venv-analysis/bin/python -m pytest analysis/
     .venv-analysis/bin/python analysis/validate_meta.py runs/<run_id>/meta.json
+    .venv-analysis/bin/python analysis/validate_judge.py \
+        quality/results/<run_id>/judge.json
     .venv-analysis/bin/python analysis/consolidate.py --runs runs/ --out runs.parquet
 
 O nome do venv é outro que o do `orchestrator/` de propósito: os dois papéis
@@ -44,6 +54,40 @@ valida é falha silenciosa de documentação. Para regenerá-lo:
 
     .venv-analysis/bin/python analysis/validate_meta.py --emit-schema \
         > analysis/meta.schema.json
+
+## O `judge.json`
+
+O registro de um output julgado, e o segundo arquivo do repositório escrito por
+um script de shell e lido em Python. Tem as **mesmas três verificações** do
+`meta.json`, pelo mesmo motivo e com a mesma divisão (D14 da Spec 5):
+
+- o modelo `pydantic` estrito de `judgement.py`, validando os bytes crus;
+- o checador em stdlib pura do `orchestrator/` (`judgement_check.py`), que cobre
+  os cinco campos sobre os quais o `clean` decide — `schema_version`, `run_id`,
+  `sha256`, `exit_code` e `finished_at`;
+- o `validate_judge.py`, que é por onde o `smoke/` valida — como caixa-preta — o
+  `judge.json` que o `run_quality.sh` acabou de escrever.
+
+O arquivo é a **entrada do plano projetada verbatim** (a forma que o triage
+escreve em `quality/plan.json`) mais o que o Juiz cunha: `started_at` e
+`finished_at` com offset, `exit_code`, o `commit`, o `instance_id` e o
+`instance_type` do Juiz — que é decisão operacional e por isso precisa ficar
+registrada — e as `versions` da imagem. A projeção verbatim é o que deixa o
+leitor juntar plano e resultado pelo `run_id` sem reconstruir campo nenhum.
+
+O `sha256` é validado como digest inteiro e minúsculo nos dois leitores, e não
+como string não-vazia: é a chave pela qual a retenção acha as cópias
+bit-idênticas a apagar (D22), e um digest truncado casa com nenhuma delas.
+
+O `judge.schema.json` commitado é gerado do modelo e vai para o anexo do artigo,
+com o mesmo teste de sincronia do `meta.schema.json`. Para regenerá-lo:
+
+    .venv-analysis/bin/python analysis/validate_judge.py --emit-schema \
+        > analysis/judge.schema.json
+
+A âncora real — um `judge.json` que o Juiz escreveu — chega com o Pass do piloto
+(D24). Até lá o `test_judge_agreement.py` de cada papel carrega a sua, escrita à
+mão, como foi com o `meta.json` antes do piloto.
 
 ## A tabela consolidada
 

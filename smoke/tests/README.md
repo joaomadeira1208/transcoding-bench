@@ -19,10 +19,14 @@ preparação não escreve mais —, e o `test_prepare_masters.py` confere o mani
 que o bash de verdade escreveu. Cada um contra a sua spec, que é por que a CLI do
 contrato recebe o config do chamador.
 
-O `test_resume.py` é o único que dirige um papel que não é o do encode: o
-`resume.py` do Orquestrador, sobre o bucket falso que o laço acabou de escrever.
-A asserção central ali é a do argv do `s3 sync` e a do relatório — quais blocos
-voltam e por quê (ver o README do papel).
+Dois módulos dirigem um papel que não é o do encode, os dois sobre o bucket falso
+que o laço acabou de escrever. O `test_resume.py` dirige o `resume.py` do
+Orquestrador, e a asserção central ali é a do argv do `s3 sync` e a do relatório
+— quais blocos voltam e por quê. O `test_quality_triage.py` dirige o
+`quality_triage.py` sobre um bucket que três laços encheram, um por arquitetura,
+e a asserção central é a do plano — quantos bitstreams distintos cada Cenário
+deu, qual Execução representa cada um e quais compartilham (ver o README do
+papel).
 
 O `test_pilot_block.py` repete o que aquele laço assere, com o plano do piloto no
 lugar do da campanha, e acrescenta o argv contra o `config/pilot.toml` e a

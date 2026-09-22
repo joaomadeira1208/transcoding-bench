@@ -27,6 +27,7 @@ VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
 VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 RESUME = REPO_ROOT / "orchestrator" / "resume.py"
+QUALITY_TRIAGE = REPO_ROOT / "orchestrator" / "quality_triage.py"
 ORCHESTRATOR_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
@@ -37,6 +38,24 @@ INSTANCE_TYPE = "c7g.xlarge"
 BUCKET = "smoke-bucket"
 MASTERS_PREFIX = "masters/"
 MANIFEST_SCHEMA_VERSION = "1"
+QUALITY_PLAN_FILENAME = "plan.json"
+RUNS_SOURCE = f"s3://{BUCKET}/runs/"
+
+# A linha com que a retomada e o triage anunciam um arquivo escrito. O caminho
+# nela é a única parte da saída que duas invocações sobre o mesmo bucket não têm
+# como ter igual, porque o `--out` é um diretório novo a cada uma.
+SLICE_LINE = "fatia reduzida: "
+PLAN_LINE = "plano: "
+
+PREFLIGHT_ARTIFACTS = {
+    "perf.json": '{"counter-value": "1234567", "event": "cycles"}\n',
+    "perf.stderr.txt": "Performance counter stats for 'ffmpeg':\n",
+}
+
+# Um cabeçalho de tabela de topo do TOML: `[[codec]]` e `[experiment]`, mas não
+# `[video.geometry]` nem `[[instrumentation.metric]]`, que pertencem ao registro
+# aberto acima deles.
+TOP_LEVEL_TABLE = re.compile(r"^\[\[?[^.\]]+\]\]?$")
 
 VERSIONS = {
     "base_image": "ubuntu:24.04@sha256:33ceb719",
@@ -187,6 +206,84 @@ class Resume(ShimTrail):
             for path in sorted(self.out_dir.iterdir())
         }
 
+    def report_lines(self) -> list[str]:
+        return _report_without(self.stdout, SLICE_LINE)
+
+
+@dataclass(frozen=True)
+class Triage(ShimTrail):
+    """O que uma invocação do `orchestrator/quality_triage.py` deixou para trás."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    out_dir: Path
+
+    def plan_bytes(self) -> bytes:
+        return (self.out_dir / QUALITY_PLAN_FILENAME).read_bytes()
+
+    def plan(self) -> dict[str, Any]:
+        return json.loads(self.plan_bytes())
+
+    def report_lines(self) -> list[str]:
+        return _report_without(self.stdout, PLAN_LINE)
+
+
+def _report_without(stdout: str, written_line: str) -> list[str]:
+    return [line for line in stdout.splitlines() if not line.startswith(written_line)]
+
+
+def keep_first_record(text: str, table: str) -> str:
+    """O TOML sem o segundo `[[table]]` em diante, e o resto do arquivo intacto."""
+    kept: list[str] = []
+    header = f"[[{table}]]"
+    seen = 0
+    dropping = False
+    for line in text.splitlines(keepends=True):
+        if TOP_LEVEL_TABLE.match(line.strip()):
+            seen += line.strip() == header
+            dropping = line.strip() == header and seen > 1
+        if not dropping:
+            kept.append(line)
+    return "".join(kept)
+
+
+def block_id_of(scenario_id: str) -> str:
+    """O nome do bloco: a `scenario_id` sem o sufixo da Execução."""
+    return scenario_id.rpartition("_")[0]
+
+
+def failed_block_id(loop: Loop) -> str:
+    """O bloco do run que falhou, pelo `meta.json` que o bash escreveu."""
+    (failed,) = [meta for meta in loop.metas().values() if meta["exit_code"] != 0]
+    return block_id_of(failed["scenario_id"])
+
+
+def seed_preflight_trail(trail: ShimTrail, instance_id: str) -> Path:
+    """O rastro do preflight no bucket falso, ao lado dos blocos da campanha."""
+    preflight = trail.bucket_dir() / "runs" / "preflight" / instance_id
+    preflight.mkdir(parents=True)
+    for name, content in PREFLIGHT_ARTIFACTS.items():
+        (preflight / name).write_text(content, encoding="utf-8")
+    return preflight
+
+
+def sync_with_the_shim(shim_bin: Path, s3_root: Path, workdir: Path, *filters: str) -> list[str]:
+    """O `s3 sync` do shim invocado direto sobre `runs/`: o que desceu, relativo
+    ao destino."""
+    workdir.mkdir()
+    destination = workdir / "down"
+    subprocess.run(
+        [str(shim_bin / "aws"), "s3", "sync", RUNS_SOURCE, str(destination), *filters],
+        env=shim_environment(shim_bin, workdir, {}, s3_root=s3_root),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sorted(
+        str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file()
+    )
+
 
 def _load_config(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
@@ -335,8 +432,20 @@ def shim_environment(
     }
 
 
-def bootstrap_arguments(masters_dir: Path, runs_dir: Path, versions_file: Path) -> list[str]:
-    """Os argumentos que os dois scripts recebem do host: nada é descoberto."""
+def bootstrap_arguments(
+    masters_dir: Path,
+    runs_dir: Path,
+    versions_file: Path,
+    *,
+    instance_id: str = INSTANCE_ID,
+    instance_type: str = INSTANCE_TYPE,
+) -> list[str]:
+    """Os argumentos que os dois scripts recebem do host: nada é descoberto.
+
+    A identidade da máquina é parâmetro porque três arquiteturas escrevem no mesmo
+    bucket no smoke do Pass de qualidade, e o `status/{instance_type}_done` de uma
+    sobrescreveria o da outra.
+    """
     return [
         "--masters-dir",
         str(masters_dir),
@@ -347,9 +456,9 @@ def bootstrap_arguments(masters_dir: Path, runs_dir: Path, versions_file: Path) 
         "--commit",
         COMMIT,
         "--instance-id",
-        INSTANCE_ID,
+        instance_id,
         "--instance-type",
-        INSTANCE_TYPE,
+        instance_type,
         "--versions-file",
         str(versions_file),
     ]
@@ -414,16 +523,22 @@ def run_all(
     O restante da fatia é o topo do canônico de onde os blocos saíram — campanha
     ou piloto: a fatia que a Instância recebe tem a forma daquele plano, só com
     menos blocos, e é essa forma que o laço tem de atravessar.
+
+    O `s3_root` é o de quem já tem um bucket para oferecer — os três laços do Pass
+    de qualidade enchem o mesmo —, e um bucket novo quando ninguém o oferece.
     """
 
     def _run_all(
         plan: dict[str, Any],
         blocks: list[dict[str, Any]],
         *flags: str,
+        s3_root: Path | None = None,
+        instance_id: str = INSTANCE_ID,
+        instance_type: str = INSTANCE_TYPE,
         **shim_env: str,
     ) -> Loop:
         workdir = tmp_path_factory.mktemp("loop")
-        env = shim_environment(shim_bin, workdir, shim_env)
+        env = shim_environment(shim_bin, workdir, shim_env, s3_root=s3_root)
         plan_slice = {**plan, "blocks": blocks}
         plan_path = workdir / "slice.json"
         plan_path.write_text(json.dumps(plan_slice), encoding="utf-8")
@@ -434,7 +549,13 @@ def run_all(
                 str(RUN_ALL),
                 "--plan",
                 str(plan_path),
-                *bootstrap_arguments(masters_dir, runs_dir, versions_file),
+                *bootstrap_arguments(
+                    masters_dir,
+                    runs_dir,
+                    versions_file,
+                    instance_id=instance_id,
+                    instance_type=instance_type,
+                ),
                 *flags,
             ],
             env=env,
@@ -553,6 +674,47 @@ def resume(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
         )
 
     return _resume
+
+
+@pytest.fixture(scope="session")
+def quality_triage(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
+    """Roda o `orchestrator/quality_triage.py` de verdade sobre o bucket que o
+    rastro dado deixou, com o `--config` que gerou o plano daqueles laços.
+
+    Como na retomada, o argv fica num diretório próprio e o `--out` é novo a cada
+    invocação, que é o que a CLI exige.
+    """
+
+    def _quality_triage(trail: ShimTrail, config: Path) -> Triage:
+        workdir = tmp_path_factory.mktemp("triage")
+        env = shim_environment(shim_bin, workdir, {}, s3_root=trail.s3_root)
+        out_dir = workdir / "out"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(QUALITY_TRIAGE),
+                "--config",
+                str(config),
+                "--bucket",
+                BUCKET,
+                "--out",
+                str(out_dir),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return Triage(
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            out_dir=out_dir,
+            argv_dir=Path(env["SMOKE_ARGV_DIR"]),
+            s3_root=trail.s3_root,
+        )
+
+    return _quality_triage
 
 
 @pytest.fixture(scope="session")

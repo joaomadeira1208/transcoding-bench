@@ -14,11 +14,11 @@ Sem Docker, sem credencial AWS e sem FFmpeg: `ffmpeg`, `ffprobe`, `perf`,
 o ciclo fecha em segundos. O mesmo `pytest smoke/` é o quarto job do CI.
 
 **O smoke nunca importa; só invoca.** O gerador do plano, a CLI de validação do
-`meta.json`, o checador stdlib do orquestrador e a CLI da retomada entram como
-subprocessos, e o que se inspeciona são os artefatos. Importar código de outro
-papel exigiria `sys.path` na marra ou `pip install -e`, as duas coisas que a
-ADR-0017 rejeitou — e tratar os outros papéis como caixa-preta é o correto para
-um smoke de qualquer forma.
+`meta.json`, o checador stdlib do orquestrador e as CLIs da retomada e do triage
+entram como subprocessos, e o que se inspeciona são os artefatos. Importar
+código de outro papel exigiria `sys.path` na marra ou `pip install -e`, as duas
+coisas que a ADR-0017 rejeitou — e tratar os outros papéis como caixa-preta é o
+correto para um smoke de qualquer forma.
 
 **Um bloco do piloto atravessa o mesmo caminho.** O `config/pilot.toml` é a
 segunda definição do repositório (ADR-0019), e o plano dele sai do mesmo CLI,
@@ -79,9 +79,10 @@ S3, e por isso sem localstack. O sentido bucket → disco é o do
 confere o sha256 antes do primeiro Cenário, e é o único do `s3 sync`: o sentido
 contrário sai como não shimado. Os `--exclude`/`--include` são aplicados na ordem
 em que a CLI de verdade os aplica — o último padrão que casa decide —, porque é
-um par deles que define o que a retomada baixa. Prefixo sem objeto desce zero
-arquivos e sai com status zero; bucket inexistente falha, como o `NoSuchBucket`
-da CLI, que é o que o `resume.py` separa de "campanha que ainda não começou".
+um par deles que define o que a retomada baixa, e um trio o que o triage do Pass
+de qualidade baixa. Prefixo sem objeto desce zero arquivos e sai com status zero;
+bucket inexistente falha, como o `NoSuchBucket` da CLI, que é o que o `resume.py`
+separa de "campanha que ainda não começou".
 
 **A retomada decide sobre o que o bash escreveu.** O `resume.py` é invocado como
 caixa-preta sobre o bucket falso que o `run_all.sh` acabou de encher, com o
@@ -101,6 +102,32 @@ o preflight deixa em `runs/preflight/<instance-id>/`, sem apagar, entra no bucke
 falso ao lado dos blocos e prova o outro lado: relatório e fatias saem idênticos
 e sem aviso de Execução sem `meta.json`, porque o `s3 sync` da retomada só traz
 `*/meta.json` e não há `meta.json` ali.
+
+**O triage do Pass decide sobre o que três laços escreveram.** O
+`quality_triage.py` entra como caixa-preta sobre o bucket falso que três laços do
+`run_all.sh` encheram, um por arquitetura declarada, com o `SMOKE_BITSTREAM` do
+`c7g` diferente do dos dois x86 — o achado que a ADR-0025 mediu no piloto. É a
+única prova de que os grupos, o representante determinístico e o `plan.json` são
+decididos sobre os `meta.json` e os `output.sha256` que o bash escreveu. O
+`--config` é o `config/pilot.toml` reduzido a um codec, as três arquiteturas
+intactas: seis blocos em dois Cenários, que é o menor recorte em que existe
+bitstream compartilhado a representar. O relatório conta dois bitstreams por
+grupo, o plano nomeia o `c7g` e o `c7i` como representantes e traz as cinco
+Replicações do `c7a` em `shared_by`, e dois triages sobre o mesmo bucket escrevem
+o mesmo `plan.json` byte a byte. O rastro do preflight entra ali também: os três
+padrões do `s3 sync` do triage não o trazem, e relatório e plano saem idênticos.
+
+O bitstream do shim é constante dentro de um laço, então os dois Cenários de uma
+arquitetura saem com o mesmo sha256 — o triage decide por grupo, e é por isso que
+isso não confunde a contagem.
+
+Os outros dois caminhos repetem um laço sobre o mesmo bucket, como a campanha faz
+depois de uma retomada: as Execuções novas vencem a dedup por `started_at`. Com
+`SMOKE_BITSTREAM_NTH` numa Replicação de um x86, a célula é nomeada no relatório,
+marcada no plano, e o bitstream a mais vira um output a mais. Com um run falhado
+(`SMOKE_FFMPEG_EXIT` mais `SMOKE_FFMPEG_NTH`), o triage recusa a matriz
+incompleta nomeando o bloco e imprimindo o comando da retomada, e não escreve
+plano nenhum — o Pass só decide sobre blocos completos.
 
 O laço fecha do outro lado: a árvore que o `run_all.sh` acabou de escrever é
 consolidada invocando `analysis/consolidate.py`, e o Parquet que sai é lido aqui.

@@ -71,3 +71,21 @@ Acontece **na máquina local** do pesquisador, pós-experimento. Um script `cons
 - A instância do Orquestrador tem dupla função: orquestração do experimento + bootstrap dos masters. Ambas são one-shot e não concorrem. **Emenda:** o bootstrap passa a ser lançado pelo Orquestrador numa instância efêmera, e a campanha ganha uma fase anterior a ela, com gate humano entre as duas.
 - A instância de preparação é um quarto ator com papel IAM próprio (ADR-0016) e disco próprio (ADR-0015); o `manifest.json` é objeto de contrato do layout (ADR-0011).
 - Limpeza seletiva dos `.mkv` no S3 acontece após o Pass: orquestrador deleta os outputs que não fazem parte da amostra retida (ADR-0007), incluindo os `.mkv` de warm-up — sobem uniformemente (ADR-0011) e nunca são amostrados. Requer o `s3:DeleteObject` escopado a `runs/*` (ADR-0016).
+
+## Emenda: três comandos, e o Juiz é mais uma entrada da vigilância
+
+O fluxo de oito passos no topo desta ADR descrevia o Pass como uma continuação automática da campanha: o Orquestrador detecta o fim dos encodes, roda o triage, cria o Juiz, detecta o término. Com o desenho da ADR-0025 fechado, ele passa a ser **três comandos, com o pesquisador entre eles**.
+
+| comando | onde roda | o que faz |
+|---|---|---|
+| `quality_triage.py` | instância do Orquestrador | decide o que julgar e escreve o `plan.json` local; **não lança nada** |
+| `orchestrator.py … judge` | instância do Orquestrador | sobe o plano, lança o Juiz, dispara o Pass e o vigia até o marcador |
+| `orchestrator.py … clean` | instância do Orquestrador | lista o que apagaria; apaga só com `--apply` |
+
+A separação é a mesma do `resume.py` (ADR-0012): **entre saber o que julgar e pagar por isso há um humano lendo o relatório**. O triage imprime grupos, o histograma de bitstreams distintos e o total de outputs, que é o que diz quanto o Juiz vai custar antes de ele subir. E `clean` é a única operação destrutiva da pipeline, então ela passa por um humano uma vez, sempre.
+
+**O Juiz é vigiado pelo mesmo laço do `run`.** Ele entra como mais uma entrada no arquivo de estado da campanha — acrescentada, nunca sobrescrevendo o arquivo, que é evidência —, distinguindo-se apenas pelo nome do marcador que a vigilância lê (`judge` no lugar do `instance_type`) e pela linha de progresso própria. A decisão de vigilância, a terminação por marcador, o prazo, o `Ctrl-C`, o `watch` e o `watch --abort` são os mesmos, sem ramo. O disparo é desacoplado da sessão SSH pelo mesmo `setsid`/`nohup` das instâncias de encode (ADR-0010): a queda do `tmux` não pode matar um Pass de horas.
+
+**O tipo do Juiz deixa de estar em aberto, e a estimativa acima estava errada.** A ADR-0025 fixa o `c7i.4xlarge` (x86, 16 vCPU), declarado na tabela `[quality]` da definição. O parágrafo "estimativa de tempo do Pass: ~2–4h (VMAF de ~10–20 outputs)" foi escrito para uma amostra que não existe mais: são **54 a 162 julgamentos** na campanha, dezoito deles em 4K, e o custo fica em **~US$ 5–8**. O requisito metodológico não muda — a mesma instância para todos os outputs.
+
+O passo 3 do fluxo original também muda de conteúdo, e a ADR-0025 o descreve: os 270 grupos por Replicação viram 54 por Cenário, a seleção da amostra fixa sai, e o que entra é a contagem de bitstreams distintos por grupo com um representante determinístico por bitstream.

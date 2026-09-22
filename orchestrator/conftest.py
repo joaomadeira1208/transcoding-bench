@@ -98,6 +98,12 @@ _MINIMAL: dict[str, Any] = {
         }
     ],
     "instance": [{"id": "c7g", "instance_type": "c7g.xlarge", "arch": "arm64"}],
+    "quality": {
+        "vmaf_model": "vmaf_v0.6.1",
+        "vmaf_delta_max": 0.5,
+        "ssim_delta_max": 0.001,
+        "judge": {"instance_type": "c7i.4xlarge", "arch": "x86_64"},
+    },
 }
 
 
@@ -265,6 +271,14 @@ def make_experiment(**overrides: Any) -> dict[str, Any]:
 
 def make_encode(**overrides: Any) -> dict[str, Any]:
     return {**copy.deepcopy(_MINIMAL["encode"]), **overrides}
+
+
+def make_quality(**overrides: Any) -> dict[str, Any]:
+    return {**copy.deepcopy(_MINIMAL["quality"]), **overrides}
+
+
+def make_judge(**overrides: Any) -> dict[str, Any]:
+    return {**copy.deepcopy(_MINIMAL["quality"]["judge"]), **overrides}
 
 
 def make_instrumentation(**overrides: Any) -> dict[str, Any]:

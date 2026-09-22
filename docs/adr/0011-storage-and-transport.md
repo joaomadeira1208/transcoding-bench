@@ -65,3 +65,28 @@ Pra contexto: o compute total do experimento custa ~$70. S3 é < 5% disso.
 - Storage total durante o experimento: ~146 GB. Após limpeza seletiva pós-Pass: poucos GB (JSONs, CSVs, logs, amostra de .mkv).
 - O bucket S3 é o "ground truth" do experimento — todos os raw dirs vivem lá. Consolidação do Parquet (local) é projeção re-gerada a qualquer momento.
 - Instâncias de encode precisam de IAM role com permissão `s3:PutObject` no bucket.
+
+## Emenda: o que o Pass de qualidade escreve, objeto a objeto
+
+O layout acima descrevia `quality/` em duas linhas — `plan.json` e `results/` — e `status/` com um `judge_done` sem forma declarada. O Pass tem escritor e leitor agora (ADR-0025), e os quatro objetos são contrato como os do encode.
+
+```
+quality/
+  plan.json                  # o plano do triage, subido pelo subcomando `judge`
+  results/{run_id}/
+    vmaf.json                # o log JSON do `libvmaf`, cru, com a série por frame
+    judge.json               # o registro do julgamento (proveniência + a entrada do plano)
+    ffmpeg.log               # o stderr do FFmpeg daquele julgamento
+  results/preflight/{instance-id}/   # a evidência do degrau do Juiz (ADR-0016)
+status/
+  judge_progress             # sobrescrito depois de cada output julgado
+  judge_done                 # o marcador do fim do Pass
+```
+
+A chave de um resultado é o `run_id` do **representante** do bitstream (ADR-0025), e é por ela que o leitor junta plano e resultado. Um Pass repetido sobrescreve; o `judge.json` carrega `finished_at` e o leitor aplica "último vence" por `run_id`, pela mesma regra dos `meta.json` (ADR-0019).
+
+`vmaf.json` é o log cru e não um resumo porque é a série por frame que a ADR-0005 manda persistir: as quatro métricas por output — média, desvio, p5 de VMAF e média de SSIM — são projeção dele, e um resumo tornaria qualquer pergunta nova um Pass novo.
+
+**`status/judge_done` tem a mesma forma do marcador do encode** — `instance_id`, `finished_at`, `runs_total`, `runs_failed`, `capped`, `exit_status` —, porque cada output julgado é um run do Juiz. É o que faz o leitor do marcador e a decisão de vigilância servirem ao Juiz **sem ramo**. `status/judge_progress` é próprio, com `instance_id`, `output_index` e `output_count`, `run_id` e `scenario_id` do output que acabou, `runs_total`, `runs_failed`, `elapsed_seconds` e `written_at`. Os dois carregam `instance_id` pelo motivo desta ADR: o `DeleteObject` da matriz (ADR-0016) não alcança `status/`, e numa repetição do Pass os objetos anteriores sobrevivem no bucket.
+
+O nome é `judge_*`, e não `{instance_type}_*`: o Juiz é um só, e prendê-lo ao tipo faria a chave mudar se a ADR-0025 trocasse de instância.

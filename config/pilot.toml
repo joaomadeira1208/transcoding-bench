@@ -119,3 +119,12 @@ arch = "x86_64"
 id = "c7a"
 instance_type = "c7a.xlarge"
 arch = "x86_64"
+
+[quality]
+vmaf_model = "vmaf_v0.6.1"
+vmaf_delta_max = 0.5
+ssim_delta_max = 0.001
+
+[quality.judge]
+instance_type = "c7i.4xlarge"
+arch = "x86_64"

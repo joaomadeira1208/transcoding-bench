@@ -94,3 +94,15 @@ O escopo dessa validação foi **ampliado pela ADR-0022** (e já vinha sendo, pe
 - A role `orchestrator` acumula três papéis de credencial: lançar/terminar instâncias (EC2), mover artefatos (S3), e ler a chave SSH (SSM/KMS).
 - O **hop limit do IMDS no encode** foi resolvido na ADR-0018: a Execução roda dentro do container, então o `aws s3 cp` também — logo o `run-instances` do encode usa **hop limit 2** (`HttpPutResponseHopLimit=2`).
 - A validação de fumaça é pré-requisito operacional antes de disparar a campanha.
+
+## Emenda: o tipo do Juiz na allowlist, e o degrau que o prova
+
+A condição de `ec2:InstanceType` acima listava `<tipo do Juiz>` como pendência. A ADR-0025 o fechou: **`c7i.4xlarge`**, declarado na tabela `[quality]` da definição, e a condição passa a incluí-lo. É a única linha da matriz que muda — o papel `judge` já existe com os prefixos de que precisa, e o `PassRole` já o nomeia.
+
+O teto de custo sob comprometimento continua valendo, num degrau acima: quatro vezes o preço-hora de uma `xlarge`, por uma instância que existe por horas.
+
+**O `preflight` ganha a perna do Juiz.** A "validação de fumaça" desta seção nasceu dizendo que a cadeia inteira roda uma vez antes de a campanha faturar, e o Juiz ficou de fora dela em todas as emendas: o papel `judge` existe desde o primeiro `apply` **sem uma instância que o tivesse assumido**. `preflight --judge` fecha isso — lança um Juiz descartável com o tipo da definição e prova, numa corrida de minutos, o que um Pass de horas descobriria caro: `PassRole` do `judge`, a condição de tipo do `c7i.4xlarge`, o clone no SHA, o build, o `GetObject` de `quality/plan.json`, dos `masters/*` e de `runs/*`, o `libvmaf` **dentro do container** sobre segundos de um Master contra ele mesmo com o modelo da definição, e o `PutObject` em `quality/results/*` e `status/*`. A instância é terminada em todo caminho de saída, e as linhas entram na mesma tabela passou/falhou dos outros degraus.
+
+**A evidência fica no bucket, e é de propósito.** O objeto que o degrau escreve de dentro do container vai para `quality/results/preflight/<instance-id>/` e **não é apagado**: o `DeleteObject` do Orquestrador é escopado a `runs/*` (acima, e continua assim), então `quality/` está fora do alcance dele por desenho. Apagá-lo exigiria alargar o único verbo destrutivo da matriz para o prefixo que guarda o dado do Pass, o que é exatamente a troca que aquele escopo recusa. O `<instance-id>` no caminho mantém as corridas distintas, e o leitor de resultados do `analysis/` ignora o prefixo `preflight/`.
+
+O `preflight` dos três tipos de encode fica **inalterado**: o "smoke AWS completo" é os quatro degraus rodados sobre o mesmo SHA, não um degrau que faz tudo.

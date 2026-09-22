@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 _TOP_LEVEL_KEYS = frozenset(
-    {"experiment", "encode", "instrumentation", "codec", "pair", "video", "instance"}
+    {"experiment", "encode", "instrumentation", "quality", "codec", "pair", "video", "instance"}
 )
 
 
@@ -106,6 +106,24 @@ class FixedEncodeParams:
 
 
 @dataclass(frozen=True)
+class JudgeRecord:
+    """A instância que roda o Pass de qualidade (ADR-0025)."""
+
+    instance_type: str
+    arch: str
+
+
+@dataclass(frozen=True)
+class QualityParams:
+    """O desenho do Pass de qualidade (ADR-0025): com que modelo se julga e o que é equivalente."""
+
+    vmaf_model: str
+    vmaf_delta_max: float
+    ssim_delta_max: float
+    judge: JudgeRecord
+
+
+@dataclass(frozen=True)
 class MetricRecord:
     """Uma das razões da ADR-0006: o par de eventos dela e o teto de plausibilidade."""
 
@@ -173,6 +191,7 @@ class ExperimentConfig:
     warmup_runs: int
     encode: FixedEncodeParams
     instrumentation: Instrumentation
+    quality: QualityParams
     codecs: tuple[CodecRecord, ...]
     pairs: tuple[PairRecord, ...]
     videos: tuple[VideoRecord, ...]
@@ -192,6 +211,7 @@ def validate_config(raw: Mapping[str, Any]) -> ExperimentConfig:
         warmup_runs=_int(experiment, "warmup_runs", "experiment", minimum=0),
         encode=_encode(_table(raw, "encode")),
         instrumentation=_instrumentation(_table(raw, "instrumentation")),
+        quality=_quality(_table(raw, "quality")),
         codecs=tuple(_codec(r, i) for i, r in enumerate(_records(raw, "codec"))),
         pairs=tuple(_pair(r, i) for i, r in enumerate(_records(raw, "pair"))),
         videos=tuple(_video(r, i) for i, r in enumerate(_records(raw, "video"))),
@@ -226,6 +246,30 @@ def _encode(record: Mapping[str, Any]) -> FixedEncodeParams:
         strip_audio=_bool(record, "strip_audio", where),
         container=_str(record, "container", where),
         scale_flags=_str(record, "scale_flags", where),
+    )
+
+
+def _quality(record: Mapping[str, Any]) -> QualityParams:
+    where = "quality"
+    _reject_unknown(record, {"vmaf_model", "vmaf_delta_max", "ssim_delta_max", "judge"}, where)
+    return QualityParams(
+        vmaf_model=_str(record, "vmaf_model", where),
+        vmaf_delta_max=_positive_number(record, "vmaf_delta_max", where),
+        ssim_delta_max=_positive_number(record, "ssim_delta_max", where),
+        judge=_judge(record, where),
+    )
+
+
+def _judge(record: Mapping[str, Any], where: str) -> JudgeRecord:
+    table = _require(record, "judge", where)
+    judge_where = f"{where}: judge"
+    if not isinstance(table, Mapping):
+        raise ConfigError(f"{judge_where} must be a table with 'instance_type' and 'arch'")
+
+    _reject_unknown(table, {"instance_type", "arch"}, judge_where)
+    return JudgeRecord(
+        instance_type=_str(table, "instance_type", judge_where),
+        arch=_str(table, "arch", judge_where),
     )
 
 
@@ -477,7 +521,7 @@ def _int(record: Mapping[str, Any], key: str, where: str, *, minimum: int | None
 
 
 def _positive_number(record: Mapping[str, Any], key: str, where: str) -> float:
-    """Teto de plausibilidade: aceita o inteiro do TOML e devolve sempre float."""
+    """Número positivo: aceita o inteiro do TOML e devolve sempre float."""
     value = _require(record, key, where)
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ConfigError(f"{where}: '{key}' must be a number, got {type(value).__name__}")

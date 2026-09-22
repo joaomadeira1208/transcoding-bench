@@ -16,6 +16,7 @@ Decisões sobre o desenho experimental: o que medir, como medir, com quais input
 | [0008](0008-ffmpeg-build-strategy.md) | Build do FFmpeg | Compilação from source com -march=native via Docker multi-arch pra exercer SIMD paths nativos; filtro ciescope desligado por ICE do GCC 13 sob SVE |
 | [0023](0023-per-video-tier-geometry.md) | Geometria por vídeo | Tiers são rótulos nominais; largura × altura de cada tier declarada por vídeo no experiment.toml; "nunca upscale" verificado sobre pixels |
 | [0024](0024-cost-analysis-and-price-pinning.md) | Análise de custo e o pin do preço | Custo é derivado na análise, não coletado; preço pinado por consulta em `analysis/prices.toml`, uma seção por lançamento; custo por Cenário separado do operacional; break-even em vez de número absoluto |
+| [0025](0025-quality-pass-sampling.md) | Amostragem do Pass de qualidade | Eixo de Replicação colapsado; um julgamento por bitstream distinto por Cenário (54 grupos, 54–162 julgamentos); representante determinístico pela ordem de `[[instance]]`; amostra fixa absorvida; Juiz `c7i.4xlarge`; modelo e limiares na tabela `[quality]` da definição |
 
 ## Arquitetura
 

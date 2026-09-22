@@ -12,6 +12,17 @@ parâmetros fixos de encode, os eventos de PMU que instrumentam cada Execução
 tipo divergente ou chave desconhecida fazem a validação falhar alto nomeando o
 registro ofensor.
 
+A tabela `[quality]` declara o desenho do Pass de qualidade (ADR-0025): o
+`vmaf_model` — o nome que o `libvmaf` resolve, e que vai literal para o
+`model=version=` do filtro —, os dois limiares de equivalência
+(`vmaf_delta_max`, `ssim_delta_max`) sobre os quais a tabela por Cenário emite o
+veredito, e a sub-tabela `[quality.judge]` com o `instance_type` e o `arch` do
+**Juiz**, lado a lado como num `[[instance]]` porque nenhum dos dois se deriva do
+outro. Está aqui pelo motivo de sempre: com que modelo o artigo reporta VMAF é
+anexo, não constante do `run_quality.sh`, e o Juiz nunca decide isso. O
+`scale_flags` da referência **não** se repete aqui — é o do `[encode]`, e medir o
+encoder exige que a referência desça pelo mesmo filtro que produziu o output.
+
 Cada `[[video]]` declara também o que a preparação e a validação dos Masters vão
 copiar: `frame_rate`, `frames` e uma sub-tabela `source` com `url`, `file`,
 `size` e `sha256`. Os valores são os da emenda da ADR-0004 — os dois arquivos 4K

@@ -113,6 +113,14 @@ class TestTheHashes:
 
         assert hashes == {"run-a": "a3f1c0de"}
 
+    def test_a_hash_that_is_not_even_utf_8_comes_back_as_it_is(self, tmp_path):
+        run_dir = write_run(tmp_path, "run-a", make_meta_json(run_id="run-a"))
+        (run_dir / RUN_HASH_FILENAME).write_bytes(b"\xff\xfe\x00")
+
+        _, hashes, _ = read_runs(tmp_path)
+
+        assert hashes["run-a"] != DIGEST
+
     def test_the_hash_is_keyed_by_the_run_id_the_plan_will_carry(self, tmp_path):
         write_run(tmp_path, "0-um-diretorio", make_meta_json(run_id="run-a"), DIGEST)
 

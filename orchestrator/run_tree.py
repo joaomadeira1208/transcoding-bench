@@ -44,5 +44,8 @@ def read_runs(runs: Path) -> tuple[list[dict[str, Any]], dict[str, str], list[st
         metas.append(meta)
         hash_path = run_dir / RUN_HASH_FILENAME
         if hash_path.is_file():
-            hashes[meta["run_id"]] = hash_path.read_text(encoding="utf-8").strip()
+            # `read_text` levantaria `UnicodeDecodeError` — que não é `OSError`, e
+            # que nenhum dos dois CLIs pega — em vez de deixar o núcleo recusar o
+            # hash malformado nomeando o run.
+            hashes[meta["run_id"]] = hash_path.read_bytes().decode("utf-8", "replace").strip()
     return metas, hashes, warnings

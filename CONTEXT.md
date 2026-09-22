@@ -59,11 +59,11 @@ Vídeo de entrada antes de qualquer transcoding pela pipeline. Existe em três r
 _Avoid_: source como sinônimo de Master (ambíguo), input bruto.
 
 **Pass de qualidade** (`quality_pass`):
-Etapa pós-encode em que se calculam métricas de qualidade (SSIM/VMAF) sobre uma **amostra estratificada** dos outputs. Sua finalidade é **validar a premissa** de que arquiteturas distintas produzem qualidade equivalente sob params fixos (encoder, preset, CRF, thread count), **não** tratar qualidade como variável dependente do experimento. Executado em instância separada das de encode (**Juiz**) pra eliminar variância arquitetural na própria computação da métrica.
-_Avoid_: avaliação de qualidade (sugere variável dependente), validação visual (sugere humanos).
+Etapa pós-encode em que se calculam métricas de qualidade (SSIM/VMAF) sobre os outputs, agrupados por **Cenário** — `codec × input_res × output_res × vídeo`, 54 na campanha e 6 no piloto. Dentro de cada grupo julga-se **cada bitstream distinto uma vez**: as Replicações de uma mesma Instância são bit-idênticas, então o eixo de Replicação não entra, e Intel e AMD, que em geral produzem o mesmo bitstream, não custam dois VMAF idênticos (ADR-0025). Todo grupo é julgado, inclusive um em que os três bitstreams coincidam. Sua finalidade é **validar a premissa** de que arquiteturas distintas produzem qualidade equivalente sob params fixos (encoder, preset, CRF, thread count), **não** tratar qualidade como variável dependente do experimento. Executado em instância separada das de encode (**Juiz**) pra eliminar variância arquitetural na própria computação da métrica. O modelo do VMAF e os dois limiares de equivalência são declarados na tabela `[quality]` da definição.
+_Avoid_: avaliação de qualidade (sugere variável dependente), validação visual (sugere humanos), amostra estratificada (a amostra fixa da ADR-0005 foi absorvida: julga-se todo Cenário).
 
 **Juiz** (`judge`):
-Instância EC2 dedicada ao **Pass de qualidade**. Mesma arquitetura/instância para todos os outputs amostrados, independentemente da instância que gerou cada output. Isola o cálculo de SSIM/VMAF da variável arquitetural.
+Instância EC2 dedicada ao **Pass de qualidade**: um `c7i.4xlarge`, declarado em `[quality.judge]` (ADR-0025). A mesma instância para todos os outputs julgados, independentemente da instância que gerou cada output — é ela que isola o cálculo de SSIM/VMAF da variável arquitetural. Percorre o plano que o triage escreveu, na ordem do arquivo e sem predicado próprio: a seleção mora no Orquestrador. O tamanho e a arquitetura são decisão **operacional** e não experimental — o Juiz não entra na comparação —, e o `judge.json` registra os dois para reprodutibilidade.
 _Avoid_: avaliador, validador.
 
 **Orquestrador** (`orchestrator`):
@@ -80,7 +80,7 @@ _Avoid_: worker, runner, nó.
 - Um **Cenário** é uma tupla de parâmetros; cada **Execução** materializa um Cenário
 - Um **Piloto** é um Experimento em escopo menor: todo **Cenário** do Piloto é um Cenário do Experimento, com os mesmos parâmetros
 - Cada **Cenário** consome o **Master** que corresponde à sua `input_res`
-- A **Pipeline** orquestra Experimentos: prepara Masters, executa Cenários, coleta métricas, e executa o **Pass de qualidade** no **Juiz** sobre uma amostra dos outputs
+- A **Pipeline** orquestra Experimentos: prepara Masters, executa Cenários, coleta métricas, e executa o **Pass de qualidade** no **Juiz** sobre um bitstream distinto por Cenário
 - O **Orquestrador** é o motor da Pipeline: lança as **Instâncias de encode** (uma por arquitetura) e, depois que terminam, o **Juiz**; as Instâncias de encode auto-dirigem os Cenários sem o Orquestrador controlar cada Execução
 
 ## Exemplo de diálogo
@@ -96,4 +96,4 @@ _Avoid_: worker, runner, nó.
 - **"workload"** aparecia indistinto entre "execução individual" e "campanha completa" — resolvido: usamos **Execução** e **Experimento** respectivamente.
 - **"source"** era usado pra denotar tanto o arquivo de origem 4K canônico quanto o input de uma execução — resolvido: usamos **Master** pro input de qualquer execução (incluindo 1080p e 720p, derivados); o arquivo de origem 4K canônico não tem termo próprio no glossário, e `source` é reservado a ele: é o nome da sub-tabela que cada `[[video]]` do `experiment.toml` declara com a URL, o arquivo, o tamanho e o sha256 que a preparação dos Masters baixa e confere (ADR-0004). Nunca como sinônimo de Master.
 - **"instância de controle" / "controle"** era usado nos ADRs como sinônimo de "orquestrador" — resolvido: o termo canônico é **Orquestrador** (o programa), e a máquina onde ele roda é "a instância do Orquestrador". Não se usa "Controle" como termo próprio.
-- **"qualidade do vídeo gerado"** apareceu no artigo como variável dependente ao lado de tempo/CPU/custo — resolvido: com encoder e CRF fixos, qualidade é esperada invariante entre arquiteturas; entra como **validação amostral da premissa** via **Pass de qualidade** rodando no **Juiz**, não como variável dependente. ADR a criar quando os parâmetros de amostragem estiverem fechados.
+- **"qualidade do vídeo gerado"** apareceu no artigo como variável dependente ao lado de tempo/CPU/custo — resolvido: com encoder e CRF fixos, qualidade é esperada invariante entre arquiteturas; entra como **validação amostral da premissa** via **Pass de qualidade** rodando no **Juiz**, não como variável dependente. Os parâmetros de amostragem estão fechados na ADR-0025, e a ADR-0005 traz a emenda que os reflete.

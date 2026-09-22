@@ -193,3 +193,16 @@ arch = "x86_64"
 id = "c7a"
 instance_type = "c7a.xlarge"
 arch = "x86_64"
+
+# O desenho do Pass de qualidade (ADR-0025). O `scale_flags` da referência não se
+# repete aqui: é o do `[encode]`, e um segundo campo divergiria em silêncio do
+# filtro que produziu o output.
+[quality]
+# O nome que o `libvmaf` resolve, e que vai literal para o `model=version=`.
+vmaf_model = "vmaf_v0.6.1"
+vmaf_delta_max = 0.5
+ssim_delta_max = 0.001
+
+[quality.judge]
+instance_type = "c7i.4xlarge"
+arch = "x86_64"

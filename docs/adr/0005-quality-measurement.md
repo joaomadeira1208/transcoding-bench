@@ -30,3 +30,13 @@ O Pass de qualidade roda **em batch, após todos os encodes terminarem** nas 3 i
 - **Juiz é uma instância adicional além das 3 do experimento primário.** Tipo/tamanho/arquitetura do Juiz ficam abertos pra ADR de arquitetura. Premissa: mesma instância pra todos os outputs amostrados.
 - **Bit-identity ≠ idêntica em todos os campos.** Container `.mkv` pode ter metadados de mux com timestamps de criação, etc. Hash deve cobrir apenas o bitstream codificado (extraído via `ffmpeg -i ... -c copy -f $codec -`, elementary stream do codec — mesmo comando da ADR-0007), não o container inteiro.
 - **Se a validação falhar inesperadamente em vários grupos,** isso é achado relevante por si só sobre não-determinismo do encoder no FFmpeg moderno entre arquiteturas — vale documentar e investigar, não esconder.
+
+## Emenda: o grupo é o Cenário, e a amostra fixa é absorvida
+
+O piloto mediu as duas coisas que o desenho acima supunha, e uma delas saiu ao contrário. A ADR-0025 registra a decisão inteira; o que muda **neste** texto:
+
+**Os 270 grupos `(codec × par × vídeo × Replicação)` viram 54 grupos por Cenário** — `(codec, input_res, output_res, vídeo)` —, e dentro de cada um julga-se **cada bitstream distinto uma vez**. As 5 Replicações de uma mesma Instância são bit-idênticas (18 de 18 casos no piloto), então o eixo de Replicação não carrega informação de qualidade: julgá-lo computaria cinco vezes o mesmo número. O resultado reportado passa a ser `X/54 grupos equivalentes`, e não `X/270`; o critério — VMAF Δ ≤ 0,5 **e** SSIM Δ ≤ 0,001 sobre o máximo menos o mínimo das médias do grupo — e o seu estatuto de distribuição, não de gate, não mudam. Os dois limiares e o modelo do VMAF passam a ser declarados na tabela `[quality]` da definição.
+
+**A amostra metodológica fixa de 6 a 10 outputs sai**, absorvida pelo desenho novo. Ela existia para o caso esperado do item 3 acima — "a maioria dos grupos passa no hash" —, em que o Pass terminaria sem nenhum valor absoluto de VMAF a reportar. O caso esperado **não se materializou**: nenhum dos 30 grupos do piloto passou no hash, e nenhum Cenário deu os três bitstreams iguais entre as arquiteturas. E a pergunta que a amostra respondia deixou de existir: como **todo** grupo é julgado — inclusive um em que os três bitstreams coincidam, que custa um VMAF só —, todo Cenário tem VMAF e SSIM absolutos a reportar, sem estratificação à parte.
+
+O hash-first continua sendo o que decide o que se julga; o que ele decide é outra coisa. Em vez de "este grupo passou, dispensa VMAF", ele responde "quantos bitstreams distintos há neste Cenário" — e a resposta 1 não dispensa o julgamento, apenas o reduz a um.

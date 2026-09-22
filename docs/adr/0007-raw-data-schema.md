@@ -60,3 +60,13 @@ para o próximo que tiver. Sem ela o schema teria uma coluna
 `perf_L1_dcache_loads` no meio de um Parquet inteiramente minúsculo, e um `SELECT`
 escrito com o resto do schema em mente voltaria vazio em qualquer engine que
 diferencie caixa.
+
+## Emenda: o predicado de retenção é o bitstream, não a amostra
+
+A regra de retenção acima — manter a amostra fixa, os grupos hash-divergentes e as reps usadas no Pass — foi escrita sobre a amostragem original da ADR-0005, e as três categorias deixaram de existir com a ADR-0025. O predicado passa a ser um só:
+
+**Mantém-se um `output.mkv` por bitstream distinto julgado com `exit_code == 0`** — o representante que o `plan.json` nomeia —, e apagam-se todas as cópias bit-idênticas dele, os warm-ups, os runs falhos e os superados pela dedup. Um bitstream cujo julgamento falhou, ou que não esteja no plano, tem **todas** as suas cópias mantidas: nada é apagado antes de poder ser julgado.
+
+É a mesma intenção com outra aritmética, e a conta melhora: na campanha, ~240 GB de `.mkv` caem para ~30. Quem escolhe o representante é o triage, deterministicamente (ADR-0025), e é por isso que ele pode ser escolhido antes do Pass e reencontrado depois dele — uma escolha por sorteio tornaria a limpeza irreproduzível, e a limpeza é a única operação destrutiva da pipeline.
+
+O que **não** muda: apaga-se só `output.mkv`, nunca os outros seis artefatos e nada fora de `runs/`; e o `output.sha256` continua preservado no Parquet por Execução, então a divergência cross-arch segue re-derivável sem os arquivos.

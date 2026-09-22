@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import fields
+from dataclasses import fields, is_dataclass
 from typing import Any
 
 import pytest
@@ -16,6 +16,9 @@ from conftest import (
     make_experiment,
     make_geometry,
     make_instrumentation,
+    make_judge,
+    make_quality,
+    make_source,
     make_video,
     real_config,
     real_pilot_config,
@@ -32,7 +35,7 @@ FIXTURE_GEOMETRY = {"1080p": (1920, 1080), "720p": (1280, 720), "480p": (854, 48
 # `[experiment]`, e sai de `fields()` pelo mesmo motivo que os campos de um
 # registro saem.
 _FAMILIES_WITH_THEIR_OWN_RULE = frozenset(
-    {"encode", "instrumentation", "codecs", "pairs", "videos", "instances"}
+    {"encode", "instrumentation", "quality", "codecs", "pairs", "videos", "instances"}
 )
 
 
@@ -44,6 +47,7 @@ def subset_divergences(pilot: ExperimentConfig, campaign: ExperimentConfig) -> l
         *_field_divergences(
             "instrumentation", None, pilot.instrumentation, campaign.instrumentation
         ),
+        *_field_divergences("quality", None, pilot.quality, campaign.quality),
         *_record_divergences("codec", "slug", pilot.codecs, campaign.codecs),
         *_record_divergences("video", "slug", pilot.videos, campaign.videos),
         *_record_divergences("instance", "id", pilot.instances, campaign.instances),
@@ -92,17 +96,24 @@ def _pair_divergences(
 
 
 def _field_divergences(
-    family: str, identity: str | None, pilot_record: Any, campaign_record: Any
+    family: str,
+    identity: str | None,
+    pilot_record: Any,
+    campaign_record: Any,
+    prefix: str = "",
 ) -> Iterator[str]:
     # Os campos saem do próprio dataclass: enumerá-los aqui deixaria um campo novo
     # do `CodecRecord` fora da guarda sem que nada falhasse.
     for field in fields(pilot_record):
+        name = f"{prefix}{field.name}"
         mine = getattr(pilot_record, field.name)
         theirs = getattr(campaign_record, field.name)
         if isinstance(mine, Mapping) and isinstance(theirs, Mapping):
-            yield from _table_divergences(family, identity, field.name, mine, theirs)
+            yield from _table_divergences(family, identity, name, mine, theirs)
+        elif is_dataclass(mine) and is_dataclass(theirs):
+            yield from _field_divergences(family, identity, mine, theirs, prefix=f"{name}.")
         elif mine != theirs:
-            yield _divergence(family, identity, field.name, mine, theirs)
+            yield _divergence(family, identity, name, mine, theirs)
 
 
 def _table_divergences(
@@ -207,6 +218,22 @@ class TestConfigLevelRejects:
         assert "bbb" in message
         assert "geometry" in message and "480p" in message
 
+    def test_another_source_digest(self, make_subset):
+        pilot, campaign = make_subset(
+            video=[
+                make_video(
+                    geometry=make_geometry(**FIXTURE_GEOMETRY),
+                    source=make_source(sha256="0" * 64),
+                )
+            ]
+        )
+
+        message = only_divergence(pilot, campaign)
+
+        assert "video" in message
+        assert "bbb" in message
+        assert "source.sha256" in message
+
     def test_codec_without_a_homonym_in_the_campaign(self, make_subset):
         message = only_divergence(*make_subset(codec=[make_codec(slug="libaom")]))
 
@@ -218,6 +245,24 @@ class TestConfigLevelRejects:
 
         assert "encode" in message
         assert "'gop_size'" in message
+
+    def test_another_vmaf_model(self, make_subset):
+        # O piloto julgaria com um modelo, a campanha com outro, e as duas faixas
+        # de VMAF que o artigo reporta lado a lado não seriam comparáveis.
+        message = only_divergence(*make_subset(quality=make_quality(vmaf_model="vmaf_4k_v0.6.1")))
+
+        assert "quality" in message
+        assert "'vmaf_model'" in message
+
+    def test_another_judge_instance_type(self, make_subset):
+        pilot, campaign = make_subset(
+            quality=make_quality(judge=make_judge(instance_type="c7i.8xlarge"))
+        )
+
+        message = only_divergence(pilot, campaign)
+
+        assert "quality" in message
+        assert "judge.instance_type" in message
 
     def test_another_pmu_event_list(self, make_subset):
         # Um evento a menos, e não outro: a lista tem de continuar válida contra a

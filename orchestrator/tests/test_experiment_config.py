@@ -15,7 +15,9 @@ from conftest import (
     make_geometry,
     make_instance,
     make_instrumentation,
+    make_judge,
     make_metric,
+    make_quality,
     make_source,
     make_video,
     real_config,
@@ -98,6 +100,17 @@ EXPECTED_GEOMETRY = {
     },
 }
 
+# Transcrição da ADR-0025: o modelo com que o Pass reporta VMAF, os dois limiares
+# de equivalência e o tipo do Juiz. Um modelo trocado produz números plausíveis
+# numa escala diferente, e um limiar afrouxado declara equivalentes grupos que a
+# ADR-0005 manda investigar.
+EXPECTED_QUALITY = {
+    "vmaf_model": "vmaf_v0.6.1",
+    "vmaf_delta_max": 0.5,
+    "ssim_delta_max": 0.001,
+    "judge": ("c7i.4xlarge", "x86_64"),
+}
+
 # Transcrição da tabela da emenda da ADR-0004: o arquivo publicado que a
 # preparação dos Masters baixa, e o que ela confere depois do `unzip`. Nada aqui
 # é derivável do `slug`, e um dígito trocado só apareceria depois do download.
@@ -146,6 +159,16 @@ def declared_sources(config: ExperimentConfig) -> dict[str, dict[str, Any]]:
 
 def declared_frame_rate_and_count(config: ExperimentConfig) -> dict[str, tuple[str, int]]:
     return {video.slug: (video.frame_rate, video.frames) for video in config.videos}
+
+
+def declared_quality(config: ExperimentConfig) -> dict[str, Any]:
+    quality = config.quality
+    return {
+        "vmaf_model": quality.vmaf_model,
+        "vmaf_delta_max": quality.vmaf_delta_max,
+        "ssim_delta_max": quality.ssim_delta_max,
+        "judge": (quality.judge.instance_type, quality.judge.arch),
+    }
 
 
 class TestAccepts:
@@ -250,6 +273,9 @@ class TestRealExperimentToml:
     def test_declares_the_frame_rate_and_the_frame_count_of_every_video(self):
         assert declared_frame_rate_and_count(real_config()) == EXPECTED_FRAME_RATE_AND_COUNT
 
+    def test_declares_the_quality_pass_of_the_adr(self):
+        assert declared_quality(real_config()) == EXPECTED_QUALITY
+
     def test_ties_preset_and_crf_to_each_codec(self):
         codecs = {c.slug: (c.preset, c.crf) for c in real_config().codecs}
 
@@ -298,6 +324,9 @@ class TestRealPilotToml:
 
     def test_carries_the_seed_of_the_campaign(self):
         assert real_pilot_config().seed == EXPECTED_SEED
+
+    def test_judges_with_the_model_and_the_thresholds_of_the_campaign(self):
+        assert declared_quality(real_pilot_config()) == EXPECTED_QUALITY
 
 
 class TestRejectsUpscale:
@@ -641,7 +670,7 @@ class TestRejectsIncompleteRecords:
             validate_config(make_raw_config(**{family: []}))
 
     @pytest.mark.parametrize(
-        "family", ["codec", "pair", "video", "instance", "encode", "instrumentation"]
+        "family", ["codec", "pair", "video", "instance", "encode", "instrumentation", "quality"]
     )
     def test_absent_family(self, make_raw_config, family):
         with pytest.raises(ConfigError, match=family):
@@ -719,8 +748,8 @@ class TestRejectsIncompleteRecords:
         assert "fps" in message
 
     def test_unknown_table_at_the_top_level(self, make_raw_config):
-        with pytest.raises(ConfigError, match="quality"):
-            validate_config(make_raw_config(quality={"sample": 10}))
+        with pytest.raises(ConfigError, match="retention"):
+            validate_config(make_raw_config(retention={"keep": 10}))
 
     def test_encoder_args_that_is_not_a_list_of_strings(self, make_raw_config):
         with pytest.raises(ConfigError, match="encoder_args"):
@@ -903,4 +932,79 @@ class TestRejectsBadMetrics:
         )
 
         with pytest.raises(ConfigError, match="min_ratio"):
+            validate_config(raw)
+
+
+class TestRejectsBadQuality:
+    """O modelo e os limiares do Pass são desenho (ADR-0025), não default de script."""
+
+    @pytest.mark.parametrize("field", ["vmaf_model", "vmaf_delta_max", "ssim_delta_max", "judge"])
+    def test_missing_field(self, make_raw_config, field):
+        quality = make_quality()
+        del quality[field]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(quality=quality))
+
+        message = str(excinfo.value)
+        assert "quality" in message
+        assert field in message
+
+    def test_model_that_is_not_a_string(self, make_raw_config):
+        # O nome vai literal para o `model=version=` do `libvmaf`, que resolve o
+        # arquivo do modelo por ele: qualquer outra coisa ali é um filtro que
+        # falha na instância, horas depois.
+        with pytest.raises(ConfigError, match="vmaf_model"):
+            validate_config(make_raw_config(quality=make_quality(vmaf_model=61)))
+
+    def test_empty_model(self, make_raw_config):
+        with pytest.raises(ConfigError, match="vmaf_model"):
+            validate_config(make_raw_config(quality=make_quality(vmaf_model="")))
+
+    @pytest.mark.parametrize("field", ["vmaf_delta_max", "ssim_delta_max"])
+    @pytest.mark.parametrize("threshold", ["0.5", True, 0, -0.5])
+    def test_threshold_that_is_not_a_positive_number(self, make_raw_config, field, threshold):
+        # Um limiar em string é a comparação que nunca dispara, e zero ou
+        # negativo reprova todo grupo: os dois trocam o veredito de equivalência
+        # sem nada estourar.
+        raw = make_raw_config(quality=make_quality(**{field: threshold}))
+
+        with pytest.raises(ConfigError, match=field):
+            validate_config(raw)
+
+    @pytest.mark.parametrize("field", ["instance_type", "arch"])
+    def test_judge_missing_field(self, make_raw_config, field):
+        judge = make_judge()
+        del judge[field]
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(quality=make_quality(judge=judge)))
+
+        message = str(excinfo.value)
+        assert "quality" in message
+        assert "judge" in message
+        assert field in message
+
+    def test_judge_that_is_not_a_table(self, make_raw_config):
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(make_raw_config(quality=make_quality(judge="c7i.4xlarge")))
+
+        message = str(excinfo.value)
+        assert "quality" in message
+        assert "judge" in message
+
+    def test_quality_that_is_not_a_table(self, make_raw_config):
+        with pytest.raises(ConfigError, match="quality"):
+            validate_config(make_raw_config(quality=["vmaf_v0.6.1"]))
+
+    def test_unknown_key_in_quality(self, make_raw_config):
+        # Um `scale_flags` aqui seria a segunda declaração do filtro da
+        # referência, divergindo do `[encode]` em silêncio (ADR-0005).
+        with pytest.raises(ConfigError, match="scale_flags"):
+            validate_config(make_raw_config(quality=make_quality(scale_flags="bicubic")))
+
+    def test_unknown_key_in_the_judge(self, make_raw_config):
+        raw = make_raw_config(quality=make_quality(judge=make_judge(threads=16)))
+
+        with pytest.raises(ConfigError, match="threads"):
             validate_config(raw)

@@ -331,3 +331,21 @@ para `runs/preflight/<instance-id>/`, **sem apagar** — ao contrário dos dois
 objetos de prova do passo, que somem porque o deles é prova de permissão e este é
 dado. É a evidência do passo que **reprova** que importa: a primeira rodada guardou
 só a tabela, e com ela não se separa multiplexação de PMU virtual contando errado.
+
+## Emenda: o item 5 da checklist, e a escada com o `preflight` completo
+
+Duas coisas neste texto foram escritas sobre um Pass de qualidade que ainda não existia, e a ADR-0025 fechou o desenho.
+
+**O item 5 do gate do piloto é reescrito.** Onde ele diz "o triage agrupou 3 outputs por (codec, par, vídeo, rep) e o Juiz produziu VMAF/SSIM para a amostra", leia-se:
+
+> 5. o triage agrupou as Replicações vencedoras por Cenário e contou os bitstreams distintos; o Juiz produziu VMAF/SSIM para cada um; a tabela de grupos reporta a equivalência.
+
+O enunciado antigo prendia o item a duas coisas que saíram: os 270 grupos por Replicação e a amostra metodológica fixa. O novo prende-o ao que o Pass agora produz — grupos por Cenário, bitstreams distintos julgados, e o veredito por grupo — e continua sendo uma pergunta que o `gate.py` responde de um comando só, sobre o bucket do piloto. Os outros sete itens não mudam.
+
+Vale a nota que a linha "o triage hash-first com grupos reais" desta ADR já antecipava: o piloto **contrariou** a expectativa da ADR-0005 de que a maioria dos grupos passaria no hash. Nenhum passou. O item 5 é o único da checklist cujo conteúdo mudou por causa do que o piloto mediu, e é o argumento do piloto inteiro em miniatura.
+
+**A escada ganha a quarta rodada do `preflight`, e continua com seis degraus.** A emenda anterior fundiu a validação de fumaça do IAM e o smoke AWS num degrau só, rodado "nos três tipos". Faltava o Juiz: o papel `judge` nunca tinha sido assumido por instância nenhuma, e o `libvmaf` dentro do container nunca tinha rodado na AWS. O degrau passa a ser **quatro rodadas** — `c7g.xlarge`, `c7i.xlarge`, `c7a.xlarge` e `--judge` sobre o `c7i.4xlarge` da definição —, todas sobre o mesmo SHA, e é isso que o "smoke AWS completo" queria dizer desde o começo (ADR-0016 emendada).
+
+A escada, cada degrau disparado pelo pesquisador: smoke local → aceite manual com Docker → preparação dos Masters e aprovação do manifesto (ADR-0014) → **`preflight` nas quatro rodadas** (ADR-0016) → **piloto** e aprovação do relatório → campanha. O hotfix de classe 2 da ADR-0021 repete o `preflight` — as quatro.
+
+**E o inventário ganha as linhas do Pass.** O agrupamento do triage muda de forma (por Cenário, contando bitstreams distintos) e continua no topo do inventário pelo mesmo motivo: um grupo mal formado compara bitstreams de Cenários diferentes e reporta divergência onde não há. Entram ao lado, com o mesmo critério de falha silenciosa: a escolha determinística do representante (um representante por sorteio torna a retenção irreproduzível), o predicado do `clean` (invertido, apaga o único `.mkv` de um bitstream e mantém as cinco cópias idênticas dele) e a junção do VMAF ao run pelo `output_sha256` (junta errado e atribui a uma arquitetura a qualidade de outra). Os três são TDD estrito, pelo critério desta ADR: a regra é sutil, os casos de borda são mais fáceis de enunciar como teste, e o custo de errar é o dado do artigo.

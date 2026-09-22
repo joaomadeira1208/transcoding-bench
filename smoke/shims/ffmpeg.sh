@@ -10,19 +10,34 @@ set -euo pipefail
 } >>"$SMOKE_ARGV_DIR/ffmpeg.argv"
 printf 'ffmpeg\n' >>"$SMOKE_ARGV_DIR/sequence"
 
+DEFAULT_BITSTREAM=bitstream
+
+# Contar encodes, e não extrações: a extração do bitstream de um run que falhou
+# não acontece, e o índice dos dois `_NTH` passaria a ser outro.
+encodes_so_far() {
+  wc -l <"$SMOKE_ARGV_DIR/ffmpeg.encodes" | tr -d ' '
+}
+
+nth_matches() {
+  [[ -z $1 || $1 == "$(encodes_so_far)" ]]
+}
+
 # O último argumento discrimina as duas invocações do `run_scenario.sh`: `-` é a
 # extração do bitstream, qualquer outra coisa é o output do encode.
 for last in "$@"; do :; done
 
 if [[ $last == - ]]; then
-  printf '%s' "${SMOKE_BITSTREAM:-bitstream}"
+  if nth_matches "${SMOKE_BITSTREAM_NTH:-}"; then
+    printf '%s' "${SMOKE_BITSTREAM:-$DEFAULT_BITSTREAM}"
+  else
+    printf '%s' "$DEFAULT_BITSTREAM"
+  fi
   exit 0
 fi
 
 printf '%s\n' "$last" >>"$SMOKE_ARGV_DIR/ffmpeg.encodes"
-nth=$(wc -l <"$SMOKE_ARGV_DIR/ffmpeg.encodes" | tr -d ' ')
 
-if [[ -z ${SMOKE_FFMPEG_NTH:-} || $SMOKE_FFMPEG_NTH == "$nth" ]]; then
+if nth_matches "${SMOKE_FFMPEG_NTH:-}"; then
   induced=1
 else
   induced=""

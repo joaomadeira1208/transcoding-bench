@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -16,10 +15,18 @@ from conftest import (
     BUCKET,
     INSTANCE_ID,
     PILOT_TOML,
+    PREFLIGHT_ARTIFACTS,
+    RUNS_SOURCE,
+    SLICE_LINE,
     Loop,
     Resume,
+    block_id_of,
+    failed_block_id,
     generate_plan,
+    keep_first_record,
+    seed_preflight_trail,
     shim_environment,
+    sync_with_the_shim,
 )
 
 # A arquitetura e o codec que sobram na configuração reduzida: os primeiros
@@ -29,80 +36,13 @@ INSTANCE = "c7g"
 
 SLICE_NAME = f"{INSTANCE}.json"
 
-RUNS_SOURCE = f"s3://{BUCKET}/runs/"
-
-SLICE_LINE = "fatia reduzida: "
-
 # O par de filtros do `s3_sync_run_metas`, na ordem em que ele os passa.
 META_FILTERS = ("--exclude", "*", "--include", "*/meta.json")
-
-PREFLIGHT_ARTIFACTS = {
-    "perf.json": '{"counter-value": "1234567", "event": "cycles"}\n',
-    "perf.stderr.txt": "Performance counter stats for 'ffmpeg':\n",
-}
 
 # O run que falha é o segundo encode do laço — a primeira Replicação do primeiro
 # bloco. Uma Replicação, e não o warm-up: o warm-up não entra na completude, e um
 # bloco com ele falhado sairia completo.
 FAILED_ENCODE = "2"
-
-# Um cabeçalho de tabela de topo do TOML: `[[codec]]` e `[experiment]`, mas não
-# `[video.geometry]` nem `[[instrumentation.metric]]`, que pertencem ao registro
-# aberto acima deles.
-TOP_LEVEL_TABLE = re.compile(r"^\[\[?[^.\]]+\]\]?$")
-
-
-def keep_first_record(text: str, table: str) -> str:
-    """O TOML sem o segundo `[[table]]` em diante, e o resto do arquivo intacto."""
-    kept: list[str] = []
-    header = f"[[{table}]]"
-    seen = 0
-    dropping = False
-    for line in text.splitlines(keepends=True):
-        if TOP_LEVEL_TABLE.match(line.strip()):
-            seen += line.strip() == header
-            dropping = line.strip() == header and seen > 1
-        if not dropping:
-            kept.append(line)
-    return "".join(kept)
-
-
-def block_id_of(scenario_id: str) -> str:
-    """O nome do bloco: a `scenario_id` sem o sufixo da Execução."""
-    return scenario_id.rpartition("_")[0]
-
-
-def failed_block_id(loop: Loop) -> str:
-    """O bloco do run que falhou, pelo `meta.json` que o bash escreveu."""
-    (failed,) = [meta for meta in loop.metas().values() if meta["exit_code"] != 0]
-    return block_id_of(failed["scenario_id"])
-
-
-def sync_with_the_shim(shim_bin: Path, s3_root: Path, workdir: Path, *filters: str) -> list[str]:
-    """O `s3 sync` do shim invocado direto sobre `runs/`: o que desceu, relativo
-    ao destino."""
-    workdir.mkdir()
-    destination = workdir / "down"
-    subprocess.run(
-        [str(shim_bin / "aws"), "s3", "sync", RUNS_SOURCE, str(destination), *filters],
-        env=shim_environment(shim_bin, workdir, {}, s3_root=s3_root),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return sorted(
-        str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file()
-    )
-
-
-def report_lines(resume: Resume) -> list[str]:
-    """O relatório sem as linhas que nomeiam as fatias escritas.
-
-    O `--out` é um diretório novo a cada invocação, e o caminho que ele imprime é
-    a única parte da saída que duas retomadas sobre o mesmo bucket não têm como
-    ter igual.
-    """
-    return [line for line in resume.stdout.splitlines() if not line.startswith(SLICE_LINE)]
 
 
 @pytest.fixture(scope="session")
@@ -165,10 +105,7 @@ def resume_with_the_preflight_trail(
     assinatura, qual das duas retomadas vê o rastro passa a depender da ordem de
     coleta, e a comparação entre as duas deixa de significar alguma coisa.
     """
-    preflight = failed_loop.bucket_dir() / "runs" / "preflight" / INSTANCE_ID
-    preflight.mkdir(parents=True)
-    for name, content in PREFLIGHT_ARTIFACTS.items():
-        (preflight / name).write_text(content, encoding="utf-8")
+    seed_preflight_trail(failed_loop, INSTANCE_ID)
     return resume(failed_loop, two_blocks_toml)
 
 
@@ -186,10 +123,10 @@ class TestFailedBlock:
         assert failed_resume.returncode == 0, failed_resume.stderr
 
     def test_the_report_counts_one_complete_and_one_pending(self, failed_resume):
-        assert report_lines(failed_resume)[0] == f"{INSTANCE}: 1/2 blocos completos, 1 pendentes"
+        assert failed_resume.report_lines()[0] == f"{INSTANCE}: 1/2 blocos completos, 1 pendentes"
 
     def test_the_report_names_the_block_of_the_failed_run(self, failed_resume, failed_loop):
-        assert report_lines(failed_resume)[1] == f"  {failed_block_id(failed_loop)}  com falha"
+        assert failed_resume.report_lines()[1] == f"  {failed_block_id(failed_loop)}  com falha"
 
     def test_one_slice_for_the_only_architecture_with_a_pending_block(self, failed_resume):
         assert list(failed_resume.slices()) == [SLICE_NAME]
@@ -218,8 +155,8 @@ class TestFailedBlock:
 class TestHealthyBlocks:
     def test_there_is_nothing_to_resume(self, healthy_resume):
         assert healthy_resume.returncode == 0, healthy_resume.stderr
-        assert report_lines(healthy_resume)[0] == f"{INSTANCE}: 2/2 blocos completos, 0 pendentes"
-        assert report_lines(healthy_resume)[-1] == "nada pendente: não há o que retomar"
+        assert healthy_resume.report_lines()[0] == f"{INSTANCE}: 2/2 blocos completos, 0 pendentes"
+        assert healthy_resume.report_lines()[-1] == "nada pendente: não há o que retomar"
 
     def test_no_slice_is_written(self, healthy_resume):
         assert healthy_resume.slices() == {}
@@ -291,7 +228,7 @@ class TestPreflightTrail:
     def test_the_report_and_the_slices_do_not_change(
         self, resume_with_the_preflight_trail, failed_resume
     ):
-        assert report_lines(resume_with_the_preflight_trail) == report_lines(failed_resume)
+        assert resume_with_the_preflight_trail.report_lines() == failed_resume.report_lines()
         assert resume_with_the_preflight_trail.slices() == failed_resume.slices()
 
     def test_no_execution_is_reported_as_missing_its_meta(self, resume_with_the_preflight_trail):

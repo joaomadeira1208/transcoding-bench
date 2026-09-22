@@ -80,7 +80,7 @@ _Avoid_: worker, runner, nó.
 - Um **Cenário** é uma tupla de parâmetros; cada **Execução** materializa um Cenário
 - Um **Piloto** é um Experimento em escopo menor: todo **Cenário** do Piloto é um Cenário do Experimento, com os mesmos parâmetros
 - Cada **Cenário** consome o **Master** que corresponde à sua `input_res`
-- A **Pipeline** orquestra Experimentos: prepara Masters, executa Cenários, coleta métricas, e executa o **Pass de qualidade** no **Juiz** sobre um bitstream distinto por Cenário
+- A **Pipeline** orquestra Experimentos: prepara Masters, executa Cenários, coleta métricas, e executa o **Pass de qualidade** no **Juiz** sobre cada bitstream distinto de cada Cenário
 - O **Orquestrador** é o motor da Pipeline: lança as **Instâncias de encode** (uma por arquitetura) e, depois que terminam, o **Juiz**; as Instâncias de encode auto-dirigem os Cenários sem o Orquestrador controlar cada Execução
 
 ## Exemplo de diálogo

@@ -160,6 +160,62 @@ def make_meta_json(**overrides: Any) -> str:
     return json.dumps(make_meta(**overrides), indent=2) + "\n"
 
 
+# O `quality/plan.json` que o triage escreve e o Juiz lê (D9 da Spec 5). O lado
+# montado à mão: o escritor produz a forma a partir da definição real, e é daqui
+# que saem as deformações campo a campo que ele nunca produziria.
+
+_VALID_PLAN_OUTPUT: dict[str, Any] = {
+    "run_id": _VALID_META["run_id"],
+    "scenario_id": _VALID_META["scenario_id"],
+    "codec": "h264",
+    "encoder": "libx264",
+    "input_res": "2160p",
+    "output_res": "1080p",
+    "video": "bbb",
+    "instance": "c7g",
+    "sha256": "3d2f7c1a90b4e5d68f2a1c0b7e9d4a35c6f8091b2d3e4f5061728394a5b6c7d8",
+    "master": "bbb_2160p.mkv",
+    "output_width": 1920,
+    "output_height": 1080,
+    "scale_flags": "lanczos",
+    "container": "mkv",
+    "frames": 19036,
+    "shared_by": [
+        {
+            "instance": "c7g",
+            "scenario_id": _VALID_META["scenario_id"],
+            "run_id": _VALID_META["run_id"],
+        }
+    ],
+    "cell_divergent": False,
+}
+
+_VALID_QUALITY_PLAN: dict[str, Any] = {
+    "schema_version": "1",
+    "quality": {
+        "vmaf_model": "vmaf_v0.6.1",
+        "vmaf_delta_max": 0.5,
+        "ssim_delta_max": 0.001,
+    },
+    "outputs": [_VALID_PLAN_OUTPUT],
+}
+
+
+def make_plan_output(**overrides: Any) -> dict[str, Any]:
+    """Uma entrada de `outputs` do plano de qualidade, com overrides por campo."""
+    return _overridden(_VALID_PLAN_OUTPUT, overrides)
+
+
+def make_quality_plan(**overrides: Any) -> dict[str, Any]:
+    """Um `quality/plan.json` válido como dict, com overrides por chave de topo."""
+    return _overridden(_VALID_QUALITY_PLAN, overrides)
+
+
+def make_quality_plan_json(**overrides: Any) -> str:
+    """O mesmo, já serializado — o leitor recebe os bytes que o triage escreveu."""
+    return json.dumps(make_quality_plan(**overrides), indent=2) + "\n"
+
+
 # Os dois objetos de `status/` que o `run_all.sh` escreve (D3/D4 da Spec 4). As
 # fixtures capturadas do bash estão em `tests/fixtures/`; estas factories são o
 # lado montado à mão, de onde saem os casos que o bash não produz.

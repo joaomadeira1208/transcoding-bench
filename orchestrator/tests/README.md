@@ -14,8 +14,11 @@ tabela), o do lançamento (a AMI da arquitetura pedida e as tags da instância),
 precedência da decisão de vigilância, a leitura do arquivo de estado, o núcleo
 do `run` (as duas guardas — o `runs/` povoado e o arquivo de estado com
 instância de pé —, a projeção do `--slices` e a decisão depois dos bootstraps),
-o parser do PID que volta do disparo e o núcleo da vigilância (o prazo do
+o parser do PID que volta do disparo, o núcleo da vigilância (o prazo do
 Orquestrador, o veredito que decide o código de saída, o resumo final e a linha
-de cada poll).
+de cada poll) e o núcleo do triage do Pass de qualidade (o agrupamento por
+Cenário, a contagem de bitstreams distintos, a escolha determinística do
+representante, a célula divergente e o leitor do plano que o Juiz e a retenção
+usam).
 Invariantes escritas à mão como default; golden inline no `.py` só onde congelar
 *é* o requisito.

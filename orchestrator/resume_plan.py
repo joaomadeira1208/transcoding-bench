@@ -57,7 +57,7 @@ def resume(
     excluded_commits: Iterable[str] = (),
 ) -> tuple[InstanceResume, ...]:
     """O que cada arquitetura do plano já tem e o que falta, na ordem do plano."""
-    winners = _winners(metas)
+    winners = winning_replications(metas)
     excluded = frozenset(excluded_commits)
 
     verdicts: dict[str, list[tuple[str, Pending | None]]] = {}
@@ -122,7 +122,7 @@ def _reason(
     return None
 
 
-def _winners(metas: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+def winning_replications(metas: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
     """Uma Replicação por `scenario_id`: o maior `started_at` vence, `run_id` desempata."""
     latest: dict[str, Mapping[str, Any]] = {}
     for meta in metas:

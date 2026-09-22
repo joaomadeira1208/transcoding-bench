@@ -17,6 +17,7 @@ from field_checks import (
     check_bool,
     check_int,
     check_non_empty_str,
+    check_record,
 )
 
 # Um `meta.json` de forma antiga continua no S3 durante a janela de retomada da
@@ -38,13 +39,10 @@ def check_meta(raw: str | bytes) -> dict[str, Any]:
     if not isinstance(meta, dict):
         raise MetaError(f"meta.json não é um objeto JSON: {type(meta).__name__}")
 
-    for field, check in _CHECKS.items():
-        if field not in meta:
-            raise MetaError(f"{field}: campo obrigatório ausente")
-        try:
-            check(field, meta[field])
-        except FieldError as error:
-            raise MetaError(str(error)) from error
+    try:
+        check_record(meta, _CHECKS)
+    except FieldError as error:
+        raise MetaError(str(error)) from error
 
     return meta
 

@@ -39,6 +39,8 @@ RUNS_PREFIX = "runs/"
 
 RUN_META_FILENAME = "meta.json"
 
+RUN_HASH_FILENAME = "output.sha256"
+
 SSH_USER = "ubuntu"
 
 SSH_KEY_PATH = Path.home() / ".ssh" / "transcoding-bench.pem"
@@ -208,6 +210,31 @@ def s3_sync_run_metas(bucket: str, destination: Path) -> None:
             "*",
             "--include",
             f"*/{RUN_META_FILENAME}",
+            f"s3://{bucket}/{RUNS_PREFIX}",
+            str(destination),
+        ]
+    )
+
+
+def s3_sync_run_metas_and_hashes(bucket: str, destination: Path) -> None:
+    """O mesmo, mais o `runs/*/output.sha256` de cada Execução (ADR-0025).
+
+    Os dois num `sync` só, e não o `meta.json` seguido dos hashes por Execução:
+    a árvore que o triage enumera tem de ser a mesma nos dois arquivos, e duas
+    passadas leriam `runs/` em instantes diferentes.
+    """
+    _run(
+        [
+            "aws",
+            "s3",
+            "sync",
+            "--only-show-errors",
+            "--exclude",
+            "*",
+            "--include",
+            f"*/{RUN_META_FILENAME}",
+            "--include",
+            f"*/{RUN_HASH_FILENAME}",
             f"s3://{bucket}/{RUNS_PREFIX}",
             str(destination),
         ]

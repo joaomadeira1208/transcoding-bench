@@ -17,13 +17,13 @@ import sys
 import tempfile
 import tomllib
 from pathlib import Path
-from typing import Any
 
 from experiment_config import ConfigError
-from external import RUN_META_FILENAME, RUNS_PREFIX, ExternalCommandError, s3_sync_run_metas
+from external import ExternalCommandError, s3_sync_run_metas
 from generate_scenarios import SLICE_FILENAME, load_config, write_plans
-from meta_check import MetaError, check_meta
+from meta_check import MetaError
 from resume_plan import reduced_slices, render_report, resume
+from run_tree import read_runs
 from scenario_plan import build_canonical_plan
 
 EXIT_OK = 0
@@ -66,27 +66,6 @@ def fresh_out_dir(value: str) -> Path:
             f"diretório novo, porque o 'run --slices' sobe toda fatia que estiver lá"
         )
     return out
-
-
-def read_metas(runs: Path) -> tuple[list[dict[str, Any]], list[str]]:
-    """Os `meta.json` da árvore sincronizada, com um aviso por Execução sem o seu.
-
-    O arquivo ofensor é nomeado pela **chave no bucket**: a árvore vive num
-    diretório temporário que já não existe quando alguém vai procurar o objeto.
-    """
-    metas: list[dict[str, Any]] = []
-    warnings: list[str] = []
-    for run_dir in sorted(path for path in runs.iterdir() if path.is_dir()):
-        key = f"{RUNS_PREFIX}{run_dir.name}/{RUN_META_FILENAME}"
-        meta_path = run_dir / RUN_META_FILENAME
-        if not meta_path.is_file():
-            warnings.append(f"{key}: ausente, Execução ignorada")
-            continue
-        try:
-            metas.append(check_meta(meta_path.read_bytes()))
-        except MetaError as error:
-            raise MetaError(f"{key}: {error}") from error
-    return metas, warnings
 
 
 def main() -> int:
@@ -145,7 +124,7 @@ def main() -> int:
             return EXIT_UNREADABLE
 
         try:
-            metas, warnings = read_metas(runs)
+            metas, _, warnings = read_runs(runs)
         except MetaError as error:
             print(error, file=sys.stderr)
             return EXIT_INVALID_META

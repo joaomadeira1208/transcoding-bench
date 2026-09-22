@@ -2,7 +2,7 @@
 
 Python que roda na t3.micro (ADR-0017): a maquinaria que age sobre a spec de
 `config/`. Gera o plano canônico de Cenários e suas fatias por arquitetura,
-dispara as Instâncias e decide o que retomar.
+dispara as Instâncias, decide o que retomar e o que o Juiz julga.
 
 Runtime é **stdlib-only** (mais a AWS CLI por `subprocess`): `requirements.txt`
 lista só o runtime e o bootstrap da instância nunca instala o `-dev`, de modo que
@@ -61,11 +61,20 @@ alinhamento que faz três linhas serem lidas de uma vez às 3 da manhã.
 
 Os leitores conferem os campos pelas mesmas primitivas, que moram no
 `field_checks.py` e levantam um `FieldError` que cada um embrulha na sua exceção,
-e pelo mesmo laço: o `check_fields` percorre os campos do registro exigindo
-presença e tipo e devolve os valores crus a quem sabe montá-lo. "Inteiro exato" e
-"ISO-8601 com offset" não são regra de contrato nenhum, e a duplicação que a
-ADR-0022 licencia é **entre papéis**: aqui é o mesmo papel e o mesmo venv, e
-duplicar não compraria verificação independente de nada.
+e pelo mesmo laço, em duas formas: o `check_fields` percorre os campos de uma
+dataclass exigindo presença e tipo e devolve os valores crus a quem sabe montá-la,
+e o `check_record` faz o mesmo quando o registro é a própria tabela de campos —
+é o laço do `meta_check` e o dos dois registros do `quality/plan.json`. "Inteiro
+exato" e "ISO-8601 com offset" não são regra de contrato nenhum, e a duplicação
+que a ADR-0022 licencia é **entre papéis**: aqui é o mesmo papel e o mesmo venv,
+e duplicar não compraria verificação independente de nada.
+
+Pela mesma razão, a árvore que o `s3 sync` baixa é lida uma vez só: o
+`run_tree.py` devolve os `meta.json` já validados, os `output.sha256` como estão
+e um aviso por diretório de run sem meta, e é dele que a retomada e o triage do
+Pass leem. O hash é decodificado com `replace` e julgado adiante: bytes que não
+sejam UTF-8 são recusa nomeando o run, e não traceback num CLI que promete não
+lançar nada.
 
 O `vigilance.py` é a decisão de um poll sobre uma arquitetura (D2/D8/D9 da
 Spec 4): recebe o que o `describe-instances` disse, o que o `kill -0` no PID
@@ -875,3 +884,107 @@ byte, e é o teste que o afirma sobre os dois planos reais. O `s3_sync_run_metas
 é argv e fica sem teste, como o resto do adaptador; a prova de que a completude é
 decidida sobre `meta.json` que o bash de verdade escreveu é a caixa-preta do
 `smoke/`.
+
+## O triage do Pass de qualidade: `quality_triage.py`
+
+O terceiro CLI do papel, e o segundo que **decide sem executar**. Roda na
+instância do Orquestrador, depois de a matriz inteira estar no bucket:
+
+    python orchestrator/quality_triage.py --config config/pilot.toml \
+        --bucket <piloto> --out ~/work/quality
+
+O par `--config`/`--bucket` é o mesmo do `run` e do `resume.py`, pela mesma
+razão: a completude é medida contra a matriz que a campanha prometeu rodar, e é
+do TOML que saem o modelo do VMAF, os dois limiares e a contagem de frames de
+cada vídeo que o plano copia.
+
+**A entrada são dois arquivos por Execução, num `s3 sync` só.** O
+`s3_sync_run_metas_and_hashes` baixa `runs/*/meta.json` e `runs/*/output.sha256`
+de uma vez para um diretório temporário, e esse diretório **é** a enumeração
+(ADR-0012): `runs/` passa de mil objetos na campanha e o parser do
+`list-objects-v2` recusa páginas truncadas por desenho. Duas passadas — os metas
+e depois os hashes — leriam `runs/` em instantes diferentes. Cada `meta.json`
+passa pelo `meta_check` e um inválido derruba o triage nomeando a chave;
+diretório de run sem `meta.json` é ignorado com um aviso no `stderr`, porque uma
+Execução sem ele não pode ter vencido a dedup.
+
+O `output.sha256` **ausente não é erro na leitura da árvore**: um run falho ou
+superado pela dedup legitimamente não tem hash a oferecer. Quem sabe se a falta
+importa é o núcleo, que sabe quem venceu — uma Replicação vencedora com
+`exit_code == 0` sem `output.sha256`, ou com conteúdo que não seja 64
+hexadecimais minúsculos, derruba o triage nomeando a chave do run. Um hash
+faltando viraria um bitstream a menos em silêncio, e o Cenário sairia do Pass
+reportando equivalência entre dois bitstreams em vez de três.
+
+**Completude antes de agrupar, pelas funções da retomada.** O triage reusa a
+dedup (`winning_replications`) e a completude por bloco (`resume`) do
+`resume_plan` — e a leitura da árvore, do `run_tree` — dentro do papel e no mesmo
+venv: a duplicação que a ADR-0022 licencia é entre papéis, não dentro de um. Qualquer bloco pendente recusa o
+triage com o relatório da retomada e o comando do `resume.py` no `stderr`. Um
+Pass sobre matriz incompleta seria refeito depois da retomada, e a retenção teria
+apagado antes disso os `output.mkv` de que o Pass refeito precisa.
+
+**A decisão é a da ADR-0025: um julgamento por bitstream distinto por Cenário.**
+As Replicações vencedoras (`warmup == false`, `exit_code == 0`) são agrupadas por
+Cenário — `codec × input_res × output_res × vídeo`, as três arquiteturas dentro
+do grupo —, e cada `sha256` distinto do grupo é julgado uma vez. Todo grupo é
+julgado, inclusive aquele em que as três arquiteturas coincidem: ali o Pass custa
+um VMAF só e produz o valor absoluto do mesmo jeito.
+
+O representante de um bitstream é **a primeira ocorrência dele na ordem do plano
+canônico**, e não um mínimo calculado à parte: o canônico é arch-major na ordem
+de `[[instance]]` e cada bloco vem `rep1..repN`, então a primeira ocorrência
+**é** a menor Replicação da primeira arquitetura declarada que o produziu. Nunca
+por `run_id`, que é UUID, nem por `started_at`, que ordena por quem terminou
+primeiro: o plano é também o que a retenção lê para decidir qual `output.mkv`
+sobrevive, e um representante sorteado tornaria a limpeza irreproduzível.
+
+Uma célula — Cenário × arquitetura — com mais de um bitstream entre as 5
+Replicações é **achado, não erro** (ADR-0005/0025): a regra acima já julga cada
+bitstream, o relatório nomeia a célula e cada entrada do plano tocada por ela
+sai com `cell_divergent`. Recusar esconderia não-determinismo do encoder entre
+Execuções da mesma máquina, que é exatamente o que há para investigar.
+
+**A saída é o relatório e o plano.** No `stdout`, uma linha por grupo com a
+contagem de bitstreams distintos e a arquitetura de cada um, o histograma, as
+células divergentes nomeadas e o total de outputs a julgar:
+
+    libx265_1080p_720p_tos    3 bitstreams  c7g | c7i | c7a
+    libx264_1080p_720p_bbb    2 bitstreams  c7g | c7i=c7a
+    bitstreams distintos por grupo: 2 bitstreams: 5 grupos, 3 bitstreams: 1 grupo
+    nenhuma célula divergente: as Replicações de cada Instância são bit-idênticas
+    6 grupos, 13 outputs a julgar
+
+O relatório **não conhece bytes**: o triage não lista nem baixa `.mkv`, e o custo
+do Pass é estimado em outputs por resolução de saída — o `extrapolate.py` já
+conhece os bytes por par para quem precisar deles.
+
+Em `--out`, o `plan.json`: `schema_version` de topo, `quality` com o modelo e os
+dois limiares copiados da definição, e `outputs` na ordem do canônico, cada
+entrada com `run_id`, `scenario_id`, os campos do Cenário (`codec`, `encoder`,
+`input_res`, `output_res`, `video`, `instance`), `sha256`, `master`,
+`output_width`, `output_height`, `scale_flags`, `container`, `frames` do vídeo,
+`shared_by` — as Execuções vencedoras com aquele bitstream, o representante
+incluído — e `cell_divergent`. Sem bucket, sem prefixo e sem caminho: chegam por
+argumento a quem vai usá-los. A serialização é a mesma do plano de Cenários, e
+dois triages sobre o mesmo bucket escrevem bytes idênticos. Por isso o `--out`
+tem de ser um diretório novo, e o CLI recusa um que já contenha um plano antes de
+sincronizar coisa alguma: o plano é lido duas vezes, uma pelo Juiz e outra pela
+retenção, e sobrescrevê-lo deixaria a limpeza decidindo sobre representantes que
+o Juiz nunca viu.
+
+Status 1 é recusa sobre o que veio do bucket — `meta.json` inválido,
+`output.sha256` ausente ou malformado, matriz incompleta —; 2 é configuração
+ilegível ou AWS CLI falhando; 0 é o plano escrito. O comando **não lança
+instância nenhuma**: quem sobe o Juiz é o `orchestrator.py judge`, e o humano
+entre os dois é o gate.
+
+O leitor do plano escrito (`check_plan`) nasce ao lado do escritor, no
+`quality_plan.py`, e é a mesma função que o `judge` e o `clean` usam antes de
+agir: forma, `schema_version`, `outputs` não vazio e cada entrada campo a campo,
+nomeando o campo e a posição da entrada. Um campo ausente que passasse ali viraria
+um `KeyError` na instância do Juiz, depois do lançamento, ou um `s3 rm` decidido
+sobre um plano que não é o que o Juiz leu. O `s3_sync_run_metas_and_hashes` é
+argv e fica sem teste, como o resto do adaptador; a prova de que a amostragem é
+decidida sobre `meta.json` e `output.sha256` que o bash de verdade escreveu é a
+caixa-preta do `smoke/`.

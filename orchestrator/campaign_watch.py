@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 from campaign_state import CampaignState, TrackedInstance
-from status_check import HOUR_WIDTH, INSTANCE_WIDTH, Progress, hour_of, progress_line
+from status_check import HOUR_WIDTH, INSTANCE_WIDTH, Progress, hour_of
 from vigilance import UNANSWERED_POLL_LIMIT, Vigilance
 
 POLL_INTERVAL_SECONDS = 300.0
@@ -41,7 +41,7 @@ def poll_line(
     unanswered_polls: int = 0,
 ) -> str:
     """A linha daquela arquitetura neste poll — a das mortas e das mudas inclusive."""
-    line = progress_line(progress, instance=each.instance, runs_total=each.runs_total)
+    line = each.render_progress(progress)
     if state is Vigilance.RUNNING:
         return line
     return f"{line}  [{_note(state, unanswered_polls)}]"

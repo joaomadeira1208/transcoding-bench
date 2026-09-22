@@ -15,6 +15,7 @@ from command_output import S3Object, TruncatedListing
 from experiment_config import ExperimentConfig, InstanceRecord
 from generate_scenarios import CANONICAL_FILENAME, SLICE_FILENAME
 from scenario_plan import build_canonical_plan, build_instance_slices
+from status_check import Role
 from vigilance import Vigilance, is_standing
 
 SCENARIOS_PREFIX = "scenarios/"
@@ -107,6 +108,7 @@ def refuse_standing_instances(state: CampaignState) -> str | None:
 def launched_instance(each: ArchitectureSlice, instance_id: str) -> TrackedInstance:
     """A arquitetura recém-lançada como o arquivo de estado a guarda, antes do disparo."""
     return TrackedInstance(
+        role=Role.ENCODE,
         instance=each.instance.id,
         instance_id=instance_id,
         instance_type=each.instance.instance_type,

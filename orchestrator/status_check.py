@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from field_checks import (
@@ -31,14 +32,25 @@ SECONDS_PER_MINUTE = 60
 
 STATUS_PREFIX = "status/"
 
+# A chave é contrato da ADR-0011 e o valor do papel é contrato do arquivo de
+# estado: colapsar os dois num `role.value` faz renomear um renomear o outro.
+JUDGE_STEM = "judge"
+
 
 class StatusError(Exception):
     """Objeto de `status/` que o Orquestrador recusa a ler, com o campo ofensor nomeado."""
 
 
+class Role(Enum):
+    """O papel de uma entrada rastreada — quem escreveu os objetos de `status/` dela."""
+
+    ENCODE = "encode"
+    JUDGE = "judge"
+
+
 @dataclass(frozen=True)
 class DoneMarker:
-    """`status/{instance_type}_done`: o resultado do `run_all.sh` daquela fatia."""
+    """O marcador de `status/`: o resultado do `run_all.sh` daquela fatia."""
 
     instance_id: str
     finished_at: str
@@ -50,7 +62,7 @@ class DoneMarker:
 
 @dataclass(frozen=True)
 class Progress:
-    """`status/{instance_type}_progress`: onde a Instância estava no último run."""
+    """O progresso de `status/`: onde a Instância estava no último run."""
 
     instance_id: str
     block_index: int
@@ -64,14 +76,21 @@ class Progress:
     written_at: str
 
 
-def done_key(instance_type: str) -> str:
-    """A chave do marcador daquela fatia, a mesma em toda tentativa (D3)."""
-    return f"{STATUS_PREFIX}{instance_type}_done"
+@dataclass(frozen=True)
+class StatusKeys:
+    """As duas chaves de `status/` de uma entrada: o marcador (D3) e o progresso (D4)."""
 
+    done: str
+    progress: str
 
-def progress_key(instance_type: str) -> str:
-    """A chave do progresso daquela fatia, sobrescrita a cada Execução (D4)."""
-    return f"{STATUS_PREFIX}{instance_type}_progress"
+    @classmethod
+    def of(cls, role: Role, instance_type: str) -> StatusKeys:
+        """As chaves que aquele papel dá aos seus objetos."""
+        stem = instance_type if role is Role.ENCODE else JUDGE_STEM
+        return cls(
+            done=f"{STATUS_PREFIX}{stem}_done",
+            progress=f"{STATUS_PREFIX}{stem}_progress",
+        )
 
 
 def check_done_marker(payload: Any, *, instance_id: str) -> DoneMarker | None:

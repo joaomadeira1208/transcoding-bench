@@ -10,7 +10,14 @@ from typing import Any
 
 import pytest
 from campaign_state import StateError, TrackedInstance, parse_state, serialize_state
-from conftest import ABSENT, make_campaign_state, make_done_marker, make_tracked_instance
+from conftest import (
+    ABSENT,
+    make_campaign_state,
+    make_done_marker,
+    make_progress,
+    make_tracked_instance,
+)
+from status_check import Role
 from vigilance import Vigilance
 
 TOP_FIELDS = ("bucket", "config_path", "commit", "total_timeout", "slice_keys", "instances")
@@ -44,6 +51,12 @@ def message(payload: Any) -> str:
     return str(raised.value)
 
 
+def only(**overrides: Any) -> TrackedInstance:
+    """O arquivo com uma entrada só, pelo parser, que é quem o `watch` chama."""
+    listed = [make_tracked_instance(**overrides)]
+    return parse_state(make_campaign_state(instances=listed)).instances[0]
+
+
 class TestTheFileTheRunWrites:
     def test_the_documented_shape_is_accepted(self):
         state = parse_state(make_campaign_state())
@@ -57,6 +70,7 @@ class TestTheFileTheRunWrites:
         state = parse_state(make_campaign_state())
 
         assert state.instances[0] == TrackedInstance(
+            role=Role.ENCODE,
             instance="c7g",
             instance_id="i-0123456789abcdef0",
             instance_type="c7g.xlarge",
@@ -193,3 +207,57 @@ class TestTheRoundTrip:
 
     def test_the_file_ends_in_a_newline(self):
         assert serialize_state(parse_state(make_campaign_state())).endswith("}\n")
+
+
+class TestTheRoleTheEntryCarries:
+    def test_the_entry_of_the_pilot_which_predates_the_field_is_an_encode(self):
+        assert only(role=ABSENT).role is Role.ENCODE
+
+    def test_the_file_of_the_pilot_is_rewritten_with_the_role_it_was_read_as(self):
+        state = parse_state(make_campaign_state(instances=[make_tracked_instance(role=ABSENT)]))
+
+        assert json.loads(serialize_state(state))["instances"][0]["role"] == "encode"
+
+    def test_the_role_survives_the_round_trip_of_a_watch_that_restarted(self):
+        state = parse_state(make_campaign_state(instances=[make_tracked_instance(role="judge")]))
+
+        assert parse_state(json.loads(serialize_state(state))) == state
+
+    def test_a_role_that_is_not_a_role_is_refused_by_index_and_name(self):
+        assert "instances[1].role" in message(deformed(role="juiz"))
+
+
+class TestTheStatusObjectsTheEntryNames:
+    def test_the_encode_names_them_after_the_instance_type_of_its_slice(self):
+        keys = only(instance_type="c7g.xlarge").status_keys
+
+        assert (keys.done, keys.progress) == (
+            "status/c7g.xlarge_done",
+            "status/c7g.xlarge_progress",
+        )
+
+    def test_the_judge_names_them_after_itself_and_not_after_its_instance_type(self):
+        keys = only(role="judge", instance_type="c7i.4xlarge").status_keys
+
+        assert (keys.done, keys.progress) == ("status/judge_done", "status/judge_progress")
+
+
+class TestTheProgressTheEntryReadsAndPrints:
+    def test_the_entry_reads_the_object_of_its_own_instance(self):
+        progress = only().read_progress(make_progress())
+
+        assert progress is not None
+        assert progress.runs_total == 21
+
+    def test_the_object_of_a_previous_attempt_is_not_this_entrys(self):
+        stale = make_progress(instance_id="i-0fedcba9876543210")
+
+        assert only().read_progress(stale) is None
+
+    def test_the_line_it_prints_carries_the_total_of_runs_of_its_own_slice(self):
+        each = only()
+
+        assert "21/36 runs" in each.render_progress(each.read_progress(make_progress()))
+
+    def test_the_entry_without_an_object_yet_still_has_a_line(self):
+        assert "sem progresso ainda" in only().render_progress(None)

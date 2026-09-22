@@ -31,6 +31,7 @@ from campaign_state import CampaignState, parse_state, serialize_state
 from command_output import S3Object, TruncatedListing
 from conftest import make_campaign_state, make_tracked_instance, real_config, real_pilot_config
 from scenario_plan import build_canonical_plan, build_instance_slices
+from status_check import Role
 from vigilance import Vigilance
 
 PREFLIGHT_PREFIX = "runs/preflight/"
@@ -191,6 +192,11 @@ def campaign_upload(config: Any, key: str) -> dict[str, Any]:
 
 
 class TestTheArchitectureAsTheStateFileGuardsIt:
+    def test_what_the_run_launches_is_an_encode(self):
+        each = full_campaign(real_pilot_config()).slices[0]
+
+        assert launched_instance(each, INSTANCE_ID).role is Role.ENCODE
+
     def test_it_is_born_bootstrapping_without_pid_and_without_marker(self):
         each = full_campaign(real_pilot_config()).slices[0]
 

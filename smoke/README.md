@@ -61,6 +61,9 @@ restringe o `SMOKE_BITSTREAM` do mesmo jeito — só o N-ésimo encode devolve o
 bitstream pedido, e os outros ficam com o default —, que é como uma Replicação
 diverge das outras quatro da mesma Instância, e `SMOKE_AWS_FAIL_KEY` restringe o
 do `aws` a uma chave, que é como só o objeto de progresso deixa de subir.
+`SMOKE_AWS_UPLOAD_DELAY` atrasa todo `s3 cp --recursive` por aqueles segundos:
+é o `aws` CLI que demora a subir o resultado, e é como se vê que o upload do Juiz
+não corre no resto do orçamento do output.
 
 O shim do `ffmpeg` atende três invocações, e a do Juiz **não** se discrimina pelo
 último argumento: o `-f null -` do `run_quality.sh` termina no mesmo `-` da

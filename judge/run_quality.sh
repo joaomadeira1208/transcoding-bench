@@ -14,6 +14,7 @@ AWS_COMMAND=aws
 # guarda: aquele número é o de uma campanha de quatro dias, e o Pass é de horas.
 OUTPUT_TIMEOUT_SECONDS=$((4 * 60 * 60))
 TOTAL_TIMEOUT_SECONDS=$((24 * 60 * 60))
+UPLOAD_TIMEOUT_SECONDS=$((5 * 60))
 
 RESULTS_PREFIX=quality/results
 PROGRESS_KEY=status/judge_progress
@@ -72,7 +73,7 @@ remaining_seconds() {
 # falho.
 guard() {
   guarded_pid=$1
-  start_watchdog "$guarded_pid" "$(remaining_seconds)"
+  start_watchdog "$guarded_pid" "$2"
 
   guarded_status=0
   wait "$guarded_pid" || guarded_status=$?
@@ -105,7 +106,7 @@ filtergraph() {
 
 download_output() {
   "$AWS_COMMAND" s3 cp "s3://$bucket/$key" "$local_output" &
-  guard $!
+  guard $! "$(remaining_seconds)"
 }
 
 measure_quality() {
@@ -116,12 +117,12 @@ measure_quality() {
     -i "$masters_dir/$master" \
     -filter_complex "$(filtergraph)" \
     -f null - >/dev/null 2>"$ffmpeg_log" &
-  guard $!
+  guard $! "$(remaining_seconds)"
 }
 
 upload_results() {
   "$AWS_COMMAND" s3 cp "$result_dir/" "s3://$bucket/$RESULTS_PREFIX/$run_id/" --recursive &
-  guard $!
+  guard $! "$UPLOAD_TIMEOUT_SECONDS"
 }
 
 # Projeção, e não campos remontados um a um: `jq` copia cada valor com o tipo que
@@ -198,6 +199,8 @@ judge_output() {
   fi
 
   finished_at=$(date -Iseconds)
+  local timed_out=false
+  ((SECONDS < output_deadline)) || timed_out=true
   write_judgement
 
   upload_results
@@ -208,7 +211,7 @@ judge_output() {
     fi
   fi
 
-  if ((SECONDS >= output_deadline)); then
+  if [[ $timed_out == true ]]; then
     log "$run_id: excedeu o timeout de ${OUTPUT_TIMEOUT_SECONDS}s (status $exit_code)"
   else
     log "$run_id: status $exit_code em $((SECONDS - started))s"

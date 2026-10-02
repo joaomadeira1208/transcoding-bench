@@ -148,7 +148,7 @@ ADR-0005 manda documentar. São quatro modos:
 - FFmpeg com status não-zero, o timeout por output incluído;
 - log do `libvmaf` ausente ou ilegível — um FFmpeg que sai zero sem deixar série
   por frame não julgou nada;
-- upload do resultado que falha, porque um julgamento que não chegou ao bucket
+- upload do resultado que falha ou estoura a janela dele, porque um julgamento que não chegou ao bucket
   não existe para o leitor.
 
 Os três primeiros entram no `judge.json` como `exit_code != 0`. O quarto **não**,
@@ -167,10 +167,17 @@ saber que o Pass acabou.
 As duas camadas locais são flags, com defaults operacionais e não do plano:
 
 - `--output-timeout <segundos>` (4 h): o **orçamento do output**, e não de cada
-  comando dele. O download, a passada do `libvmaf` e o upload correm sob o que
-  resta dele; o que estourar recebe SIGTERM, o output entra no `judge.json` como
-  falho e o laço segue. Um teto por comando deixaria um download que consumisse a
-  janela inteira seguido de um `libvmaf` com uma janela nova.
+  comando dele. O download e a passada do `libvmaf` correm sob o que resta dele;
+  o que estourar recebe SIGTERM, o output entra no `judge.json` como falho e o
+  laço segue. Um teto por comando deixaria um download que consumisse a janela
+  inteira seguido de um `libvmaf` com uma janela nova.
+
+O upload do resultado fica **fora** desse orçamento, com uma janela própria e
+fixa de 5 min. É ele que registra o output — inclusive o que estourou: no resto
+do orçamento, um `libvmaf` morto no limite deixaria o upload com 1 s, menos que a
+partida do `aws` CLI, e o output travado sumiria do bucket sem `judge.json` nem
+`ffmpeg.log`; um `libvmaf` que terminasse bem perto do limite perderia a medição
+do mesmo jeito.
 - `--total-timeout <segundos>` (24 h): conferido **antes de cada output**; ao
   estourar, o laço para, escreve o marcador com `capped` verdadeiro e sai com 1.
 

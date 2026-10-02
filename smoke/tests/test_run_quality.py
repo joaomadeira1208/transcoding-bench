@@ -62,6 +62,10 @@ PROGRESS_TYPES = {
 # travado morreu procura este `sleep` no `ps` da máquina inteira.
 HANG_S = f"3572.{os.getpid() % 1000}"
 
+# Mais que o `--output-timeout` inteiro do Pass travado: no resto do orçamento do
+# output, todo upload dele morreria antes de terminar.
+UPLOAD_DELAY_S = "2.5"
+
 # O output que os dois desvios escolhem — a falha induzida e o travamento.
 FIRST_JUDGEMENT = "1"
 SECOND_JUDGEMENT = "2"
@@ -159,7 +163,8 @@ def judged_with_a_failed_output(triaged, campaign, run_quality) -> Pass:
 
 @pytest.fixture(scope="session")
 def judged_with_a_hung_output(triaged, campaign, run_quality) -> Pass:
-    """O primeiro `libvmaf` trava, e o timeout por output vale 2 s."""
+    """O primeiro `libvmaf` trava, o timeout por output vale 2 s e todo upload
+    do resultado leva mais que isso."""
     return run_quality(
         campaign[ARM],
         triaged.plan(),
@@ -167,6 +172,7 @@ def judged_with_a_hung_output(triaged, campaign, run_quality) -> Pass:
         "2",
         SMOKE_FFMPEG_HANG=HANG_S,
         SMOKE_FFMPEG_NTH=FIRST_JUDGEMENT,
+        SMOKE_AWS_UPLOAD_DELAY=UPLOAD_DELAY_S,
     )
 
 
@@ -542,6 +548,16 @@ class TestOutputTimeout:
         assert codes[0] != 0
         assert codes[1:] == [0] * (len(judged.outputs()) - 1)
 
+    def test_the_hung_output_still_leaves_its_judgement_and_its_log_in_the_bucket(
+        self, judged_with_a_hung_output
+    ):
+        judged = judged_with_a_hung_output
+        hung = judged.outputs()[0]["run_id"]
+        uploaded = {path.name for path in judged.results(hung).iterdir()}
+
+        assert {JUDGE_FILENAME, FFMPEG_LOG} <= uploaded
+        assert judged.judgement(hung)["exit_code"] == 143
+
     def test_the_hung_ffmpeg_does_not_outlive_the_output(self, judged_with_a_hung_output):
         processes = subprocess.run(["ps", "-Ao", "args="], capture_output=True, text=True)
 
@@ -550,7 +566,7 @@ class TestOutputTimeout:
     def test_the_timeout_is_reported(self, judged_with_a_hung_output):
         judged = judged_with_a_hung_output
 
-        assert "excedeu o timeout de 2s" in judged.stderr
+        assert judged.stderr.count("excedeu o timeout de 2s") == 1
         assert judged.returncode != 0
 
     def test_the_marker_is_still_written(self, judged_with_a_hung_output):

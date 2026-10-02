@@ -15,11 +15,13 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from conftest import EXPERIMENT, REPO_ROOT, ROLE_ROOT, Execution
+from conftest import ARM, EXPERIMENT, REPO_ROOT, ROLE_ROOT, Execution, Pass
 
 pytestmark = pytest.mark.docker
 
 ACCEPTANCE = ROLE_ROOT / "acceptance.sh"
+JUDGE_ACCEPTANCE = ROLE_ROOT / "judge_acceptance.sh"
+FIXTURES_README = REPO_ROOT / "analysis" / "tests" / "fixtures" / "README.md"
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile"
 IMAGE_TAG = "transcoding-bench:acceptance"
 
@@ -29,6 +31,17 @@ TIME_BIN = "/usr/bin/time"
 
 CONTAINER_MASTERS = "/work/masters"
 CONTAINER_OUT = "/work/out"
+
+# O `$FFMPEG_COMMAND` do `run_quality.sh`, que o shim substituiu na camada de
+# baixo e que aqui volta a ser o binário.
+FFMPEG = "ffmpeg"
+VMAF_LOG = "vmaf.json"
+
+# O vídeo contra ele mesmo: o que separa isto de 100 é o `libvmaf`, não o clip.
+VMAF_FLOOR = 99
+SSIM_FLOOR = 0.999
+
+LOG_PATH = re.compile(r"log_path=[^:]+")
 
 # 5 s a 24 fps: curto o bastante para o ciclo caber em minutos, longo o bastante
 # para o `pidstat` a 1 Hz deixar mais de uma amostra.
@@ -114,6 +127,57 @@ def master_geometry(run: dict[str, Any]) -> dict[str, int]:
     return video["geometry"][run["input_res"]]
 
 
+def run_in_image(
+    image: str,
+    harness: Path,
+    out_dir: Path,
+    arguments: list[str],
+    *docker_options: str,
+) -> subprocess.CompletedProcess[str]:
+    """Roda um harness dentro da imagem e traz o `CONTAINER_OUT` dela para `out_dir`.
+
+    O script chega pelo stdin: um bind-mount dependeria de o diretório do
+    repositório estar entre os que a VM do Docker compartilha, que varia de
+    máquina para máquina.
+    """
+    container = f"acceptance-{uuid4().hex[:12]}"
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--name",
+                container,
+                *docker_options,
+                "--interactive",
+                image,
+                "bash",
+                "-s",
+                "--",
+                "--out-dir",
+                CONTAINER_OUT,
+                "--clip-seconds",
+                str(CLIP_SECONDS),
+                "--clip-fps",
+                str(CLIP_FPS),
+                *arguments,
+            ],
+            input=harness.read_text(encoding="utf-8"),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        subprocess.run(
+            ["docker", "cp", f"{container}:{CONTAINER_OUT}/.", str(out_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        subprocess.run(["docker", "rm", "--force", container], capture_output=True, check=False)
+    return result
+
+
 @pytest.fixture(scope="session")
 def image() -> str:
     subprocess.run(
@@ -134,58 +198,29 @@ def capture(tmp_path_factory: pytest.TempPathFactory, image: str, execute):
         clip = f"{CONTAINER_MASTERS}/{run['master']}"
         output = f"{CONTAINER_OUT}/output.{run['container']}"
         out_dir = tmp_path_factory.mktemp("capture")
-        container = f"acceptance-{uuid4().hex[:12]}"
 
-        try:
-            result = subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "--name",
-                    container,
-                    # Sem a capability o `perf_event_open` é recusado, e a cadeia
-                    # inteira sai não-zero antes de o encode começar.
-                    "--cap-add=PERFMON",
-                    "--interactive",
-                    image,
-                    # O script chega pelo stdin: um bind-mount dependeria de o
-                    # diretório do repositório estar entre os que a VM do Docker
-                    # compartilha, que varia de máquina para máquina.
-                    "bash",
-                    "-s",
-                    "--",
-                    "--out-dir",
-                    CONTAINER_OUT,
-                    "--clip",
-                    clip,
-                    "--clip-size",
-                    f"{geometry['width']}x{geometry['height']}",
-                    "--clip-seconds",
-                    str(CLIP_SECONDS),
-                    "--clip-fps",
-                    str(CLIP_FPS),
-                    "--pidstat-flags",
-                    pidstat_flags,
-                    "--pidstat-interval",
-                    pidstat_interval,
-                    "--muxer",
-                    run["bitstream_muxer"],
-                    "--",
-                    *instrumentation_chain(execution, clip, output),
-                ],
-                input=ACCEPTANCE.read_text(encoding="utf-8"),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            subprocess.run(
-                ["docker", "cp", f"{container}:{CONTAINER_OUT}/.", str(out_dir)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        finally:
-            subprocess.run(["docker", "rm", "--force", container], capture_output=True, check=False)
+        result = run_in_image(
+            image,
+            ACCEPTANCE,
+            out_dir,
+            [
+                "--clip",
+                clip,
+                "--clip-size",
+                f"{geometry['width']}x{geometry['height']}",
+                "--pidstat-flags",
+                pidstat_flags,
+                "--pidstat-interval",
+                pidstat_interval,
+                "--muxer",
+                run["bitstream_muxer"],
+                "--",
+                *instrumentation_chain(execution, clip, output),
+            ],
+            # Sem a capability o `perf_event_open` é recusado, e a cadeia inteira
+            # sai não-zero antes de o encode começar.
+            "--cap-add=PERFMON",
+        )
 
         return Capture(run=run, returncode=result.returncode, stderr=result.stderr, out_dir=out_dir)
 
@@ -284,3 +319,88 @@ class TestBitstream:
         digest = captured.artifact("output.sha256").strip()
 
         assert digest != hashlib.sha256(output_path(captured).read_bytes()).hexdigest()
+
+
+def judgement_argv(judged: Pass, clip: str) -> list[str]:
+    """O primeiro julgamento que o `run_quality.sh` montou, com os caminhos do
+    host trocados pelos do container e o clip nas duas entradas.
+
+    Sai do rastro do shim pelo mesmo motivo da cadeia do encode: o filtergraph é
+    o que o aceite existe para exercitar, e transcrevê-lo provaria este arquivo.
+    """
+    argv = [FFMPEG, *judged.argv("ffmpeg")[0]]
+    for index, argument in enumerate(argv):
+        if argument == "-i":
+            argv[index + 1] = clip
+        elif argument == "-filter_complex":
+            argv[index + 1] = LOG_PATH.sub(f"log_path={CONTAINER_OUT}/{VMAF_LOG}", argv[index + 1])
+    return argv
+
+
+@pytest.fixture(scope="session")
+def judged_by_the_shim(triaged, campaign, run_quality) -> Pass:
+    return run_quality(campaign[ARM], triaged.plan())
+
+
+@pytest.fixture(scope="session")
+def judged_for_real(
+    tmp_path_factory: pytest.TempPathFactory, image: str, judged_by_the_shim: Pass, capture_dir
+) -> Capture:
+    """O `libvmaf` de verdade sobre o clip contra ele mesmo, na geometria do
+    output que o shim julgou primeiro — o `scale=` do filtergraph vira identidade
+    e fica no argv como o bash o montou."""
+    output = judged_by_the_shim.outputs()[0]
+    clip = f"{CONTAINER_MASTERS}/{output['master']}"
+    out_dir = tmp_path_factory.mktemp("judge-capture")
+
+    result = run_in_image(
+        image,
+        JUDGE_ACCEPTANCE,
+        out_dir,
+        [
+            "--clip",
+            clip,
+            "--clip-size",
+            f"{output['output_width']}x{output['output_height']}",
+            "--",
+            *judgement_argv(judged_by_the_shim, clip),
+        ],
+    )
+
+    captured = Capture(
+        run=output, returncode=result.returncode, stderr=result.stderr, out_dir=out_dir
+    )
+    if capture_dir is not None and captured.wrote(VMAF_LOG):
+        shutil.copyfile(out_dir / VMAF_LOG, capture_dir / VMAF_LOG)
+    return captured
+
+
+def vmaf_log(captured: Capture) -> dict[str, Any]:
+    return json.loads(captured.artifact(VMAF_LOG))
+
+
+class TestJudge:
+    def test_the_real_ffmpeg_accepted_the_argv_the_judge_builds(self, judged_for_real):
+        assert judged_for_real.returncode == 0, judged_for_real.artifact("ffmpeg.log")
+
+    def test_the_log_has_one_entry_per_frame_of_the_clip(self, judged_for_real):
+        assert len(vmaf_log(judged_for_real)["frames"]) == CLIP_SECONDS * CLIP_FPS
+
+    def test_the_vmaf_of_the_clip_against_itself_is_close_to_100(self, judged_for_real):
+        log = vmaf_log(judged_for_real)
+        scores = [frame["metrics"]["vmaf"] for frame in log["frames"]]
+
+        assert all(isinstance(score, float) for score in scores)
+        assert log["pooled_metrics"]["vmaf"]["mean"] >= VMAF_FLOOR
+
+    def test_the_ssim_of_the_clip_against_itself_is_close_to_1(self, judged_for_real):
+        log = vmaf_log(judged_for_real)
+
+        assert log["pooled_metrics"]["float_ssim"]["mean"] >= SSIM_FLOOR
+
+    def test_the_fixture_readme_names_the_libvmaf_of_the_image(self, judged_for_real):
+        # O bump do `libvmaf` no Dockerfile é a hora de regenerar o `vmaf.json`, e
+        # é aqui que a regeneração esquecida aparece.
+        version = json.loads(judged_for_real.artifact("versions.json"))["libvmaf"]
+
+        assert f"`libvmaf` {version}" in FIXTURES_README.read_text(encoding="utf-8")

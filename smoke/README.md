@@ -164,7 +164,7 @@ apagar — um representante por bitstream julgado, dois por Cenário; as cópias
 deles e os seis warm-ups. Com `--apply` somem exatamente esses 32 `output.mkv`,
 todo outro objeto fica byte a byte, e a decisão impressa é a mesma de sem
 `--apply`. Com o segundo julgamento falhado, toda cópia daquele bitstream fica
-e as dos outros vão; sem `status/judge_done`, o `clean` recusa nomeando o
+e as dos outros vão; sem `status/judge_done`, ou com um inválido, o `clean` recusa nomeando o
 marcador e não apaga nada; com um `s3 rm` falhado, a chave é nomeada, o status
 é não-zero e as outras 31 são apagadas assim mesmo.
 

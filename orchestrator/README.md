@@ -1055,8 +1055,9 @@ as cópias apagadas seriam as de um representante que o Juiz nunca mediu.
 **A decisão é a função pura do `retention.py`**, um veredito por `meta.json`
 do bucket, nesta precedência:
 
-1. representante do plano cujo `judge.json` tem `exit_code == 0`: **mantém** —
-   é o que o Juiz mediu, e nem uma retomada posterior ao triage o tira;
+1. representante do plano: **mantém** — com `judge.json` de `exit_code == 0` é
+   o que o Juiz mediu, e sem julgamento ou julgado com falha é o que o próximo
+   Pass baixa; nem uma retomada posterior ao triage o tira;
 2. warm-up: **apaga**;
 3. run falho (`exit_code != 0`): **apaga**;
 4. run superado pela dedup (`winning_replications`, a mesma do triage): **apaga**;

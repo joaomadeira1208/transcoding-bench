@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from external import QUALITY_RESULTS_PREFIX, RUNS_PREFIX
+from external import QUALITY_RESULTS_PREFIX, RUN_HASH_FILENAME, RUNS_PREFIX
 from judgement_check import JUDGE_FILENAME, JudgementError, check_judgement
 from resume_plan import winning_replications
 
@@ -68,31 +68,35 @@ def decide(
 ) -> tuple[Retention, ...]:
     """Um veredito por Execução do bucket, na ordem dos `meta.json`.
 
-    O representante julgado vence qualquer outro motivo: é o `output.mkv` que o
-    Juiz mediu, e mesmo superado por uma retomada posterior ao triage ele é o
-    que o artigo reporta.
+    O representante do plano vence qualquer outro motivo: superado por uma
+    retomada posterior ao triage, o julgado com sucesso é ainda o que o artigo
+    reporta, e o não julgado ou julgado com falha é ainda o que o próximo Pass
+    baixa.
     """
     metas = list(metas)
     present = {meta["run_id"] for meta in metas}
-    judged: dict[tuple[str, str], str] = {}
-    failed: set[tuple[str, str]] = set()
+    bitstreams: dict[tuple[str, str], Verdict] = {}
+    representatives: dict[str, Verdict] = {}
     for output in plan["outputs"]:
-        bitstream = (scenario_of(output["scenario_id"]), output["sha256"])
         judgement = judgements.get(output["run_id"])
         _require_same_bitstream(output, present, hashes, judgement)
         if judgement is None:
+            representatives[output["run_id"]] = Verdict.KEEP_UNJUDGED
             continue
+        bitstream = (scenario_of(output["scenario_id"]), output["sha256"])
         if judgement["exit_code"] == 0:
-            judged[bitstream] = output["run_id"]
+            representatives[output["run_id"]] = Verdict.KEEP_JUDGED
+            bitstreams[bitstream] = Verdict.DELETE_COPY
         else:
-            failed.add(bitstream)
+            representatives[output["run_id"]] = Verdict.KEEP_JUDGEMENT_FAILED
+            bitstreams.setdefault(bitstream, Verdict.KEEP_JUDGEMENT_FAILED)
 
-    representatives = frozenset(judged.values())
     winners = winning_replications(metas)
     return tuple(
         Retention(
             key=output_key(meta),
-            verdict=_verdict(meta, winners, hashes, representatives, judged, failed),
+            verdict=representatives.get(meta["run_id"])
+            or _verdict(meta, winners, hashes, bitstreams),
         )
         for meta in metas
     )
@@ -174,12 +178,8 @@ def _verdict(
     meta: Mapping[str, Any],
     winners: Mapping[str, Mapping[str, Any]],
     hashes: Mapping[str, str],
-    representatives: frozenset[str],
-    judged: Mapping[tuple[str, str], str],
-    failed: set[tuple[str, str]],
+    bitstreams: Mapping[tuple[str, str], Verdict],
 ) -> Verdict:
-    if meta["run_id"] in representatives:
-        return Verdict.KEEP_JUDGED
     if meta["warmup"]:
         return Verdict.DELETE_WARMUP
     if meta["exit_code"] != 0:
@@ -190,12 +190,7 @@ def _verdict(
     digest = hashes.get(meta["run_id"])
     if digest is None:
         return Verdict.KEEP_NO_HASH
-    bitstream = (scenario_of(meta["scenario_id"]), digest)
-    if bitstream in judged:
-        return Verdict.DELETE_COPY
-    if bitstream in failed:
-        return Verdict.KEEP_JUDGEMENT_FAILED
-    return Verdict.KEEP_UNJUDGED
+    return bitstreams.get((scenario_of(meta["scenario_id"]), digest), Verdict.KEEP_UNJUDGED)
 
 
 def _require_same_bitstream(
@@ -216,7 +211,7 @@ def _require_same_bitstream(
         raise CleanError(f"{where}: representante do plano sem meta.json neste bucket")
     if hashes.get(run_id) != output["sha256"]:
         raise CleanError(
-            f"{where}/output.sha256: {hashes.get(run_id)!r} não é o bitstream que o plano "
+            f"{where}/{RUN_HASH_FILENAME}: {hashes.get(run_id)!r} não é o bitstream que o plano "
             f"nomeia ({output['sha256']})"
         )
     if judgement is not None and judgement["sha256"] != output["sha256"]:

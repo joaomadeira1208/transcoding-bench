@@ -85,6 +85,13 @@ def applied_without_judge_done(judged, plan_path, clean) -> Clean:
 
 
 @pytest.fixture(scope="session")
+def applied_with_an_invalid_judge_done(judged, plan_path, clean) -> Clean:
+    return clean(
+        judged, plan_path, APPLY, prepare=lambda bucket: (bucket / JUDGE_DONE).write_text("{}")
+    )
+
+
+@pytest.fixture(scope="session")
 def applied_with_a_failed_removal(judged, plan_path, triaged, clean) -> Clean:
     """O `s3 rm` de uma cópia falha; os outros seguem."""
     return clean(judged, plan_path, APPLY, SMOKE_AWS_FAIL_KEY=failing_removal(triaged))
@@ -188,6 +195,18 @@ class TestWithoutJudgeDone:
     def test_nothing_is_deleted(self, applied_without_judge_done):
         assert applied_without_judge_done.objects() == applied_without_judge_done.before
         assert removals(applied_without_judge_done) == []
+
+
+class TestAnInvalidJudgeDone:
+    def test_it_refuses_naming_the_marker(self, applied_with_an_invalid_judge_done):
+        assert applied_with_an_invalid_judge_done.returncode != 0
+        assert JUDGE_DONE in applied_with_an_invalid_judge_done.stderr
+
+    def test_nothing_is_deleted(self, applied_with_an_invalid_judge_done):
+        assert applied_with_an_invalid_judge_done.objects() == (
+            applied_with_an_invalid_judge_done.before
+        )
+        assert removals(applied_with_an_invalid_judge_done) == []
 
 
 class TestAFailedRemoval:

@@ -288,6 +288,29 @@ class TestWhatIsKeptWhole:
 
         assert verdicts(decision)[key_of(newer)] is Verdict.KEEP_UNJUDGED
 
+    @pytest.mark.parametrize(
+        ("exit_code", "verdict"),
+        [(1, Verdict.KEEP_JUDGEMENT_FAILED), (None, Verdict.KEEP_UNJUDGED)],
+    )
+    def test_a_representative_superseded_after_the_triage_is_kept_until_judged(
+        self, bucket, exit_code, verdict
+    ):
+        plan = bucket.triage()
+        representative = plan["outputs"][0]
+        bucket.add(
+            representative["scenario_id"],
+            started_at=LATE,
+            digest=representative["sha256"],
+            instance=representative["instance"],
+        )
+        judgements = judged(plan, **{representative["run_id"]: exit_code or 0})
+        if exit_code is None:
+            del judgements[representative["run_id"]]
+
+        decision = decide(plan, bucket.metas, bucket.hashes, judgements)
+
+        assert verdicts(decision)[key_of(representative["run_id"])] is verdict
+
     def test_a_winner_without_output_sha256(self, bucket):
         plan = bucket.triage()
         meta = bucket.meta("libx264_1080p_1080p_bbb_c7a_rep4")

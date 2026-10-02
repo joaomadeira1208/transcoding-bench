@@ -9,15 +9,16 @@ import json
 from typing import Any
 
 import pytest
-from campaign_state import StateError, TrackedInstance, parse_state, serialize_state
+from campaign_state import StateError, TrackedInstance, appended, parse_state, serialize_state
 from conftest import (
     ABSENT,
     make_campaign_state,
     make_done_marker,
+    make_judge_progress,
     make_progress,
     make_tracked_instance,
 )
-from status_check import Role
+from status_check import Role, StatusError
 from vigilance import Vigilance
 
 TOP_FIELDS = ("bucket", "config_path", "commit", "total_timeout", "slice_keys", "instances")
@@ -77,6 +78,8 @@ class TestTheFileTheRunWrites:
             pid=4242,
             block_count=6,
             runs_total=36,
+            commit="ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900",
+            total_timeout=120 * 60 * 60,
             state=Vigilance.RUNNING,
             outcome=None,
         )
@@ -160,6 +163,9 @@ class TestTheFieldsItRefuses:
             ("block_count", "6"),
             ("block_count", 6.0),
             ("runs_total", True),
+            ("commit", ""),
+            ("total_timeout", 0),
+            ("total_timeout", "86400"),
             ("state", "acordada"),
             ("state", None),
             ("outcome", "done"),
@@ -261,3 +267,106 @@ class TestTheProgressTheEntryReadsAndPrints:
 
     def test_the_entry_without_an_object_yet_still_has_a_line(self):
         assert "sem progresso ainda" in only().render_progress(None)
+
+
+class TestTheLaunchTheEntryCameFrom:
+    def test_the_entry_of_the_pilot_which_predates_them_takes_the_launch_of_the_file(self):
+        state = parse_state(
+            make_campaign_state(
+                commit="0" * 40,
+                total_timeout=7200,
+                instances=[make_tracked_instance(commit=ABSENT, total_timeout=ABSENT)],
+            )
+        )
+
+        assert (state.instances[0].commit, state.instances[0].total_timeout) == ("0" * 40, 7200)
+
+    def test_the_file_of_the_pilot_is_rewritten_with_what_it_was_read_as(self):
+        listed = [make_tracked_instance(commit=ABSENT, total_timeout=ABSENT)]
+        state = parse_state(make_campaign_state(instances=listed))
+
+        rewritten = json.loads(serialize_state(state))["instances"][0]
+
+        assert (rewritten["commit"], rewritten["total_timeout"]) == (
+            state.commit,
+            state.total_timeout,
+        )
+
+    def test_an_entry_launched_on_another_commit_keeps_its_own(self):
+        listed = [make_tracked_instance(commit="1" * 40, total_timeout=86400)]
+        entry = parse_state(make_campaign_state(instances=listed)).instances[0]
+
+        assert (entry.commit, entry.total_timeout) == ("1" * 40, 86400)
+
+
+class TestTheJudgeEntryReadsAndPrintsItsOwnProgress:
+    def test_the_judge_reads_the_object_of_the_judge(self):
+        progress = only(role="judge").read_progress(make_judge_progress())
+
+        assert progress is not None
+        assert progress.output_index == 7
+
+    def test_the_object_of_a_previous_pass_is_not_this_judges(self):
+        stale = make_judge_progress(instance_id="i-0fedcba9876543210")
+
+        assert only(role="judge").read_progress(stale) is None
+
+    def test_the_progress_of_an_encode_is_refused_by_the_reader_of_the_judge(self):
+        with pytest.raises(StatusError, match="output_index"):
+            only(role="judge").read_progress(make_progress())
+
+    def test_the_line_it_prints_is_the_line_of_the_judge(self):
+        judge = only(role="judge", instance="judge")
+
+        line = judge.render_progress(judge.read_progress(make_judge_progress()))
+
+        assert "output  7/13" in line
+
+    def test_the_judge_without_an_object_yet_says_no_output_was_judged(self):
+        assert "nenhum output julgado" in only(role="judge").render_progress(None)
+
+
+class TestTheEntryAppendedToTheFile:
+    def judge(self) -> TrackedInstance:
+        return only(
+            role="judge",
+            instance="judge",
+            instance_id="i-0aaaaaaaaaaaaaaaa",
+            instance_type="c7i.4xlarge",
+            pid=None,
+            block_count=0,
+            runs_total=13,
+            commit="1" * 40,
+            total_timeout=86400,
+            state="bootstrapping",
+        )
+
+    def test_the_campaign_already_recorded_is_preserved(self):
+        campaign = parse_state(make_campaign_state())
+
+        state = appended(campaign, self.judge())
+
+        assert state.instances[:-1] == campaign.instances
+        assert (state.bucket, state.commit, state.total_timeout, state.slice_keys) == (
+            campaign.bucket,
+            campaign.commit,
+            campaign.total_timeout,
+            campaign.slice_keys,
+        )
+
+    def test_the_judge_is_the_last_entry(self):
+        state = appended(parse_state(make_campaign_state()), self.judge())
+
+        assert state.instances[-1] == self.judge()
+
+    def test_the_appended_file_round_trips_through_the_watch(self):
+        state = appended(parse_state(make_campaign_state()), self.judge())
+
+        assert parse_state(json.loads(serialize_state(state))) == state
+
+    def test_a_file_born_with_the_judge_alone_round_trips_too(self):
+        state = appended(
+            parse_state(make_campaign_state(instances=[], slice_keys=[])), self.judge()
+        )
+
+        assert parse_state(json.loads(serialize_state(state))).instances == (self.judge(),)

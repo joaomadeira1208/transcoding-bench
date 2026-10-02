@@ -584,6 +584,8 @@ _TRACKED_INSTANCE: dict[str, Any] = {
     "pid": 4242,
     "block_count": 6,
     "runs_total": 36,
+    "commit": _VALID_META["commit"],
+    "total_timeout": 120 * 60 * 60,
     "state": "running",
     "outcome": None,
 }

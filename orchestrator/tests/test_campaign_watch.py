@@ -20,6 +20,7 @@ from campaign_watch import (
     settled_line,
     summary_lines,
     watch_deadline_seconds,
+    watched,
 )
 from conftest import make_campaign_state, make_done_marker, make_progress, make_tracked_instance
 from instance_launch import BOOTSTRAP_TIMEOUT_SECONDS
@@ -209,3 +210,87 @@ class TestTheLineOfEachPoll:
         settled = settled_line(architecture(**FINISHED))
 
         assert settled.startswith(" " * HOUR_WIDTH)
+
+
+JUDGE_ID = "i-0aaaaaaaaaaaaaaaa"
+
+
+def judge(**overrides: Any) -> dict[str, Any]:
+    entry = {
+        "role": "judge",
+        "instance": "judge",
+        "instance_id": JUDGE_ID,
+        "instance_type": "c7i.4xlarge",
+        **overrides,
+    }
+    return make_tracked_instance(**entry)
+
+
+def judged(instance_id: str = JUDGE_ID, **marker: Any) -> dict[str, Any]:
+    """O Juiz que saiu do laço pelo marcador dele."""
+    return judge(
+        instance_id=instance_id,
+        state=Vigilance.FINISHED.value,
+        outcome=make_done_marker(instance_id=instance_id, **marker),
+    )
+
+
+CAMPAIGN = (
+    make_tracked_instance(instance="c7g", **FINISHED),
+    make_tracked_instance(instance="c7i", state=Vigilance.DEAD.value, outcome=None),
+)
+
+
+class TestTheLaunchTheVigilanceAnswersFor:
+    def test_a_campaign_alone_is_watched_whole(self):
+        launched = state(*CAMPAIGN)
+
+        assert watched(launched) == launched.instances
+
+    def test_the_judge_appended_to_the_campaign_is_watched_alone(self):
+        launched = state(*CAMPAIGN, judge())
+
+        assert watched(launched) == launched.instances[-1:]
+
+    def test_a_file_born_with_the_judge_alone_watches_the_judge(self):
+        launched = state(judge())
+
+        assert watched(launched) == launched.instances
+
+    def test_a_repeated_pass_watches_only_the_last_judge(self):
+        launched = state(*CAMPAIGN, judged("i-0bbbbbbbbbbbbbbbb"), judge())
+
+        assert watched(launched) == launched.instances[-1:]
+
+    def test_the_dead_architecture_of_the_campaign_is_not_a_reason_of_the_judge(self):
+        launched = state(*CAMPAIGN, judged())
+
+        assert failure_reasons(watched(launched)) == ()
+
+    def test_a_file_without_any_entry_watches_nothing(self):
+        assert watched(state()) == ()
+
+
+class TestTheExitCodeOfTheJudge:
+    def test_the_judge_that_judged_every_output_is_no_reason_at_all(self):
+        assert failure_reasons(state(judged()).instances) == ()
+
+    def test_a_failed_output_is_a_reason_naming_the_judge_and_its_loop(self):
+        reasons = failure_reasons(state(judged(runs_failed=2, exit_status=1)).instances)
+
+        assert reasons != ()
+        assert all("judge" in reason for reason in reasons)
+        assert any("run_quality.sh" in reason for reason in reasons)
+        assert not any("run_all.sh" in reason for reason in reasons)
+
+    def test_the_cap_of_the_pass_is_a_reason(self):
+        assert failure_reasons(state(judged(capped=True, exit_status=1)).instances) != ()
+
+    def test_the_judge_that_died_is_a_reason(self):
+        reasons = failure_reasons(state(judge(state="dead", outcome=None)).instances)
+
+        assert len(reasons) == 1
+        assert "judge" in reasons[0]
+
+    def test_the_deadline_that_blew_over_the_judge_is_a_reason(self):
+        assert failure_reasons(state(judged()).instances, deadline_blown=True) != ()

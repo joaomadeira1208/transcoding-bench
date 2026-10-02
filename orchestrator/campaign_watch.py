@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 from campaign_state import CampaignState, TrackedInstance
-from status_check import HOUR_WIDTH, INSTANCE_WIDTH, Progress, hour_of
+from status_check import HOUR_WIDTH, INSTANCE_WIDTH, JudgeProgress, Progress, Role, hour_of
 from vigilance import UNANSWERED_POLL_LIMIT, Vigilance
 
 POLL_INTERVAL_SECONDS = 300.0
@@ -21,6 +21,18 @@ RESUME_OUT_DIR = "~/work/resume"
 
 ORCHESTRATOR_CLI = "python orchestrator/orchestrator.py"
 RESUME_CLI = "python orchestrator/resume.py"
+
+
+def watched(state: CampaignState) -> tuple[TrackedInstance, ...]:
+    """As entradas do último lançamento do arquivo: é sobre elas que a vigilância responde.
+
+    O Juiz é acrescentado ao arquivo da campanha (D17 da Spec 5), e a arquitetura
+    que morreu dias antes já teve o veredito dela: contada de novo, faria todo
+    Pass sobre uma campanha retomada sair com erro.
+    """
+    if state.instances and state.instances[-1].role is Role.JUDGE:
+        return state.instances[-1:]
+    return tuple(each for each in state.instances if each.role is Role.ENCODE)
 
 
 def watch_deadline_seconds(*, total_timeout: int, bootstrap_timeout: float) -> float:
@@ -37,7 +49,7 @@ def poll_line(
     each: TrackedInstance,
     *,
     state: Vigilance,
-    progress: Progress | None,
+    progress: Progress | JudgeProgress | None,
     unanswered_polls: int = 0,
 ) -> str:
     """A linha daquela arquitetura neste poll — a das mortas e das mudas inclusive."""
@@ -85,12 +97,13 @@ def _reasons(each: TrackedInstance) -> Iterator[str]:
     if each.outcome is None:
         yield f"{each.instance}: sem marcador, estado {each.state.value}"
         return
+    loop = _LOOPS[each.role]
     if each.outcome.runs_failed:
-        yield f"{each.instance}: {each.outcome.runs_failed} run(s) da fatia com falha"
+        yield f"{each.instance}: {each.outcome.runs_failed} run(s) com falha"
     if each.outcome.capped:
-        yield f"{each.instance}: o teto do run_all.sh parou a fatia antes do fim"
+        yield f"{each.instance}: o teto do {loop} parou o laço antes do fim"
     if each.outcome.exit_status:
-        yield f"{each.instance}: o run_all.sh saiu com status {each.outcome.exit_status}"
+        yield f"{each.instance}: o {loop} saiu com status {each.outcome.exit_status}"
 
 
 def _summary(each: TrackedInstance) -> str:
@@ -118,6 +131,8 @@ def _note(state: Vigilance, unanswered_polls: int) -> str:
         )
     return _NOTES[state]
 
+
+_LOOPS = {Role.ENCODE: "run_all.sh", Role.JUDGE: "run_quality.sh"}
 
 _NOTES = {
     Vigilance.BOOTSTRAPPING: "bootstrap em curso, ainda sem PID",

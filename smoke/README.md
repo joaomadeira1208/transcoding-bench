@@ -84,7 +84,7 @@ disso, toda versão de cada objeto subido avulso em
 S3, e `status/{instance_type}_progress` é sobrescrito a cada Execução.
 
 O shim do `aws` traduz `s3 cp` — nos dois sentidos —, `s3 sync` no sentido
-bucket → disco e `s3api list-objects-v2` em operações sobre
+bucket → disco, `s3 rm` e `s3api list-objects-v2` em operações sobre
 `$SMOKE_S3_ROOT/<bucket>/<key>`. O que se testa com ele é que o layout de
 prefixos da ADR-0011 casa entre quem escreve (o bash) e quem lê (o
 `list-objects-v2` do Orquestrador e o `s3 sync` da retomada) — nunca semântica do
@@ -96,7 +96,11 @@ em que a CLI de verdade os aplica — o último padrão que casa decide —, por
 um par deles que define o que a retomada baixa, e um trio o que o triage do Pass
 de qualidade baixa. Prefixo sem objeto desce zero arquivos e sai com status zero;
 bucket inexistente falha, como o `NoSuchBucket` da CLI, que é o que o `resume.py`
-separa de "campanha que ainda não começou".
+separa de "campanha que ainda não começou". O `s3 rm` apaga um objeto por
+invocação, e apagar uma chave que não existe sai com status zero, como o
+`DeleteObject` do S3: o `clean` decide sem listar o bucket. O
+`SMOKE_AWS_FAIL_KEY` vale para ele também, que é como um `s3 rm` falha no meio
+da limpeza.
 
 **A retomada decide sobre o que o bash escreveu.** O `resume.py` é invocado como
 caixa-preta sobre o bucket falso que o `run_all.sh` acabou de encher, com o
@@ -148,6 +152,21 @@ dirigido de verdade sobre o `plan.json` daquele triage, com `ffmpeg` e `aws`
 shimados, e é o elo que fecha o Pass: o que o Python decidiu vira argv de FFmpeg
 sem ninguém transcrever nada no meio. A campanha de três laços e o triage sobre
 ela são fixtures do `conftest.py` justamente porque têm dois consumidores.
+
+**A retenção apaga sobre o que o Juiz julgou.** O `orchestrator.py clean` entra
+como caixa-preta sobre o bucket que os três laços encheram e o `run_quality.sh`
+julgou, com o `plan.json` daquele triage e um `--infra` mínimo, cada caminho
+sobre uma **cópia** do bucket: com `--apply` ele apaga, e o bucket julgado é o
+mesmo para todos. É o lugar em que um erro custa o dado do artigo, e a
+asserção é sobre o bucket inteiro, objeto a objeto, antes e depois. Sem
+`--apply` nada some e nenhum `s3 rm` sai, e a decisão conta 4 a manter e 32 a
+apagar — um representante por bitstream julgado, dois por Cenário; as cópias
+deles e os seis warm-ups. Com `--apply` somem exatamente esses 32 `output.mkv`,
+todo outro objeto fica byte a byte, e a decisão impressa é a mesma de sem
+`--apply`. Com o segundo julgamento falhado, toda cópia daquele bitstream fica
+e as dos outros vão; sem `status/judge_done`, o `clean` recusa nomeando o
+marcador e não apaga nada; com um `s3 rm` falhado, a chave é nomeada, o status
+é não-zero e as outras 31 são apagadas assim mesmo.
 
 A asserção central é a do **argv**, e ela é feita contra a **definição** — a
 geometria do tier daquele vídeo, o `scale_flags` do `[encode]`, o modelo do

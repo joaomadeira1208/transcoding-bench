@@ -430,7 +430,7 @@ recusá-la amarraria um `apply` novo a um checkout novo do Orquestrador.
 Um subcomando por passo da campanha, e o `--infra` antes dele, com o caminho do
 arquivo acima. Roda na instância do Orquestrador, **dentro de `tmux`**: os
 subcomandos bloqueiam por horas e a sessão SSH que cair não pode levar o passo
-junto. São quatro:
+junto. São cinco:
 
     python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
@@ -439,6 +439,8 @@ junto. São quatro:
         --config config/pilot.toml --bucket <piloto>
     python orchestrator/orchestrator.py --infra ~/work/infra.json watch
     python orchestrator/orchestrator.py --infra ~/work/infra.json watch --abort
+    python orchestrator/orchestrator.py --infra ~/work/infra.json clean \
+        --bucket <piloto> --plan ~/work/quality/plan.json [--apply]
 
 A escada em que eles se encaixam, cada degrau disparado pelo pesquisador
 (ADR-0022): smoke local → aceite com Docker → preparação dos Masters → **gate
@@ -1016,3 +1018,88 @@ sobre um plano que não é o que o Juiz leu. O `s3_sync_run_metas_and_hashes` é
 argv e fica sem teste, como o resto do adaptador; a prova de que a amostragem é
 decidida sobre `meta.json` e `output.sha256` que o bash de verdade escreveu é a
 caixa-preta do `smoke/`.
+
+## A retenção: `clean`
+
+A única operação destrutiva da pipeline (ADR-0007, D22 da Spec 5). Roda na
+instância do Orquestrador, depois de o Juiz terminar, com o plano que ele julgou:
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json clean \
+        --bucket <piloto> --plan ~/work/quality/plan.json
+    python orchestrator/orchestrator.py --infra ~/work/infra.json clean \
+        --bucket <piloto> --plan ~/work/quality/plan.json --apply
+
+**A entrada é o bucket, não o que o triage lembrava.** O `--plan` passa pelo
+`check_plan`; o `status/judge_done` é exigido e validado campo a campo pelo
+`check_judge_done`; os `meta.json` e os `output.sha256` descem pelo mesmo
+`s3_sync_run_metas_and_hashes` do triage e são lidos pelo `run_tree`; e os
+`quality/results/*/judge.json` descem por um `s3_sync_judgements` filtrado e
+passam, um a um, pelo `judgement_check`. Só o nível do `run_id` conta: a
+evidência do `preflight` em `quality/results/preflight/<instance-id>/` não
+julgou output do plano. Um `judge.json` cujo `run_id` não é o do diretório dele
+é recusado nomeando a chave.
+
+**Sem `status/judge_done` válido, recusa.** Ausente, ou com um campo fora do
+contrato, é o Juiz no meio do Pass. O marcador não tem identidade a conferir —
+o `clean` não tem a entrada que lançou o Juiz —, então "válido" inclui a ordem:
+um `judge.json` que terminou **depois** do `finished_at` do marcador é o Pass
+seguinte em andamento, com o marcador do anterior ainda no bucket, e também
+recusa, nomeando o `judge.json`.
+
+**O plano, o bucket e o Juiz têm de falar do mesmo bitstream.** Um
+representante do plano sem `meta.json` no bucket, com um `output.sha256` que não
+é o `sha256` do plano, ou com um `judge.json` que julgou outro `sha256`, recusa
+antes de qualquer decisão: é o `--plan` de outro triage ou de outro bucket, e
+as cópias apagadas seriam as de um representante que o Juiz nunca mediu.
+
+**A decisão é a função pura do `retention.py`**, um veredito por `meta.json`
+do bucket, nesta precedência:
+
+1. representante do plano cujo `judge.json` tem `exit_code == 0`: **mantém** —
+   é o que o Juiz mediu, e nem uma retomada posterior ao triage o tira;
+2. warm-up: **apaga**;
+3. run falho (`exit_code != 0`): **apaga**;
+4. run superado pela dedup (`winning_replications`, a mesma do triage): **apaga**;
+5. Replicação vencedora sem `output.sha256`: **mantém**;
+6. mesmo Cenário e mesmo `sha256` de um representante julgado com sucesso:
+   **apaga** — é cópia bit-idêntica;
+7. mesmo Cenário e mesmo `sha256` de um representante julgado com falha:
+   **mantém**;
+8. o resto — bitstream sem julgamento ou fora do plano: **mantém**.
+
+O Cenário é o da ADR-0025, a `scenario_id` sem a arquitetura e sem o sufixo: o
+mesmo `sha256` em outro Cenário não é cópia de nada. A chave de cada veredito é
+`runs/{run_id}/output.{container}`, com o `container` do `meta.json` exigido
+alfanumérico — a única forma de chave que o `clean` produz. Os outros seis
+artefatos e tudo fora de `runs/` nunca entram na decisão, e o `DeleteObject` do
+Orquestrador não os alcança de qualquer forma (ADR-0016).
+
+**Sem `--apply`, imprime a decisão e não apaga nada.** No `stdout`, um bloco por
+motivo com a contagem e a chave de cada um, e o total na última linha:
+
+    manter: representante julgado com exit_code 0 (13)
+      runs/623966c6-14f8-4919-841d-36c0f49edc30/output.mkv
+      ...
+    apagar: cópia bit-idêntica de um representante julgado (77)
+      ...
+    apagar: warm-up (18)
+      ...
+    13 a manter, 95 a apagar
+
+A decisão **não conhece bytes** e não lista `runs/`: os bytes estão no
+`list-objects-v2`, que trunca numa campanha de mil objetos, e a chave de um run
+falho que nunca subiu `output.mkv` sai na lista do mesmo jeito — apagar o que
+não existe é status zero no S3. O único `list-objects-v2` é o do marcador.
+
+**Com `--apply`, um `s3 rm` por chave**, pelo adaptador `s3_rm`, até a última:
+uma falha não poupa as outras. As falhas saem nomeadas no `stderr` ao fim, e
+qualquer uma faz o status ser 1; rodar de novo é seguro, porque a decisão sobre
+o bucket já parcialmente limpo é a mesma. A decisão impressa é a mesma com e
+sem `--apply` — é a mesma função, chamada antes de o flag ser olhado.
+
+Status 1 é recusa — marcador ausente, inválido ou mais velho que um julgamento;
+plano, `meta.json` ou `judge.json` inválido; plano de outro bucket — ou `s3 rm`
+falho; 0 é a decisão impressa, e com `--apply` executada inteira. O que ganha
+teste é a decisão, a leitura dos `judge.json`, a ordem do marcador e o leitor
+dele; o laço do subcomando é escrito direto, e a prova de que o predicado vale
+sobre o que o bash e o Juiz escreveram é a caixa-preta do `smoke/`.

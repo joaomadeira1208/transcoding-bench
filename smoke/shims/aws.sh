@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Shim da AWS CLI: `s3://<bucket>/<key>` é `$SMOKE_S3_ROOT/<bucket>/<key>`, nos
-# dois sentidos do `s3 cp` e no de bucket para disco do `s3 sync`.
+# dois sentidos do `s3 cp`, no de bucket para disco do `s3 sync` e no `s3 rm`.
 
 set -euo pipefail
 
@@ -163,6 +163,33 @@ s3_sync() {
   done < <(object_keys "$source")
 }
 
+# Apagar uma chave que não existe sai com status zero, como o `DeleteObject` do
+# S3: o `clean` decide sem listar o bucket, e o `output.mkv` de um run falho pode
+# nunca ter subido.
+s3_rm() {
+  local target="" bucket key
+  while (($#)); do
+    case $1 in
+      --only-show-errors) ;;
+      --*) fail "flag não shimada em s3 rm: $1" ;;
+      *)
+        [[ -z $target ]] || fail "argumento a mais em s3 rm: $1"
+        target=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n $target ]] || fail "s3 rm exige um alvo"
+
+  key=$(object_key "$target")
+  bucket=${target#s3://}
+  bucket=${bucket%%/*}
+  [[ -d $SMOKE_S3_ROOT/$bucket ]] || fail "bucket inexistente: $bucket"
+  [[ $key != "${SMOKE_AWS_FAIL_KEY:-}" ]] || fail "falha induzida no objeto $key"
+  rm -f "$(object_path "$target")"
+  printf 'delete: %s\n' "$target"
+}
+
 # Chaves em ordem binária e nenhuma saída quando não há objeto, como a CLI de
 # verdade: um leitor que espere sempre um documento JSON quebra aqui primeiro.
 s3api_list_objects_v2() {
@@ -204,6 +231,10 @@ case "${1:-} ${2:-}" in
   "s3 sync")
     shift 2
     s3_sync "$@"
+    ;;
+  "s3 rm")
+    shift 2
+    s3_rm "$@"
     ;;
   "s3api list-objects-v2")
     shift 2

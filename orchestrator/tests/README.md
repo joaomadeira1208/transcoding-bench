@@ -19,6 +19,8 @@ Orquestrador, o veredito que decide o código de saída, o resumo final e a linh
 de cada poll) e o núcleo do triage do Pass de qualidade (o agrupamento por
 Cenário, a contagem de bitstreams distintos, a escolha determinística do
 representante, a célula divergente e o leitor do plano que o Juiz e a retenção
-usam).
+usam) e o da retenção (o veredito de cada `output.{container}` sobre o plano e os
+`judge.json`, a forma da chave que se apaga, o plano de outro bucket, o marcador
+mais velho que um julgamento e a leitura dos `judge.json`).
 Invariantes escritas à mão como default; golden inline no `.py` só onde congelar
 *é* o requisito.

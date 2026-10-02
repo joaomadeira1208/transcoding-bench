@@ -9,7 +9,7 @@ import json
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -41,7 +41,8 @@ VMAF_LOG = "vmaf.json"
 VMAF_FLOOR = 99
 SSIM_FLOOR = 0.999
 
-LOG_PATH = re.compile(r"log_path=[^:]+")
+LOG_PATH_OPTION = re.compile(r"log_path=[^:]+")
+SCALE = re.compile(r"scale=([0-9]+):([0-9]+):")
 
 # 5 s a 24 fps: curto o bastante para o ciclo caber em minutos, longo o bastante
 # para o `pidstat` a 1 Hz deixar mais de uma amostra.
@@ -67,10 +68,10 @@ FRAMES = re.compile(r"frame=\s*([0-9]+)")
 class Capture:
     """As saídas cruas que as ferramentas de verdade deixaram, trazidas ao host."""
 
-    run: dict[str, Any]
     returncode: int
     stderr: str
     out_dir: Path
+    run: dict[str, Any] = field(default_factory=dict)
 
     def artifact(self, name: str) -> str:
         # `errors="replace"`: o `ffmpeg.log` é stderr de terceiros, e um byte
@@ -134,12 +135,6 @@ def run_in_image(
     arguments: list[str],
     *docker_options: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Roda um harness dentro da imagem e traz o `CONTAINER_OUT` dela para `out_dir`.
-
-    O script chega pelo stdin: um bind-mount dependeria de o diretório do
-    repositório estar entre os que a VM do Docker compartilha, que varia de
-    máquina para máquina.
-    """
     container = f"acceptance-{uuid4().hex[:12]}"
     try:
         result = subprocess.run(
@@ -151,6 +146,9 @@ def run_in_image(
                 *docker_options,
                 "--interactive",
                 image,
+                # O script chega pelo stdin: um bind-mount dependeria de o
+                # diretório do repositório estar entre os que a VM do Docker
+                # compartilha, que varia de máquina para máquina.
                 "bash",
                 "-s",
                 "--",
@@ -321,19 +319,15 @@ class TestBitstream:
         assert digest != hashlib.sha256(output_path(captured).read_bytes()).hexdigest()
 
 
-def judgement_argv(judged: Pass, clip: str) -> list[str]:
-    """O primeiro julgamento que o `run_quality.sh` montou, com os caminhos do
-    host trocados pelos do container e o clip nas duas entradas.
-
-    Sai do rastro do shim pelo mesmo motivo da cadeia do encode: o filtergraph é
-    o que o aceite existe para exercitar, e transcrevê-lo provaria este arquivo.
-    """
-    argv = [FFMPEG, *judged.argv("ffmpeg")[0]]
+def judgement_argv(traced: list[str], clip: str) -> list[str]:
+    argv = [FFMPEG, *traced]
     for index, argument in enumerate(argv):
         if argument == "-i":
             argv[index + 1] = clip
         elif argument == "-filter_complex":
-            argv[index + 1] = LOG_PATH.sub(f"log_path={CONTAINER_OUT}/{VMAF_LOG}", argv[index + 1])
+            argv[index + 1] = LOG_PATH_OPTION.sub(
+                f"log_path={CONTAINER_OUT}/{VMAF_LOG}", argv[index + 1]
+            )
     return argv
 
 
@@ -346,30 +340,20 @@ def judged_by_the_shim(triaged, campaign, run_quality) -> Pass:
 def judged_for_real(
     tmp_path_factory: pytest.TempPathFactory, image: str, judged_by_the_shim: Pass, capture_dir
 ) -> Capture:
-    """O `libvmaf` de verdade sobre o clip contra ele mesmo, na geometria do
-    output que o shim julgou primeiro — o `scale=` do filtergraph vira identidade
-    e fica no argv como o bash o montou."""
-    output = judged_by_the_shim.outputs()[0]
-    clip = f"{CONTAINER_MASTERS}/{output['master']}"
+    traced = judged_by_the_shim.argv("ffmpeg")[0]
+    *_, master = (traced[index + 1] for index, each in enumerate(traced) if each == "-i")
+    clip = f"{CONTAINER_MASTERS}/{Path(master).name}"
+    width, height = SCALE.search(traced[traced.index("-filter_complex") + 1]).groups()
     out_dir = tmp_path_factory.mktemp("judge-capture")
 
     result = run_in_image(
         image,
         JUDGE_ACCEPTANCE,
         out_dir,
-        [
-            "--clip",
-            clip,
-            "--clip-size",
-            f"{output['output_width']}x{output['output_height']}",
-            "--",
-            *judgement_argv(judged_by_the_shim, clip),
-        ],
+        ["--clip", clip, "--clip-size", f"{width}x{height}", "--", *judgement_argv(traced, clip)],
     )
 
-    captured = Capture(
-        run=output, returncode=result.returncode, stderr=result.stderr, out_dir=out_dir
-    )
+    captured = Capture(returncode=result.returncode, stderr=result.stderr, out_dir=out_dir)
     if capture_dir is not None and captured.wrote(VMAF_LOG):
         shutil.copyfile(out_dir / VMAF_LOG, capture_dir / VMAF_LOG)
     return captured
@@ -399,8 +383,6 @@ class TestJudge:
         assert log["pooled_metrics"]["float_ssim"]["mean"] >= SSIM_FLOOR
 
     def test_the_fixture_readme_names_the_libvmaf_of_the_image(self, judged_for_real):
-        # O bump do `libvmaf` no Dockerfile é a hora de regenerar o `vmaf.json`, e
-        # é aqui que a regeneração esquecida aparece.
         version = json.loads(judged_for_real.artifact("versions.json"))["libvmaf"]
 
         assert f"`libvmaf` {version}" in FIXTURES_README.read_text(encoding="utf-8")

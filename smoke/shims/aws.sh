@@ -80,6 +80,7 @@ s3_cp() {
 
   if [[ -n $recursive ]]; then
     [[ -d $source ]] || fail "origem recursiva não é diretório: $source"
+    sleep "${SMOKE_AWS_UPLOAD_DELAY:-0}"
     source=${source%/}
     destination=${destination%/}
     local relative

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +22,11 @@ RUN_SCENARIO = REPO_ROOT / "encode" / "run_scenario.sh"
 RUN_ALL = REPO_ROOT / "encode" / "run_all.sh"
 FETCH_MASTERS = REPO_ROOT / "encode" / "fetch_masters.sh"
 PREPARE_MASTERS = REPO_ROOT / "masters" / "prepare.sh"
+RUN_QUALITY = REPO_ROOT / "judge" / "run_quality.sh"
 GENERATE_SCENARIOS = REPO_ROOT / "orchestrator" / "generate_scenarios.py"
 GENERATE_MASTERS_PLAN = REPO_ROOT / "orchestrator" / "generate_masters_plan.py"
 VALIDATE_META = REPO_ROOT / "analysis" / "validate_meta.py"
+VALIDATE_JUDGE = REPO_ROOT / "analysis" / "validate_judge.py"
 VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 RESUME = REPO_ROOT / "orchestrator" / "resume.py"
@@ -39,6 +42,9 @@ BUCKET = "smoke-bucket"
 MASTERS_PREFIX = "masters/"
 MANIFEST_SCHEMA_VERSION = "1"
 QUALITY_PLAN_FILENAME = "plan.json"
+QUALITY_RESULTS_PREFIX = "quality/results"
+RESULTS_DIR_NAME = "results"
+JUDGE_FILENAME = "judge.json"
 RUNS_SOURCE = f"s3://{BUCKET}/runs/"
 
 # A linha com que a retomada e o triage anunciam um arquivo escrito. O caminho
@@ -229,8 +235,60 @@ class Triage(ShimTrail):
         return _report_without(self.stdout, PLAN_LINE)
 
 
+@dataclass(frozen=True)
+class Pass(ShimTrail):
+    """O que uma invocação do `judge/run_quality.sh` deixou para trás."""
+
+    plan: dict[str, Any]
+    returncode: int
+    stdout: str
+    stderr: str
+    work_dir: Path
+
+    def outputs(self) -> list[dict[str, Any]]:
+        """Os outputs do plano, na ordem em que o Juiz tinha de percorrê-los."""
+        return self.plan["outputs"]
+
+    def results(self, run_id: str) -> Path:
+        """Onde o shim do `aws` deixou a cópia de `quality/results/{run_id}/`."""
+        return self.bucket_dir() / QUALITY_RESULTS_PREFIX / run_id
+
+    def local_results(self, run_id: str) -> Path:
+        """O diretório do resultado no work dir, antes de o upload acontecer."""
+        return self.work_dir / RESULTS_DIR_NAME / run_id
+
+    def judgement(self, run_id: str) -> dict[str, Any]:
+        return json.loads((self.results(run_id) / JUDGE_FILENAME).read_text(encoding="utf-8"))
+
+    def local_output(self, output: dict[str, Any]) -> Path:
+        """O `.mkv` daquele output no work dir, que o Juiz apaga depois de julgá-lo."""
+        return self.work_dir / f"{output['run_id']}.{output['container']}"
+
+
 def _report_without(stdout: str, written_line: str) -> list[str]:
     return [line for line in stdout.splitlines() if not line.startswith(written_line)]
+
+
+# A forma do marcador de `status/`, que o Juiz repete campo a campo para que o
+# leitor do Orquestrador e a decisão de vigilância sirvam aos dois sem ramo. Uma
+# cópia por papel deixaria um dos dois divergir sem nada avisar.
+DONE_MARKER_TYPES = {
+    "instance_id": str,
+    "finished_at": str,
+    "runs_total": int,
+    "runs_failed": int,
+    "capped": bool,
+    "exit_status": int,
+}
+
+
+def typed_fields(payload: dict[str, Any]) -> dict[str, type]:
+    """O tipo de cada campo: `bool` não é `int` do lado de quem lê."""
+    return {name: type(value) for name, value in payload.items()}
+
+
+def offset_aware(timestamp: str) -> bool:
+    return datetime.fromisoformat(timestamp).utcoffset() is not None
 
 
 def keep_first_record(text: str, table: str) -> str:
@@ -294,6 +352,45 @@ def _load_config(path: Path) -> dict[str, Any]:
 # parametrização dos testes sai delas.
 EXPERIMENT = _load_config(EXPERIMENT_TOML)
 PILOT = _load_config(PILOT_TOML)
+
+# O Juiz da definição (ADR-0025): o `judge.json` registra os dois, e transcrevê-los
+# aqui deixaria o smoke concordando consigo mesmo.
+JUDGE_INSTANCE_TYPE = PILOT["quality"]["judge"]["instance_type"]
+JUDGE_INSTANCE_ID = "i-00fedcba9876543210"
+
+# Explícito, e não o default `nproc`: o Mac do pesquisador não o tem, e o número
+# viaja para o `n_threads` do `libvmaf`, que é argv asserido.
+JUDGE_THREADS = "2"
+
+# As três arquiteturas do `config/pilot.toml`, na ordem em que ele as declara: é
+# essa ordem que decide o representante de um bitstream compartilhado (ADR-0025).
+# O ARM é o que diverge dos dois x86, que é o que o piloto mediu.
+ARM = "c7g"
+X86 = ("c7i", "c7a")
+ARCHITECTURES = (ARM, *X86)
+
+# O bitstream que só o laço do ARM devolve. Os dois x86 ficam com o default do
+# shim: é o que faz o hash deles coincidir sem nenhuma combinação entre os laços.
+ARM_BITSTREAM = "arm64"
+
+
+def instance_id_of(architecture: str) -> str:
+    """Um id por máquina: as três escrevem no mesmo bucket, e dois `meta.json` com
+    o mesmo `instance_id` seriam uma máquina só."""
+    return f"i-{ARCHITECTURES.index(architecture):017x}"
+
+
+def instance_type_of(architecture: str) -> str:
+    (record,) = [each for each in PILOT["instance"] if each["id"] == architecture]
+    return record["instance_type"]
+
+
+def bitstream_environment(architecture: str) -> dict[str, str]:
+    return {"SMOKE_BITSTREAM": ARM_BITSTREAM} if architecture == ARM else {}
+
+
+def blocks_of(plan: dict[str, Any], architecture: str) -> list[dict[str, Any]]:
+    return [block for block in plan["blocks"] if block["instance"] == architecture]
 
 
 def generate_plan(config: Path, out_dir: Path) -> dict[str, Any]:
@@ -717,6 +814,131 @@ def quality_triage(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
 
 
 @pytest.fixture(scope="session")
+def run_quality(
+    tmp_path_factory: pytest.TempPathFactory,
+    shim_bin: Path,
+    masters_dir: Path,
+    versions_file: Path,
+):
+    """Roda o `judge/run_quality.sh` de verdade sobre o plano dado, com os shims.
+
+    O bucket é uma **cópia** do que o rastro dado deixou: o Juiz baixa os
+    `output.mkv` que os laços do encode subiram — num bucket vazio não haveria o
+    que julgar —, mas os quatro caminhos do Pass escrevem os mesmos
+    `quality/results/{run_id}/` e o mesmo par de `status/`, e no bucket
+    compartilhado o último apagaria a evidência dos anteriores.
+    """
+
+    def _run_quality(
+        trail: ShimTrail,
+        plan: dict[str, Any],
+        *flags: str,
+        **shim_env: str,
+    ) -> Pass:
+        workdir = tmp_path_factory.mktemp("judge")
+        s3_root = workdir / "s3"
+        shutil.copytree(trail.s3_root, s3_root)
+        env = shim_environment(shim_bin, workdir, shim_env, s3_root=s3_root)
+        work_dir = workdir / "work"
+        work_dir.mkdir()
+        plan_path = work_dir / QUALITY_PLAN_FILENAME
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                str(RUN_QUALITY),
+                "--plan",
+                str(plan_path),
+                "--masters-dir",
+                str(masters_dir),
+                "--work-dir",
+                str(work_dir),
+                "--bucket",
+                BUCKET,
+                "--commit",
+                COMMIT,
+                "--instance-id",
+                JUDGE_INSTANCE_ID,
+                "--instance-type",
+                JUDGE_INSTANCE_TYPE,
+                "--versions-file",
+                str(versions_file),
+                "--threads",
+                JUDGE_THREADS,
+                *flags,
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=LOOP_DEADLINE_S,
+        )
+        return Pass(
+            plan=plan,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            work_dir=work_dir,
+            argv_dir=Path(env["SMOKE_ARGV_DIR"]),
+            s3_root=s3_root,
+        )
+
+    return _run_quality
+
+
+@pytest.fixture(scope="session")
+def one_codec_toml(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """O `config/pilot.toml` reduzido a um codec: dois Cenários nas três arquiteturas.
+
+    A mesma redução do `test_resume.py`, sem recortar `[[instance]]`: o que o Pass
+    agrupa é um Cenário atravessando as arquiteturas, e com uma só não haveria
+    bitstream compartilhado nem representante a escolher.
+    """
+    text = keep_first_record(PILOT_TOML.read_text(encoding="utf-8"), "codec")
+    path = tmp_path_factory.mktemp("triage-config") / PILOT_TOML.name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.fixture(scope="session")
+def campaign_plan(tmp_path_factory: pytest.TempPathFactory, one_codec_toml: Path) -> dict[str, Any]:
+    """O canônico da configuração reduzida, pelo mesmo CLI e do mesmo jeito."""
+    return generate_plan(one_codec_toml, tmp_path_factory.mktemp("triage-scenarios"))
+
+
+@pytest.fixture(scope="session")
+def campaign(campaign_plan: dict[str, Any], run_all) -> dict[str, Loop]:
+    """Um laço por arquitetura, todos no mesmo bucket falso e na ordem do canônico.
+
+    Um bucket só porque é o que a campanha faz: as três máquinas sobem para
+    `runs/` sem saber uma da outra, e quem as reúne é o triage.
+    """
+    loops: dict[str, Loop] = {}
+    s3_root = None
+    for architecture in ARCHITECTURES:
+        loops[architecture] = run_all(
+            campaign_plan,
+            blocks_of(campaign_plan, architecture),
+            s3_root=s3_root,
+            instance_id=instance_id_of(architecture),
+            instance_type=instance_type_of(architecture),
+            **bitstream_environment(architecture),
+        )
+        s3_root = loops[architecture].s3_root
+    return loops
+
+
+@pytest.fixture(scope="session")
+def triaged(campaign: dict[str, Loop], one_codec_toml: Path, quality_triage) -> Triage:
+    """O triage sobre a matriz inteira e sã.
+
+    O rastro é o do primeiro laço porque os três compartilham o bucket; qualquer
+    um deles chega ao mesmo lugar.
+    """
+    return quality_triage(campaign[ARM], one_codec_toml)
+
+
+@pytest.fixture(scope="session")
 def block(plan: dict[str, Any]) -> dict[str, Any]:
     return plan["blocks"][0]
 
@@ -924,18 +1146,28 @@ def list_objects(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
 
 
 def check_with_stdlib_checker(meta_path: Path) -> subprocess.CompletedProcess[str]:
-    """Roda o `meta.json` contra o checador stdlib do orquestrador, sem importar.
+    return _check_with_stdlib_checker(meta_path, "meta_check", "check_meta")
 
-    Ele é módulo e não CLI, então o subprocesso é o que mantém o `sys.path` de
-    outro papel fora do processo do smoke (ADR-0022).
+
+def check_judgement_with_stdlib_checker(judge_path: Path) -> subprocess.CompletedProcess[str]:
+    return _check_with_stdlib_checker(judge_path, "judgement_check", "check_judgement")
+
+
+def _check_with_stdlib_checker(
+    path: Path, module: str, checker: str
+) -> subprocess.CompletedProcess[str]:
+    """Roda o artefato contra o checador stdlib do orquestrador, sem importar.
+
+    Eles são módulos e não CLIs, então o subprocesso é o que mantém o `sys.path`
+    de outro papel fora do processo do smoke (ADR-0022).
     """
     program = (
         "import sys; sys.path.insert(0, sys.argv[1]);"
-        "from meta_check import check_meta;"
-        "check_meta(open(sys.argv[2], 'rb').read())"
+        f"from {module} import {checker};"
+        f"{checker}(open(sys.argv[2], 'rb').read())"
     )
     return subprocess.run(
-        [sys.executable, "-c", program, str(ORCHESTRATOR_DIR), str(meta_path)],
+        [sys.executable, "-c", program, str(ORCHESTRATOR_DIR), str(path)],
         capture_output=True,
         text=True,
         check=False,
@@ -973,9 +1205,17 @@ def check_with_preflight(perf_json: Path) -> subprocess.CompletedProcess[str]:
 
 
 def validate_with_cli(meta_path: Path) -> subprocess.CompletedProcess[str]:
-    """A CLI de validação do `analysis/`, invocada como caixa-preta."""
+    return _validate_with_cli(meta_path, VALIDATE_META)
+
+
+def validate_judgement_with_cli(judge_path: Path) -> subprocess.CompletedProcess[str]:
+    return _validate_with_cli(judge_path, VALIDATE_JUDGE)
+
+
+def _validate_with_cli(path: Path, cli: Path) -> subprocess.CompletedProcess[str]:
+    """A CLI de contrato do `analysis/` daquele artefato, invocada como caixa-preta."""
     return subprocess.run(
-        [sys.executable, str(VALIDATE_META), str(meta_path)],
+        [sys.executable, str(cli), str(path)],
         capture_output=True,
         text=True,
         check=False,

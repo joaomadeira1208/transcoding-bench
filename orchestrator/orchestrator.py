@@ -82,7 +82,9 @@ from instance_launch import (
     encode_name,
     encode_tags,
     encode_target,
+    judge_image,
     launch_encode,
+    launch_judge,
     orphan_hint,
     render_user_data,
     wait_for_bootstrapped_instance,
@@ -90,22 +92,29 @@ from instance_launch import (
 from instance_wait import BootstrapError, WaitTimeout
 from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
-from masters_plan import build_masters_plan
+from masters_plan import build_masters_plan, iter_masters
 from preflight import (
+    ENCODE_STEPS,
+    JUDGE_STEPS,
     SELF_CHECK_STEPS,
     Counter,
     Outcome,
     PreflightError,
     Step,
     StepResult,
-    encode_put_command,
+    VmafScore,
     failed,
     perf_counters,
     perf_detail,
     perf_probe_command,
+    put_command,
     render_table,
     summarize,
+    vmaf_detail,
+    vmaf_probe_command,
+    vmaf_score,
 )
+from quality_plan import PLAN_FILENAME, PlanError, check_empty_plan, empty_plan
 from scenario_plan import (
     build_canonical_plan,
     build_instance_slices,
@@ -135,6 +144,11 @@ MASTERS_PREFIX = "masters/"
 MANIFEST_NAME = "manifest.json"
 
 PREFLIGHT_PREFIX = "runs/preflight/"
+
+QUALITY_PREFIX = "quality/"
+QUALITY_PLAN_KEY = f"{QUALITY_PREFIX}{PLAN_FILENAME}"
+JUDGE_PREFLIGHT_PREFIX = f"{QUALITY_PREFIX}results/preflight/"
+JUDGE_VOLUME_SIZE_GB = 100
 SELF_CHECK_PREFIX = f"{PREFLIGHT_PREFIX}self-check/"
 SELF_CHECK_OBJECT = "probe.txt"
 SELF_CHECK_CONTENT = "preflight\n"
@@ -154,9 +168,12 @@ PREPARE_TIMEOUT_SECONDS = 10800.0
 # a instância ser terminada sozinha se o comando travar, não cortar um encode.
 PERF_PROBE_TIMEOUT_SECONDS = 1800.0
 
+# O mesmo raciocínio para o `libvmaf` do Juiz sobre segundos de um Master 4K.
+VMAF_PROBE_TIMEOUT_SECONDS = 1800.0
+
 # O do `s3 cp` de nove bytes continua curto: o que leva minutos ali é o container
 # subindo, e um teto de meia hora faria um cp pendurado faturar meia hora.
-ENCODE_PUT_TIMEOUT_SECONDS = 300.0
+PUT_TIMEOUT_SECONDS = 300.0
 
 # O disparo volta assim que o processo desacoplado nasce: o que demora é o
 # `run_all.sh`, e ele já não está do outro lado deste SSH.
@@ -164,6 +181,11 @@ DISPATCH_TIMEOUT_SECONDS = 60.0
 
 PROBE_STDOUT_NAME = "perf.json"
 PROBE_STDERR_NAME = "perf.stderr.txt"
+
+VMAF_STDOUT_NAME = "vmaf.json"
+VMAF_STDERR_NAME = "ffmpeg.log"
+
+JUDGE_PUT_NAME = "probe.txt"
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -220,17 +242,25 @@ def main() -> int:
     )
     check = subcommands.add_parser(
         "preflight",
-        help="prova o caminho do encode numa instância descartável, antes de a fatura correr",
+        help="prova o caminho do encode ou do Juiz numa instância descartável",
         description=(
             "Roda a auto-checagem do Orquestrador, lança uma instância de encode do tipo "
             "pedido com a fatia daquela arquitetura, confere o perf e o PutObject de dentro "
-            "do container, termina a instância e imprime a tabela passou/falhou."
+            "do container, termina a instância e imprime a tabela passou/falhou. Com "
+            "--judge, lança um Juiz descartável sobre um plano vazio e confere o libvmaf e "
+            "o PutObject em quality/results/preflight/ no lugar do perf."
         ),
     )
-    check.add_argument(
+    leg = check.add_mutually_exclusive_group()
+    leg.add_argument(
         "--instance-type",
         default=PREFLIGHT_INSTANCE_TYPE,
-        help=f"tipo da instância descartável (default: {PREFLIGHT_INSTANCE_TYPE})",
+        help=f"tipo da instância de encode descartável (default: {PREFLIGHT_INSTANCE_TYPE})",
+    )
+    leg.add_argument(
+        "--judge",
+        action="store_true",
+        help="a perna do Juiz, com o tipo e a arquitetura de [quality.judge]",
     )
     check.add_argument(
         "--bucket",
@@ -240,7 +270,7 @@ def main() -> int:
     check.set_defaults(
         run=lambda args, **common: preflight(
             config=_load_config(EXPERIMENT_TOML),
-            instance_type=args.instance_type,
+            instance_type=None if args.judge else args.instance_type,
             bucket=args.bucket,
             **common,
         )
@@ -456,10 +486,10 @@ def preflight(
     infra: InfraConfig,
     config: ExperimentConfig,
     work_dir: Path,
-    instance_type: str,
+    instance_type: str | None,
     bucket: str | None,
 ) -> int:
-    """O caminho do encode inteiro numa instância de poucos minutos, e a tabela dele.
+    """O caminho do encode, ou o do Juiz quando não há tipo, numa instância de minutos.
 
     A escada é linear e para no primeiro passo que falhar: o que vem depois de um
     `PassRole` recusado não tem o que provar. A instância, se chegou a subir, é
@@ -467,70 +497,158 @@ def preflight(
     """
     target = bucket or infra.buckets.pilot
     results: list[StepResult] = []
-    instance_id: str | None = None
+    launched: list[str] = []
 
     try:
         commit = _self_check(results, infra=infra, bucket=target, work_dir=work_dir)
-
-        encode = _step(
-            results,
-            Step.AMI,
-            lambda: encode_target(config, infra.amis, instance_type),
-            detail=lambda chosen: f"{instance_type} ({chosen.instance.arch}): {chosen.image_id}",
-        )
-        key = slice_key(encode.instance.id)
-        launched = _step(
-            results,
-            Step.LAUNCH,
-            lambda: _launch_encode(
-                encode=encode,
+        if instance_type is None:
+            _judge_leg(
+                results,
+                launched,
                 infra=infra,
                 config=config,
                 commit=commit,
                 bucket=target,
-                slice_key=key,
                 work_dir=work_dir,
-            ),
-            detail=lambda started: f"{started.instance_id} no commit {commit}, fatia em {key}",
-        )
-        instance_id = launched.instance_id
-
-        host = _step(
-            results,
-            Step.BOOTSTRAP,
-            lambda: wait_for_bootstrapped_instance(instance_id, report=_report),
-        )
-        _step(
-            results,
-            Step.PERF,
-            lambda: _probe_perf(
-                host=host,
-                run=launched.probe_run,
+            )
+        else:
+            _encode_leg(
+                results,
+                launched,
+                infra=infra,
                 config=config,
+                commit=commit,
                 bucket=target,
-                instance_id=launched.instance_id,
                 work_dir=work_dir,
-            ),
-            detail=perf_detail,
-        )
-        _step(results, Step.ENCODE_PUT, lambda: _put_from_container(host, target, instance_id))
+                instance_type=instance_type,
+            )
     except _Aborted:
         pass
     finally:
-        if instance_id is not None:
+        if launched:
             with suppress(_Aborted):
-                _step(results, Step.TERMINATE, lambda: _terminate(instance_id))
+                _step(results, Step.TERMINATE, lambda: _terminate(launched[0]))
 
-    table = summarize(results)
+    table = summarize(results, ENCODE_STEPS if instance_type else JUDGE_STEPS)
     print(render_table(table))
     if failed(table):
         return EXIT_FAILURE
 
-    _report(
-        "o preflight passou; o degrau seguinte da escada é o primeiro bloco do piloto, "
-        "que é a primeira Execução real (ADR-0022)"
-    )
+    if instance_type is None:
+        _report(
+            f"o preflight do Juiz passou; a evidência fica em "
+            f"s3://{target}/{JUDGE_PREFLIGHT_PREFIX}, e o degrau seguinte é o triage do piloto"
+        )
+    else:
+        _report(
+            "o preflight passou; o degrau seguinte da escada é o primeiro bloco do piloto, "
+            "que é a primeira Execução real (ADR-0022)"
+        )
     return EXIT_OK
+
+
+def _encode_leg(
+    results: list[StepResult],
+    launched: list[str],
+    *,
+    infra: InfraConfig,
+    config: ExperimentConfig,
+    commit: str,
+    bucket: str,
+    work_dir: Path,
+    instance_type: str,
+) -> None:
+    encode = _step(
+        results,
+        Step.AMI,
+        lambda: encode_target(config, infra.amis, instance_type),
+        detail=lambda chosen: f"{instance_type} ({chosen.instance.arch}): {chosen.image_id}",
+    )
+    key = slice_key(encode.instance.id)
+    started = _step(
+        results,
+        Step.LAUNCH,
+        lambda: _launch_encode(
+            encode=encode,
+            infra=infra,
+            config=config,
+            commit=commit,
+            bucket=bucket,
+            slice_key=key,
+            work_dir=work_dir,
+        ),
+        detail=lambda started: f"{started.instance_id} no commit {commit}, fatia em {key}",
+    )
+    instance_id = started.instance_id
+    launched.append(instance_id)
+
+    host = _step(
+        results,
+        Step.BOOTSTRAP,
+        lambda: wait_for_bootstrapped_instance(instance_id, report=_report),
+    )
+    _step(
+        results,
+        Step.PERF,
+        lambda: _probe_perf(
+            host=host,
+            run=started.probe_run,
+            config=config,
+            bucket=bucket,
+            instance_id=instance_id,
+            work_dir=work_dir,
+        ),
+        detail=perf_detail,
+    )
+    _step(results, Step.PUT, lambda: _put_from_container(host, bucket, instance_id))
+
+
+def _judge_leg(
+    results: list[StepResult],
+    launched: list[str],
+    *,
+    infra: InfraConfig,
+    config: ExperimentConfig,
+    commit: str,
+    bucket: str,
+    work_dir: Path,
+) -> None:
+    judge = config.quality.judge
+    image_id = _step(
+        results,
+        Step.AMI,
+        lambda: judge_image(judge, infra.amis),
+        detail=lambda image: f"{judge.instance_type} ({judge.arch}): {image}",
+    )
+    instance_id = _step(
+        results,
+        Step.LAUNCH,
+        lambda: _launch_judge(
+            image_id=image_id,
+            infra=infra,
+            config=config,
+            commit=commit,
+            bucket=bucket,
+            work_dir=work_dir,
+        ),
+        detail=lambda started: f"{started} no commit {commit}, plano vazio em {QUALITY_PLAN_KEY}",
+    )
+    launched.append(instance_id)
+
+    host = _step(
+        results,
+        Step.BOOTSTRAP,
+        lambda: wait_for_bootstrapped_instance(instance_id, report=_report),
+    )
+    _step(
+        results,
+        Step.VMAF,
+        lambda: _probe_vmaf(
+            host=host, config=config, bucket=bucket, instance_id=instance_id, work_dir=work_dir
+        ),
+        detail=vmaf_detail,
+    )
+    _step(results, Step.PUT, lambda: _put_from_judge(host, bucket, instance_id))
 
 
 def run_campaign(
@@ -1131,7 +1249,13 @@ def _probe_perf(
         ),
         timeout=PERF_PROBE_TIMEOUT_SECONDS,
     )
-    _keep_probe_evidence(probe, bucket=bucket, instance_id=instance_id, work_dir=work_dir)
+    _keep_probe_evidence(
+        probe,
+        names=(PROBE_STDOUT_NAME, PROBE_STDERR_NAME),
+        bucket=bucket,
+        prefix=f"{PREFLIGHT_PREFIX}{instance_id}/",
+        local=work_dir / "preflight" / instance_id,
+    )
     if probe.returncode != 0:
         raise PreflightError(
             f"o probe do perf saiu com status {probe.returncode}; a saída crua está em "
@@ -1141,19 +1265,24 @@ def _probe_perf(
 
 
 def _keep_probe_evidence(
-    probe: CommandOutput, *, bucket: str, instance_id: str, work_dir: Path
+    probe: CommandOutput,
+    *,
+    names: tuple[str, str],
+    bucket: str,
+    prefix: str,
+    local: Path,
 ) -> None:
     """As duas saídas do probe no log do Orquestrador e no bucket, **sem apagar**.
 
     Sem o `s3_rm` que fecha os outros dois objetos de prova deste passo: o deles é
     prova de permissão e some, e este é o dado que o próximo diagnóstico lê.
     """
-    local = work_dir / "preflight" / instance_id
     local.mkdir(parents=True, exist_ok=True)
-    for name, text in ((PROBE_STDOUT_NAME, probe.stdout), (PROBE_STDERR_NAME, probe.stderr)):
+    stdout_name, stderr_name = names
+    for name, text in ((stdout_name, probe.stdout), (stderr_name, probe.stderr)):
         path = local / name
         path.write_text(text, encoding="utf-8")
-        key = f"{PREFLIGHT_PREFIX}{instance_id}/{name}"
+        key = f"{prefix}{name}"
         s3_cp(str(path), f"s3://{bucket}/{key}")
         _report(f"{key}: guardado em {path}")
         print(text, file=sys.stderr)
@@ -1162,7 +1291,7 @@ def _keep_probe_evidence(
 def _put_from_container(host: str, bucket: str, instance_id: str) -> str:
     """O `PutObject` do papel `encode` pelo caminho real, e a limpeza pelo Orquestrador."""
     key = f"{PREFLIGHT_PREFIX}{instance_id}.txt"
-    ssh_exec(host, encode_put_command(bucket=bucket, key=key), timeout=ENCODE_PUT_TIMEOUT_SECONDS)
+    ssh_exec(host, put_command(bucket=bucket, key=key), timeout=PUT_TIMEOUT_SECONDS)
 
     written = s3_list_prefix(bucket, key)
     if not written:
@@ -1171,6 +1300,85 @@ def _put_from_container(host: str, bucket: str, instance_id: str) -> str:
         )
     s3_rm(f"s3://{bucket}/{key}")
     return f"{key}: {written[0].size} bytes escritos pelo container, listados e apagados"
+
+
+def _launch_judge(
+    *,
+    image_id: str,
+    infra: InfraConfig,
+    config: ExperimentConfig,
+    commit: str,
+    bucket: str,
+    work_dir: Path,
+) -> str:
+    """Sobe o plano vazio para `quality/plan.json` e lança o Juiz que vai baixá-lo."""
+    text = serialize_plan(empty_plan(config))
+    check_empty_plan(text)
+
+    local = work_dir / "preflight" / PLAN_FILENAME
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(text, encoding="utf-8")
+    s3_cp(str(local), f"s3://{bucket}/{QUALITY_PLAN_KEY}")
+
+    return launch_judge(
+        judge=config.quality.judge,
+        image_id=image_id,
+        infra=infra,
+        commit=commit,
+        bucket=bucket,
+        plan_key=QUALITY_PLAN_KEY,
+        manifest_key=f"{MASTERS_PREFIX}{MANIFEST_NAME}",
+        masters_prefix=MASTERS_PREFIX,
+        volume_size_gb=JUDGE_VOLUME_SIZE_GB,
+        name=PREFLIGHT_NAME_TAG,
+    )
+
+
+def _probe_vmaf(
+    *, host: str, config: ExperimentConfig, bucket: str, instance_id: str, work_dir: Path
+) -> VmafScore:
+    """O `libvmaf` do container sobre um Master contra ele mesmo; guarda, e depois julga."""
+    probe = ssh_capture(
+        host,
+        vmaf_probe_command(
+            master=next(iter_masters(build_masters_plan(config))),
+            scale_flags=config.encode.scale_flags,
+            vmaf_model=config.quality.vmaf_model,
+            repo_dir=REMOTE_REPO_DIR,
+            work_dir=REMOTE_WORK_DIR,
+        ),
+        timeout=VMAF_PROBE_TIMEOUT_SECONDS,
+    )
+    prefix = f"{JUDGE_PREFLIGHT_PREFIX}{instance_id}/"
+    _keep_probe_evidence(
+        probe,
+        names=(VMAF_STDOUT_NAME, VMAF_STDERR_NAME),
+        bucket=bucket,
+        prefix=prefix,
+        local=work_dir / "preflight" / instance_id,
+    )
+    if probe.returncode != 0:
+        raise PreflightError(
+            f"o probe do libvmaf saiu com status {probe.returncode}; a saída crua está em "
+            f"s3://{bucket}/{prefix}"
+        )
+    return vmaf_score(probe.stdout)
+
+
+def _put_from_judge(host: str, bucket: str, instance_id: str) -> str:
+    """O `PutObject` do papel `judge` de dentro do container, listado e **deixado**.
+
+    O `DeleteObject` do Orquestrador não alcança `quality/` (ADR-0016).
+    """
+    key = f"{JUDGE_PREFLIGHT_PREFIX}{instance_id}/{JUDGE_PUT_NAME}"
+    ssh_exec(host, put_command(bucket=bucket, key=key), timeout=PUT_TIMEOUT_SECONDS)
+
+    written = s3_list_prefix(bucket, key)
+    if not written:
+        raise PreflightError(
+            f"s3://{bucket}/{key}: o cp do container não deixou o objeto no bucket"
+        )
+    return f"{key}: {written[0].size} bytes escritos pelo container e listados"
 
 
 def _terminate(instance_id: str) -> str:
@@ -1234,6 +1442,7 @@ _FAILURES = (
     LaunchError,
     PreparationError,
     PreflightError,
+    PlanError,
     CampaignError,
     StateError,
     StatusError,

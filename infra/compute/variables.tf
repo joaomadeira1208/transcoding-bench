@@ -19,9 +19,9 @@ variable "budget_notification_email" {
 }
 
 variable "allowed_instance_types" {
-  description = "Tipos que o Orquestrador pode lançar; o teto de custo sob comprometimento (ADR-0016). O tipo do Juiz entra aqui quando a spec do Pass o fixar."
+  description = "Tipos que o Orquestrador pode lançar; o teto de custo sob comprometimento (ADR-0016). O c7i.4xlarge é o Juiz de [quality.judge] (ADR-0025)."
   type        = list(string)
-  default     = ["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "t3.micro"]
+  default     = ["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "c7i.4xlarge", "t3.micro"]
 }
 
 variable "orchestrator_ami_id" {

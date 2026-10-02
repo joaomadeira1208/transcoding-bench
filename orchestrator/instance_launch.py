@@ -1,4 +1,4 @@
-"""O lançamento de uma Instância de encode e a espera pelo bootstrap dela.
+"""O lançamento de uma Instância de encode ou de um Juiz, e a espera pelo bootstrap.
 
 O user-data fino e a espera não são do papel `encode`: o `prepare-masters` sobe a
 instância dele pelos mesmos dois. Ver `orchestrator/README.md`.
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from command_output import OutputError
-from experiment_config import ExperimentConfig, InstanceRecord
+from experiment_config import ExperimentConfig, InstanceRecord, JudgeRecord
 from external import cloud_init_status, described_instance, run_instances
 from infra_config import Amis, InfraConfig
 from instance_wait import wait_for_bootstrap, wait_for_instance_ready
@@ -31,6 +31,7 @@ REMOTE_WORK_DIR = "/home/ubuntu/work"
 # `TerminateInstances` sobre `encode`, `judge` e `masters` (ADR-0016): uma tag
 # `preflight` deixaria a instância deste passo interminável por quem a lançou.
 ENCODE_ROLE = "encode"
+JUDGE_ROLE = "judge"
 
 NAME_PREFIX = "transcoding-bench"
 
@@ -66,14 +67,23 @@ def encode_target(config: ExperimentConfig, amis: Amis, instance_type: str) -> E
             f"(declarados: {', '.join(sorted(declared))})"
         )
 
+    return EncodeTarget(instance=instance, image_id=_image(amis, instance.arch, instance_type))
+
+
+def judge_image(judge: JudgeRecord, amis: Amis) -> str:
+    """A AMI do Juiz: a de encode da arquitetura que `[quality.judge]` declara."""
+    return _image(amis, judge.arch, judge.instance_type)
+
+
+def _image(amis: Amis, arch: str, instance_type: str) -> str:
     images = {"arm64": amis.encode_arm64, "x86_64": amis.encode_amd64}
-    image_id = images.get(instance.arch)
+    image_id = images.get(arch)
     if image_id is None:
         raise LaunchError(
             f"{instance_type}: o arquivo de infra não tem AMI para a arquitetura "
-            f"'{instance.arch}' (tem: {', '.join(sorted(images))})"
+            f"'{arch}' (tem: {', '.join(sorted(images))})"
         )
-    return EncodeTarget(instance=instance, image_id=image_id)
+    return image_id
 
 
 def encode_name(instance: InstanceRecord) -> str:
@@ -131,6 +141,49 @@ def launch_encode(
         )
     except OutputError as error:
         raise LaunchError(orphan_hint(f"Name={tags['Name']}", error)) from error
+
+
+def launch_judge(
+    *,
+    judge: JudgeRecord,
+    image_id: str,
+    infra: InfraConfig,
+    commit: str,
+    bucket: str,
+    plan_key: str,
+    manifest_key: str,
+    masters_prefix: str,
+    volume_size_gb: int,
+    name: str,
+) -> str:
+    """Lança um Juiz com o tipo da definição e o perfil `judge`."""
+    role_args = [
+        "--work-dir",
+        REMOTE_WORK_DIR,
+        "--bucket",
+        bucket,
+        "--plan-key",
+        plan_key,
+        "--manifest-key",
+        manifest_key,
+        "--masters-prefix",
+        masters_prefix,
+    ]
+    try:
+        return run_instances(
+            instance_type=judge.instance_type,
+            image_id=image_id,
+            subnet_id=infra.subnet_id,
+            security_group_id=infra.security_groups.ephemeral,
+            instance_profile=infra.instance_profiles.judge,
+            key_name=infra.key_pair_name,
+            user_data=render_user_data(commit=commit, role=JUDGE_ROLE, role_args=role_args),
+            volume_size_gb=volume_size_gb,
+            imds_hop_limit=IMDS_HOP_LIMIT,
+            tags={"Name": name, "role": JUDGE_ROLE, "commit": commit},
+        )
+    except OutputError as error:
+        raise LaunchError(orphan_hint(f"Name={name}", error)) from error
 
 
 def wait_for_bootstrapped_instance(

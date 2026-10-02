@@ -164,12 +164,25 @@ def build_plan(config: ExperimentConfig, triaged: Triage) -> dict[str, Any]:
     }
 
 
+def empty_plan(config: ExperimentConfig) -> dict[str, Any]:
+    """O plano que o `preflight --judge` sobe: válido em tudo, e sem output a julgar."""
+    return build_plan(config, Triage(outputs=(), groups=()))
+
+
 def render_report(triaged: Triage) -> str:
     return "\n".join(_report_lines(triaged))
 
 
 def check_plan(raw: str | bytes) -> dict[str, Any]:
     """Valida os bytes crus de um `quality/plan.json` e devolve o objeto já parseado."""
+    plan = _parsed(raw)
+    _check_schema_version(plan)
+    _check_quality(plan)
+    _check_outputs(plan)
+    return plan
+
+
+def _parsed(raw: str | bytes) -> dict[str, Any]:
     try:
         plan = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -177,10 +190,18 @@ def check_plan(raw: str | bytes) -> dict[str, Any]:
 
     if not isinstance(plan, dict):
         raise PlanError(f"{PLAN_FILENAME} não é um objeto JSON: {type(plan).__name__}")
+    return plan
 
+
+def check_empty_plan(raw: str | bytes) -> dict[str, Any]:
+    """O mesmo leitor para o plano do `preflight --judge`, que exige `outputs` vazio."""
+    plan = _parsed(raw)
     _check_schema_version(plan)
     _check_quality(plan)
-    _check_outputs(plan)
+    outputs = plan.get("outputs")
+    if outputs != []:
+        found = f"{len(outputs)} entradas" if isinstance(outputs, list) else repr(outputs)
+        raise PlanError(f"outputs: esperava a lista vazia do preflight, veio {found}")
     return plan
 
 

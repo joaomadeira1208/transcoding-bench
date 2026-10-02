@@ -65,8 +65,6 @@ class TestTheAmiOfTheRequestedType:
 
 
 class TestTheAmiOfTheJudge:
-    # Nenhuma AMI nova para o Juiz (D16 da Spec 5): a de encode da arquitetura
-    # declarada em `[quality.judge]` serve.
     def test_the_x86_judge_of_the_definition_gets_the_x86_image(self):
         assert real_config().quality.judge.arch == "x86_64"
         assert judge_image(real_config().quality.judge, amis()) == amis().encode_amd64

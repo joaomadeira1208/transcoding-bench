@@ -163,13 +163,10 @@ TOTAL_TIMEOUT_SECONDS = 120 * 60 * 60
 # instância faturando e indistinguível das ~2 h de silêncio do caso normal.
 PREPARE_TIMEOUT_SECONDS = 10800.0
 
-# O probe do `perf` encoda segundos de um Master de verdade, e no pior par do
-# plano isso é 4K num encoder lento: o teto é generoso porque o que ele compra é
-# a instância ser terminada sozinha se o comando travar, não cortar um encode.
-PERF_PROBE_TIMEOUT_SECONDS = 1800.0
-
-# O mesmo raciocínio para o `libvmaf` do Juiz sobre segundos de um Master 4K.
-VMAF_PROBE_TIMEOUT_SECONDS = 1800.0
+# Os probes do `perf` e do `libvmaf` trabalham segundos de um Master de verdade,
+# e no pior caso isso é 4K num encoder lento: o teto é generoso porque o que ele
+# compra é a instância ser terminada sozinha se o comando travar, não cortar o probe.
+PROBE_TIMEOUT_SECONDS = 1800.0
 
 # O do `s3 cp` de nove bytes continua curto: o que leva minutos ali é o container
 # subindo, e um teto de meia hora faria um cp pendurado faturar meia hora.
@@ -496,12 +493,13 @@ def preflight(
     terminada em todo caminho de saída.
     """
     target = bucket or infra.buckets.pilot
+    judge = instance_type is None
     results: list[StepResult] = []
     launched: list[str] = []
 
     try:
         commit = _self_check(results, infra=infra, bucket=target, work_dir=work_dir)
-        if instance_type is None:
+        if judge:
             _judge_leg(
                 results,
                 launched,
@@ -529,12 +527,12 @@ def preflight(
             with suppress(_Aborted):
                 _step(results, Step.TERMINATE, lambda: _terminate(launched[0]))
 
-    table = summarize(results, ENCODE_STEPS if instance_type else JUDGE_STEPS)
+    table = summarize(results, JUDGE_STEPS if judge else ENCODE_STEPS)
     print(render_table(table))
     if failed(table):
         return EXIT_FAILURE
 
-    if instance_type is None:
+    if judge:
         _report(
             f"o preflight do Juiz passou; a evidência fica em "
             f"s3://{target}/{JUDGE_PREFLIGHT_PREFIX}, e o degrau seguinte é o triage do piloto"
@@ -1247,7 +1245,7 @@ def _probe_perf(
             repo_dir=REMOTE_REPO_DIR,
             work_dir=REMOTE_WORK_DIR,
         ),
-        timeout=PERF_PROBE_TIMEOUT_SECONDS,
+        timeout=PROBE_TIMEOUT_SECONDS,
     )
     _keep_probe_evidence(
         probe,
@@ -1291,15 +1289,19 @@ def _keep_probe_evidence(
 def _put_from_container(host: str, bucket: str, instance_id: str) -> str:
     """O `PutObject` do papel `encode` pelo caminho real, e a limpeza pelo Orquestrador."""
     key = f"{PREFLIGHT_PREFIX}{instance_id}.txt"
-    ssh_exec(host, put_command(bucket=bucket, key=key), timeout=PUT_TIMEOUT_SECONDS)
+    size = _put_and_list(host, bucket, key)
+    s3_rm(f"s3://{bucket}/{key}")
+    return f"{key}: {size} bytes escritos pelo container, listados e apagados"
 
+
+def _put_and_list(host: str, bucket: str, key: str) -> int:
+    ssh_exec(host, put_command(bucket=bucket, key=key), timeout=PUT_TIMEOUT_SECONDS)
     written = s3_list_prefix(bucket, key)
     if not written:
         raise PreflightError(
             f"s3://{bucket}/{key}: o cp do container não deixou o objeto no bucket"
         )
-    s3_rm(f"s3://{bucket}/{key}")
-    return f"{key}: {written[0].size} bytes escritos pelo container, listados e apagados"
+    return written[0].size
 
 
 def _launch_judge(
@@ -1311,7 +1313,6 @@ def _launch_judge(
     bucket: str,
     work_dir: Path,
 ) -> str:
-    """Sobe o plano vazio para `quality/plan.json` e lança o Juiz que vai baixá-lo."""
     text = serialize_plan(empty_plan(config))
     check_empty_plan(text)
 
@@ -1337,7 +1338,7 @@ def _launch_judge(
 def _probe_vmaf(
     *, host: str, config: ExperimentConfig, bucket: str, instance_id: str, work_dir: Path
 ) -> VmafScore:
-    """O `libvmaf` do container sobre um Master contra ele mesmo; guarda, e depois julga."""
+    """Guarda a saída crua antes de julgá-la, pelo motivo do `_probe_perf`."""
     probe = ssh_capture(
         host,
         vmaf_probe_command(
@@ -1347,7 +1348,7 @@ def _probe_vmaf(
             repo_dir=REMOTE_REPO_DIR,
             work_dir=REMOTE_WORK_DIR,
         ),
-        timeout=VMAF_PROBE_TIMEOUT_SECONDS,
+        timeout=PROBE_TIMEOUT_SECONDS,
     )
     prefix = f"{JUDGE_PREFLIGHT_PREFIX}{instance_id}/"
     _keep_probe_evidence(
@@ -1371,14 +1372,7 @@ def _put_from_judge(host: str, bucket: str, instance_id: str) -> str:
     O `DeleteObject` do Orquestrador não alcança `quality/` (ADR-0016).
     """
     key = f"{JUDGE_PREFLIGHT_PREFIX}{instance_id}/{JUDGE_PUT_NAME}"
-    ssh_exec(host, put_command(bucket=bucket, key=key), timeout=PUT_TIMEOUT_SECONDS)
-
-    written = s3_list_prefix(bucket, key)
-    if not written:
-        raise PreflightError(
-            f"s3://{bucket}/{key}: o cp do container não deixou o objeto no bucket"
-        )
-    return f"{key}: {written[0].size} bytes escritos pelo container e listados"
+    return f"{key}: {_put_and_list(host, bucket, key)} bytes escritos pelo container e listados"
 
 
 def _terminate(instance_id: str) -> str:

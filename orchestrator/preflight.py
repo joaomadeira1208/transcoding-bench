@@ -183,10 +183,8 @@ def vmaf_probe_command(
 ) -> list[str]:
     """O `libvmaf` sobre segundos de um Master contra ele mesmo, pelo caminho do Juiz.
 
-    O filtro é o do `judge/run_quality.sh`: a referência escalada para a geometria
-    do output, que aqui é a do próprio Master. O log sai pelo stdout e o stderr do
-    FFmpeg pelo stderr, com o status do FFmpeg — e o log vai mesmo quando ele
-    falha, porque o log parcial é a evidência do passo que reprovou.
+    O filtro é o do `judge/run_quality.sh`, e o `cat` do log vai mesmo quando o
+    FFmpeg falha: um `&&` no lugar do `;` apagaria a evidência do passo que reprovou.
     """
     source = f"{WORK_MOUNT}/{MASTERS_DIR_NAME}/{master['name']}"
     clip = ["-t", str(PROBE_SECONDS), "-i", source]
@@ -217,7 +215,7 @@ def vmaf_probe_command(
 
 
 def put_command(*, bucket: str, key: str) -> list[str]:
-    """O `s3 cp` do papel, pelo caminho real: de dentro do container."""
+    """O `s3 cp` do papel de dentro do container, e não do Orquestrador."""
     return [
         "sudo",
         "docker",
@@ -275,14 +273,11 @@ def perf_detail(counted: Mapping[str, Counter]) -> str:
 
 @dataclass(frozen=True)
 class VmafScore:
-    """O que o `libvmaf` do container comparou e o VMAF médio que ele deu."""
-
     frames: int
     vmaf: float
 
 
 def vmaf_score(raw: str) -> VmafScore:
-    """O log JSON do `libvmaf`, ou a recusa que nomeia por que ele não prova nada."""
     if not raw.strip():
         raise PreflightError("log do libvmaf ausente: o container não deixou log nenhum")
     try:

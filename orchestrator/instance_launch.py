@@ -114,18 +114,7 @@ def launch_encode(
     tags: Mapping[str, str],
 ) -> str:
     """Lança a Instância que vai consumir a fatia daquela arquitetura."""
-    role_args = [
-        "--work-dir",
-        REMOTE_WORK_DIR,
-        "--bucket",
-        bucket,
-        "--plan-key",
-        slice_key,
-        "--manifest-key",
-        manifest_key,
-        "--masters-prefix",
-        masters_prefix,
-    ]
+    role_args = _bootstrap_args(bucket, slice_key, manifest_key, masters_prefix)
     try:
         return run_instances(
             instance_type=target.instance.instance_type,
@@ -156,19 +145,7 @@ def launch_judge(
     volume_size_gb: int,
     name: str,
 ) -> str:
-    """Lança um Juiz com o tipo da definição e o perfil `judge`."""
-    role_args = [
-        "--work-dir",
-        REMOTE_WORK_DIR,
-        "--bucket",
-        bucket,
-        "--plan-key",
-        plan_key,
-        "--manifest-key",
-        manifest_key,
-        "--masters-prefix",
-        masters_prefix,
-    ]
+    role_args = _bootstrap_args(bucket, plan_key, manifest_key, masters_prefix)
     try:
         return run_instances(
             instance_type=judge.instance_type,
@@ -184,6 +161,23 @@ def launch_judge(
         )
     except OutputError as error:
         raise LaunchError(orphan_hint(f"Name={name}", error)) from error
+
+
+def _bootstrap_args(
+    bucket: str, plan_key: str, manifest_key: str, masters_prefix: str
+) -> list[str]:
+    return [
+        "--work-dir",
+        REMOTE_WORK_DIR,
+        "--bucket",
+        bucket,
+        "--plan-key",
+        plan_key,
+        "--manifest-key",
+        manifest_key,
+        "--masters-prefix",
+        masters_prefix,
+    ]
 
 
 def wait_for_bootstrapped_instance(

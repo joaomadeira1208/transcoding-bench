@@ -13,14 +13,7 @@ import pytest
 from conftest import make_infra, real_config
 from experiment_config import InstanceRecord
 from infra_config import parse_infra
-from instance_launch import (
-    ENCODE_ROLE,
-    LaunchError,
-    encode_name,
-    encode_tags,
-    encode_target,
-    judge_image,
-)
+from instance_launch import ENCODE_ROLE, LaunchError, encode_name, encode_tags, encode_target
 
 
 def amis():
@@ -62,23 +55,6 @@ class TestTheAmiOfTheRequestedType:
 
         with pytest.raises(LaunchError, match="riscv"):
             encode_target(config, amis(), "c7x.xlarge")
-
-
-class TestTheAmiOfTheJudge:
-    def test_the_x86_judge_of_the_definition_gets_the_x86_image(self):
-        assert real_config().quality.judge.arch == "x86_64"
-        assert judge_image(real_config().quality.judge, amis()) == amis().encode_amd64
-
-    def test_an_arm_judge_gets_the_arm_image(self):
-        judge = replace(real_config().quality.judge, arch="arm64")
-
-        assert judge_image(judge, amis()) == amis().encode_arm64
-
-    def test_an_arch_with_no_ami_is_refused_naming_the_arch(self):
-        judge = replace(real_config().quality.judge, arch="riscv")
-
-        with pytest.raises(LaunchError, match="riscv"):
-            judge_image(judge, amis())
 
 
 class TestTheTagsOfALaunchedInstance:

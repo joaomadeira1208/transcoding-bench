@@ -161,10 +161,30 @@ vazia — e o reescreve a cada mudança de estado; o `watch` o lê e volta ao me
 laço. Mora ao lado do arquivo de infra, em `~/work/state.json`, e um `run` novo
 o sobrescreve.
 
-O papel é o campo mais novo do arquivo, e o `run` escreve `encode` em toda
+O papel é um campo novo do arquivo, e o `run` escreve `encode` em toda
 arquitetura que lança. Um arquivo escrito antes dele — o `state.json` do piloto,
 que é evidência daquele lançamento e não se regenera — é lido como `encode` e
 reescrito com o campo.
+
+O `judge` **acrescenta** a entrada do Juiz ao arquivo que estiver lá, em vez de
+sobrescrevê-lo, ou o cria só com ela (D17 da Spec 5): a campanha registrada é
+preservada, entrada por entrada e no topo. Por isso cada entrada carrega também
+o `commit` e o `total_timeout` **do lançamento que a subiu** — o Juiz do Pass
+roda num commit que já tem o `judge/` e com um teto de 24 h, e o topo continua
+sendo o da campanha. Uma entrada escrita antes desses dois campos os herda do
+topo na leitura e é reescrita com eles, pelo mesmo arranjo do papel. A entrada
+do Juiz se chama `judge`, tem os outputs do plano como `runs_total` — cada output
+julgado é um run do Juiz (D15) — e `block_count` zero, porque o plano dele não
+tem blocos.
+
+A vigilância responde pelo **último lançamento** do arquivo, e só por ele
+(`watched`, no `campaign_watch.py`): o Juiz quando a última entrada é um Juiz, as
+arquiteturas de encode quando não. É sobre essas entradas que o poll pergunta,
+que o resumo imprime e que o código de saída decide — a `c7i` que morreu na
+campanha já teve o veredito dela, e contada de novo faria todo Pass sobre uma
+campanha retomada sair com erro. O prazo é o do `total_timeout` delas. O `watch
+--abort`, ao contrário, termina **toda** entrada de pé do arquivo, seja de que
+lançamento for: a saída de emergência não escolhe.
 
 O `total_timeout` está no arquivo porque o prazo do Orquestrador sai dele (D10):
 sem esse campo, o `watch` retomado teria de recebê-lo por flag, e uma flag que o
@@ -430,7 +450,7 @@ recusá-la amarraria um `apply` novo a um checkout novo do Orquestrador.
 Um subcomando por passo da campanha, e o `--infra` antes dele, com o caminho do
 arquivo acima. Roda na instância do Orquestrador, **dentro de `tmux`**: os
 subcomandos bloqueiam por horas e a sessão SSH que cair não pode levar o passo
-junto. São quatro:
+junto. São cinco:
 
     python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
@@ -438,6 +458,8 @@ junto. São quatro:
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight --judge
     python orchestrator/orchestrator.py --infra ~/work/infra.json run \
         --config config/pilot.toml --bucket <piloto>
+    python orchestrator/orchestrator.py --infra ~/work/infra.json judge \
+        --config config/pilot.toml --bucket <piloto> --plan ~/work/quality/plan.json
     python orchestrator/orchestrator.py --infra ~/work/infra.json watch
     python orchestrator/orchestrator.py --infra ~/work/infra.json watch --abort
 
@@ -787,8 +809,9 @@ e renderização são escritos direto (ADR-0022).
 
 ### O `watch` e o laço de vigilância
 
-O quarto subcomando é o mesmo laço do `run`, começando do arquivo de estado em
-vez de começar de um lançamento:
+O `watch` é o mesmo laço do `run` e do `judge`, começando do arquivo de estado
+em vez de começar de um lançamento — sobre as arquiteturas de encode ou sobre o
+Juiz, conforme o último lançamento que o arquivo registra:
 
     python orchestrator/orchestrator.py --infra ~/work/infra.json watch
 
@@ -874,8 +897,8 @@ pesquisador decidindo continuar a vigiar.
 **`Ctrl-C` não termina nada** (D11). O SIGINT para só a vigilância e imprime as
 duas linhas que importam — o `watch` para voltar e o `watch --abort` para
 terminar tudo —, saindo com 130, que é o status que distingue "o pesquisador
-parou de olhar" de "a campanha tem pendência". Só o `run` e o `watch` dizem
-isso: um `Ctrl-C` no `prepare-masters` ou no `preflight` interrompe um passo que
+parou de olhar" de "a campanha tem pendência". Só o `run`, o `judge` e o `watch`
+dizem isso: um `Ctrl-C` no `prepare-masters` ou no `preflight` interrompe um passo que
 lança instância e não escreve arquivo de estado nenhum, e a linha de lá manda
 conferir no `describe-instances` se a instância daquele passo ficou de pé.
 
@@ -900,8 +923,71 @@ linha de cada poll — mais a decisão do `vigilance.py` e o arquivo de estado.
 Com `--abort` o subcomando não vigia: termina, numa chamada só, todas as
 instâncias que o arquivo de estado lista e ainda dá como de pé, marcando-as
 mortas em seguida, e sai. É a saída de emergência que não é o console da AWS
-(D12). O que já está em `runs/` fica lá, para o `resume.py`. Um arquivo sem
-instância de pé é "nada a terminar", com status zero.
+(D12). O que já está em `runs/` fica lá, para o `resume.py`, e o que o Juiz já
+julgou fica em `quality/results/`. Um arquivo sem instância de pé é "nada a
+terminar", com status zero.
+
+### O Pass de qualidade: `judge`
+
+O quinto subcomando sobe o Juiz sobre o plano que o `quality_triage.py`
+escreveu, e entra no mesmo laço do `run` (D16 a D18 da Spec 5):
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json judge \
+        --config config/pilot.toml --bucket <piloto> --plan ~/work/quality/plan.json \
+        [--output-timeout <s>] [--total-timeout <s>]
+
+`--config`, `--bucket` e `--plan` são obrigatórios e sem default: o par
+definição/bucket continua sendo o gate entre piloto e campanha, e o plano é o
+que o pesquisador leu no relatório do triage. Os dois timeouts são as camadas
+locais do `run_quality.sh` e viajam até ele pelo `launch_container.sh` do Juiz:
+`--output-timeout` é o orçamento de cada output (2 h) e `--total-timeout` o teto
+do Pass inteiro (24 h). Os defaults são operacionais, e não do plano.
+
+Em passos:
+
+1. **A auto-checagem**, pela mesma função e com a mesma tabela do `run`. Falha
+   ali é saída sem lançamento. O manifesto no bucket alvo é pré-condição aqui
+   também: o bootstrap do Juiz baixa os Masters por ele.
+2. **O plano**, lido e validado pelo `check_plan` do `quality_plan.py`; um plano
+   sem outputs, ou com uma entrada malformada, é recusado sem lançar nada.
+3. **A guarda do arquivo de estado**, a mesma do `run`: qualquer instância de pé —
+   uma arquitetura de encode ou um Juiz anterior — recusa, nomeando o id e
+   mandando rodar o `watch --abort`. E a recíproca vale: o `run` recusa um Juiz
+   de pé. Um arquivo de **outro bucket** é recusado também, porque o bucket do
+   topo é o que o poll lista, e o Juiz seria vigiado onde o marcador dele nunca
+   aparece.
+4. **O upload** do plano para `quality/plan.json`, a chave que o bootstrap do
+   Juiz baixa.
+5. **O lançamento**, pelo `judge_launch.py`: o tipo e a arquitetura de
+   `[quality.judge]`, a AMI pela arquitetura — a `encode_amd64` do arquivo de
+   infra serve ao `c7i.4xlarge`, e não há AMI nova —, perfil `judge`, 100 GB gp3,
+   hop limit 2 e as tags `role=judge`, `commit` e `Name=transcoding-bench-judge`,
+   com o `judge/bootstrap.sh` pelo mesmo user-data fino, recebendo as chaves do
+   plano e do manifesto. A entrada do Juiz é acrescentada ao arquivo de estado
+   assim que o `run-instances` devolve o id, `bootstrapping` e sem PID.
+6. **A espera** por `running` e pelo `cloud-init`. Erro ou timeout termina o
+   Juiz e sai com erro: um build quebrado custa minutos.
+7. **O disparo desacoplado**, pelo mesmo `setsid`/`nohup` do `run`: o
+   `judge/launch_container.sh` com stdin de `/dev/null`, as saídas em
+   `~/work/launch_container.log` da instância e os dois timeouts; o PID volta
+   pelo stdout para o arquivo de estado. Falha daqui em diante não termina o
+   Juiz: a mensagem manda o `watch --abort`.
+8. **A vigilância**, o mesmo laço do `run` e do `watch`, sobre a entrada do Juiz:
+   `kill -0` no PID, o marcador `status/judge_done` pelo leitor do encode — ele
+   tem a mesma forma (D15) —, a linha do `status/judge_progress` a cada 5
+   minutos, a terminação no poll em que o marcador é válido e o prazo de
+   `--total-timeout` mais o bootstrap mais a margem. O status de saída é zero só
+   se nenhum output falhou, o Juiz não morreu e nenhum teto disparou.
+
+`Ctrl-C` para só a vigilância, como no `run`; o `watch` retoma o Juiz pelo
+arquivo de estado e o `watch --abort` o termina, sem código de vigilância novo.
+
+O que ganha teste é o núcleo do `judge_launch.py` — a projeção do lançamento a
+partir de `[quality.judge]`, a entrada do Juiz, o arquivo a que ela é
+acrescentada e o nome do plano em que o bootstrap e o disparo concordam —, mais a entrada acrescentada em ida e volta
+pelo `campaign_state.py`, a guarda recusando um Juiz de pé, o lançamento vigiado
+e a decisão de saída sobre o marcador do Juiz no `campaign_watch.py`. Laço,
+comandos remotos e renderização são escritos direto, como no `run`.
 
 ## A retomada: `resume.py`
 

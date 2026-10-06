@@ -31,7 +31,14 @@ from campaign_launch import (
     slice_key,
     slice_name,
 )
-from campaign_state import CampaignState, StateError, TrackedInstance, parse_state, serialize_state
+from campaign_state import (
+    CampaignState,
+    StateError,
+    TrackedInstance,
+    appended,
+    parse_state,
+    serialize_state,
+)
 from campaign_watch import (
     LIVENESS_TIMEOUT_SECONDS,
     ORCHESTRATOR_CLI,
@@ -43,6 +50,7 @@ from campaign_watch import (
     settled_line,
     summary_lines,
     watch_deadline_seconds,
+    watched,
 )
 from command_output import (
     DescribedInstance,
@@ -82,14 +90,23 @@ from instance_launch import (
     encode_name,
     encode_tags,
     encode_target,
-    judge_image,
+    image_for_arch,
     launch_encode,
-    launch_judge,
+    launch_instance,
     orphan_hint,
     render_user_data,
     wait_for_bootstrapped_instance,
 )
 from instance_wait import BootstrapError, WaitTimeout
+from judge_launch import (
+    QUALITY_PLAN_KEY,
+    QUALITY_RESULTS_PREFIX,
+    JudgeError,
+    judge_dispatch_command,
+    judge_launch,
+    judge_state,
+    launched_judge,
+)
 from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
 from masters_plan import build_masters_plan, iter_masters
@@ -114,7 +131,7 @@ from preflight import (
     vmaf_probe_command,
     vmaf_score,
 )
-from quality_plan import PLAN_FILENAME, PlanError, check_empty_plan, empty_plan
+from quality_plan import PLAN_FILENAME, PlanError, check_empty_plan, check_plan, empty_plan
 from scenario_plan import (
     build_canonical_plan,
     build_instance_slices,
@@ -123,7 +140,9 @@ from scenario_plan import (
 )
 from status_check import (
     STATUS_PREFIX,
+    JudgeProgress,
     Progress,
+    Role,
     StatusError,
 )
 from vigilance import Liveness, Vigilance, decide_vigilance, is_standing, marker_verdict
@@ -145,10 +164,7 @@ MANIFEST_NAME = "manifest.json"
 
 PREFLIGHT_PREFIX = "runs/preflight/"
 
-QUALITY_PREFIX = "quality/"
-QUALITY_PLAN_KEY = f"{QUALITY_PREFIX}{PLAN_FILENAME}"
-JUDGE_PREFLIGHT_PREFIX = f"{QUALITY_PREFIX}results/preflight/"
-JUDGE_VOLUME_SIZE_GB = 100
+JUDGE_PREFLIGHT_PREFIX = f"{QUALITY_RESULTS_PREFIX}preflight/"
 SELF_CHECK_PREFIX = f"{PREFLIGHT_PREFIX}self-check/"
 SELF_CHECK_OBJECT = "probe.txt"
 SELF_CHECK_CONTENT = "preflight\n"
@@ -158,6 +174,9 @@ LOCAL_SCENARIOS_DIR = "scenarios"
 
 RUN_TIMEOUT_SECONDS = 4 * 60 * 60
 TOTAL_TIMEOUT_SECONDS = 120 * 60 * 60
+
+JUDGE_OUTPUT_TIMEOUT_SECONDS = 2 * 60 * 60
+JUDGE_TOTAL_TIMEOUT_SECONDS = 24 * 60 * 60
 
 # Sem teto, o `curl` do `prepare.sh` que estola pendura o CLI para sempre, com a
 # instância faturando e indistinguível das ~2 h de silêncio do caso normal.
@@ -191,7 +210,7 @@ EXIT_FAILURE = 1
 # pesquisador parou de olhar" de "a campanha tem pendência" (D11).
 EXIT_INTERRUPTED = 130
 
-_VIGILANT_SUBCOMMANDS = frozenset({"run", "watch"})
+_VIGILANT_SUBCOMMANDS = frozenset({"run", "judge", "watch"})
 
 
 class PreparationError(Exception):
@@ -329,13 +348,69 @@ def main() -> int:
             **common,
         )
     )
+    quality = subcommands.add_parser(
+        "judge",
+        help="sobe o plano do Pass, lança o Juiz e dispara o run_quality.sh nele",
+        description=(
+            "Roda a auto-checagem, valida o plano do quality_triage.py, recusa um arquivo "
+            "de estado com instância de pé, sobe o plano para quality/plan.json, lança o "
+            "Juiz de [quality.judge], espera o cloud-init e dispara o run_quality.sh "
+            "desacoplado da sessão SSH. A entrada do Juiz é acrescentada ao arquivo de "
+            "estado, e a vigilância é a mesma do run."
+        ),
+    )
+    quality.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="caminho do TOML da definição, de onde sai o [quality.judge]",
+    )
+    quality.add_argument(
+        "--bucket",
+        required=True,
+        help="bucket que recebe o plano e os resultados: o do piloto ou o da campanha",
+    )
+    quality.add_argument(
+        "--plan",
+        required=True,
+        type=Path,
+        help="o plan.json que o quality_triage.py escreveu",
+    )
+    quality.add_argument(
+        "--output-timeout",
+        type=positive_seconds,
+        default=JUDGE_OUTPUT_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=(
+            f"orçamento de cada output, repassado ao run_quality.sh "
+            f"(default: {JUDGE_OUTPUT_TIMEOUT_SECONDS})"
+        ),
+    )
+    quality.add_argument(
+        "--total-timeout",
+        type=positive_seconds,
+        default=JUDGE_TOTAL_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=f"teto do Pass inteiro, idem (default: {JUDGE_TOTAL_TIMEOUT_SECONDS})",
+    )
+    quality.set_defaults(
+        run=lambda args, **common: judge(
+            config=_load_config(args.config),
+            config_path=args.config,
+            bucket=args.bucket,
+            plan_path=args.plan.expanduser(),
+            output_timeout=args.output_timeout,
+            total_timeout=args.total_timeout,
+            **common,
+        )
+    )
     watch = subcommands.add_parser(
         "watch",
         help="retoma a vigilância pelo arquivo de estado; --abort é a saída de emergência",
         description=(
-            "Lê o arquivo de estado do work dir, o valida e volta ao mesmo laço do run, "
-            "de onde o Orquestrador caiu: as três perguntas a cada 5 minutos, a "
-            "terminação de cada arquitetura no poll em que o marcador dela aparece e o "
+            "Lê o arquivo de estado do work dir, o valida e volta ao mesmo laço do run "
+            "e do judge, de onde o Orquestrador caiu: as três perguntas a cada 5 minutos, "
+            "a terminação de cada instância no poll em que o marcador dela aparece e o "
             "resumo ao fim. As que o arquivo já dá por terminadas são puladas. Com "
             "--abort não vigia: termina toda instância que o arquivo lista e sai."
         ),
@@ -612,17 +687,16 @@ def _judge_leg(
     work_dir: Path,
 ) -> None:
     judge = config.quality.judge
-    image_id = _step(
+    _step(
         results,
         Step.AMI,
-        lambda: judge_image(judge, infra.amis),
+        lambda: image_for_arch(infra.amis, judge.arch, judge.instance_type),
         detail=lambda image: f"{judge.instance_type} ({judge.arch}): {image}",
     )
     instance_id = _step(
         results,
         Step.LAUNCH,
         lambda: _launch_judge(
-            image_id=image_id,
             infra=infra,
             config=config,
             commit=commit,
@@ -678,7 +752,8 @@ def run_campaign(
         return EXIT_FAILURE
 
     state_path = work_dir / STATE_NAME
-    _guard_state(state_path)
+    if _guard_state(state_path) is not None:
+        _report(f"{state_path}: só instâncias mortas, o arquivo de estado pode ser reescrito")
     if slices_dir is None:
         _guard_runs(bucket)
         campaign = full_campaign(config)
@@ -724,6 +799,90 @@ def run_campaign(
     return _drive_vigilance(tracked, started=started)
 
 
+def judge(
+    *,
+    infra: InfraConfig,
+    work_dir: Path,
+    config: ExperimentConfig,
+    config_path: Path,
+    bucket: str,
+    plan_path: Path,
+    output_timeout: int,
+    total_timeout: int,
+) -> int:
+    """O Pass de qualidade: plano no bucket, o Juiz, e a mesma vigilância do `run`."""
+    started = time.monotonic()
+    results: list[StepResult] = []
+    try:
+        commit = _self_check(results, infra=infra, bucket=bucket, work_dir=work_dir)
+    except _Aborted:
+        commit = None
+    print(render_table(summarize(results, SELF_CHECK_STEPS)))
+    if commit is None:
+        return EXIT_FAILURE
+
+    plan = check_plan(plan_path.read_bytes())
+    state_path = work_dir / STATE_NAME
+    tracked = _StateFile(
+        state_path,
+        judge_state(
+            _guard_state(state_path),
+            bucket=bucket,
+            config_path=str(config_path),
+            commit=commit,
+            total_timeout=total_timeout,
+        ),
+    )
+
+    s3_cp(str(plan_path), f"s3://{bucket}/{QUALITY_PLAN_KEY}")
+    _report(f"s3://{bucket}/{QUALITY_PLAN_KEY}: {len(plan['outputs'])} output(s) a julgar")
+    tracked.write()
+
+    launch = judge_launch(
+        config,
+        infra,
+        commit=commit,
+        bucket=bucket,
+        manifest_key=f"{MASTERS_PREFIX}{MANIFEST_NAME}",
+        masters_prefix=MASTERS_PREFIX,
+    )
+    instance_id = launch_instance(launch)
+    entry = launched_judge(
+        instance_id,
+        instance_type=launch.instance_type,
+        plan=plan,
+        commit=commit,
+        total_timeout=total_timeout,
+    )
+    tracked.append(entry)
+    _report(
+        f"{instance_id}: Juiz ({launch.instance_type}) lançado no commit {commit}, "
+        f"acrescentado a {tracked.path}"
+    )
+
+    try:
+        host = wait_for_bootstrapped_instance(instance_id, report=_report)
+    except _FAILURES as error:
+        _fail(error)
+        _terminate_all(tracked)
+        return EXIT_FAILURE
+
+    try:
+        _dispatch_judge(
+            tracked, entry, host, output_timeout=output_timeout, total_timeout=total_timeout
+        )
+    except _FAILURES as error:
+        _fail(error)
+        _fail(f"o Juiz de {tracked.path} continua de pé (ADR-0010): o watch --abort o termina")
+        return EXIT_FAILURE
+
+    _report(
+        f"o Juiz roda sozinho; o arquivo de estado é {tracked.path}. Ctrl-C para a "
+        f"vigilância sem terminar nada, e o watch a retoma"
+    )
+    return _drive_vigilance(tracked, started=started)
+
+
 def watch_campaign(*, infra: InfraConfig, work_dir: Path) -> int:
     """A vigilância retomada de onde o Orquestrador caiu, pelo arquivo de estado (D12)."""
     started = time.monotonic()
@@ -747,7 +906,8 @@ def watch_abort(*, infra: InfraConfig, work_dir: Path) -> int:
 
     _report(
         f"{terminated} instância(s) terminada(s); o que já está em "
-        f"s3://{tracked.state.bucket}/{RUNS_PREFIX} fica lá, para o resume.py"
+        f"s3://{tracked.state.bucket}/{RUNS_PREFIX} fica lá, para o resume.py, e o que "
+        f"o Juiz julgou, em s3://{tracked.state.bucket}/{QUALITY_RESULTS_PREFIX}"
     )
     return EXIT_OK
 
@@ -755,22 +915,36 @@ def watch_abort(*, infra: InfraConfig, work_dir: Path) -> int:
 def _drive_vigilance(tracked: _StateFile, *, started: float) -> int:
     """O laço até nada mais estar de pé, o resumo e o código de saída (D2, D8, D10)."""
     limit = watch_deadline_seconds(
-        total_timeout=tracked.state.total_timeout,
+        total_timeout=max(
+            (each.total_timeout for each in watched(tracked.state)),
+            default=tracked.state.total_timeout,
+        ),
         bootstrap_timeout=BOOTSTRAP_TIMEOUT_SECONDS,
     )
     blown = _watch_loop(tracked, started=started, limit=limit)
 
+    launch = watched(tracked.state)
     _report("o lançamento terminou:")
-    for line in summary_lines(tracked.state.instances):
+    for line in summary_lines(launch):
         print(line)
-    reasons = failure_reasons(tracked.state.instances, deadline_blown=blown)
+    reasons = failure_reasons(launch, deadline_blown=blown)
+    judged = any(each.role is Role.JUDGE for each in launch)
     if not reasons:
-        _report(
-            f"as {len(tracked.state.instances)} arquiteturas terminaram sem pendência; "
-            f"as Execuções estão em s3://{tracked.state.bucket}/{RUNS_PREFIX}"
-        )
+        if judged:
+            _report(
+                f"o Juiz julgou todo output do plano; os resultados estão em "
+                f"s3://{tracked.state.bucket}/{QUALITY_RESULTS_PREFIX}"
+            )
+        else:
+            _report(
+                f"as {len(launch)} arquiteturas terminaram sem pendência; "
+                f"as Execuções estão em s3://{tracked.state.bucket}/{RUNS_PREFIX}"
+            )
         return EXIT_OK
 
+    if judged:
+        _fail(_lines("o Pass de qualidade terminou com pendência:", reasons))
+        return EXIT_FAILURE
     _fail(_lines("a campanha terminou com pendência:", reasons))
     for line in resume_hint(tracked.state):
         _fail(line)
@@ -793,15 +967,15 @@ def _watch_loop(tracked: _StateFile, *, started: float, limit: float) -> bool:
 
 
 def _standing(tracked: _StateFile) -> list[TrackedInstance]:
-    """As arquiteturas que ainda faturam: são elas que o poll pergunta e que ele termina."""
-    return [each for each in tracked.state.instances if is_standing(each.state)]
+    """As instâncias do lançamento vigiado que ainda faturam: são elas que o poll pergunta."""
+    return [each for each in watched(tracked.state) if is_standing(each.state)]
 
 
 def _poll(tracked: _StateFile, unanswered: dict[str, int]) -> None:
     """As três perguntas por arquitetura de pé, e uma linha para cada arquitetura (D2)."""
     listed = _status_listing(tracked)
 
-    for each in tracked.state.instances:
+    for each in watched(tracked.state):
         if not is_standing(each.state):
             print(settled_line(each))
         elif listed is None:
@@ -842,8 +1016,8 @@ def _poll_architecture(
         _fail(f"{each.instance}: o poll não pôde ser feito desta vez: {error}")
         return
 
-    silent = unanswered.get(each.instance, 0) + 1 if liveness is Liveness.NO_ANSWER else 0
-    unanswered[each.instance] = silent
+    silent = unanswered.get(each.instance_id, 0) + 1 if liveness is Liveness.NO_ANSWER else 0
+    unanswered[each.instance_id] = silent
     state = decide_vigilance(
         described_state=described.state if described else None,
         liveness=liveness,
@@ -853,12 +1027,12 @@ def _poll_architecture(
     print(poll_line(each, state=state, progress=progress, unanswered_polls=silent))
 
     if state is Vigilance.READY_TO_TERMINATE:
-        _remember(tracked, each.instance, state=state, outcome=outcome)
+        _remember(tracked, each.instance_id, state=state, outcome=outcome)
         _terminate_architecture(tracked, each, Vigilance.FINISHED)
     elif state is Vigilance.DEAD:
         _terminate_architecture(tracked, each, Vigilance.DEAD)
     elif state is not each.state:
-        _remember(tracked, each.instance, state=state)
+        _remember(tracked, each.instance_id, state=state)
 
 
 def _liveness(each: TrackedInstance, described: DescribedInstance | None) -> Liveness:
@@ -888,7 +1062,9 @@ def _status_object(tracked: _StateFile, key: str, listed: set[str]) -> Any:
     return json.loads(local.read_text(encoding="utf-8"))
 
 
-def _progress(tracked: _StateFile, each: TrackedInstance, listed: set[str]) -> Progress | None:
+def _progress(
+    tracked: _StateFile, each: TrackedInstance, listed: set[str]
+) -> Progress | JudgeProgress | None:
     """O progresso desta Instância; o da tentativa anterior chega como `None` e some.
 
     Apagar o `except` faz um objeto de progresso deformado — telemetria, que o
@@ -924,14 +1100,18 @@ def _terminate_architecture(tracked: _StateFile, each: TrackedInstance, state: V
                 f"no arquivo de estado, e o próximo poll tenta de novo"
             )
             return
-    _remember(tracked, each.instance, state=state)
+    _remember(tracked, each.instance_id, state=state)
 
 
-def _remember(tracked: _StateFile, instance: str, **changes: Any) -> None:
-    """A mudança de uma arquitetura, que vai para o disco na hora (D12)."""
+def _remember(tracked: _StateFile, instance_id: str, **changes: Any) -> None:
+    """A mudança de uma instância, que vai para o disco na hora (D12).
+
+    Pelo `instance_id`, e não pelo nome: o Juiz de um Pass repetido se chama
+    `judge` como o anterior, e a mudança de um reescreveria o outro.
+    """
     tracked.update(
         [
-            replace(each, **changes) if each.instance == instance else each
+            replace(each, **changes) if each.instance_id == instance_id else each
             for each in tracked.state.instances
         ]
     )
@@ -959,6 +1139,10 @@ class _StateFile:
         self.state = replace(self.state, instances=tuple(instances))
         self.write()
 
+    def append(self, entry: TrackedInstance) -> None:
+        self.state = appended(self.state, entry)
+        self.write()
+
     def write(self) -> None:
         self.path.write_text(serialize_state(self.state), encoding="utf-8")
 
@@ -975,14 +1159,15 @@ def _self_check(
     return commit
 
 
-def _guard_state(path: Path) -> None:
-    """A guarda da D12: instância de pé no arquivo de estado recusa o lançamento novo."""
+def _guard_state(path: Path) -> CampaignState | None:
+    """A guarda da D12, e o arquivo que ela leu, ou `None` se não havia arquivo."""
     if not path.exists():
-        return
-    refusal = refuse_standing_instances(_StateFile.load(path).state)
+        return None
+    state = _StateFile.load(path).state
+    refusal = refuse_standing_instances(state)
     if refusal is not None:
         raise CampaignError(f"{path}: {refusal}")
-    _report(f"{path}: só instâncias mortas, o arquivo de estado pode ser reescrito")
+    return state
 
 
 def _guard_runs(bucket: str) -> None:
@@ -1032,7 +1217,14 @@ def _launch_all(
     """Uma Instância por fatia, cada uma no arquivo de estado assim que tem id."""
     for each in campaign.slices:
         instance_id = _launch_architecture(each, state=tracked.state, infra=infra, config=config)
-        tracked.update([*tracked.state.instances, launched_instance(each, instance_id)])
+        tracked.append(
+            launched_instance(
+                each,
+                instance_id,
+                commit=tracked.state.commit,
+                total_timeout=tracked.state.total_timeout,
+            )
+        )
         _report(
             f"{instance_id}: {each.instance.id} ({each.instance.instance_type}) lançada no "
             f"commit {tracked.state.commit}, fatia em {each.key}"
@@ -1114,13 +1306,40 @@ def _dispatch_all(
         )
 
 
+def _dispatch_judge(
+    tracked: _StateFile,
+    judge: TrackedInstance,
+    host: str,
+    *,
+    output_timeout: int,
+    total_timeout: int,
+) -> None:
+    """O `launch_container.sh` do Juiz desacoplado, e o PID no arquivo de estado."""
+    command = judge_dispatch_command(
+        repo_dir=REMOTE_REPO_DIR,
+        work_dir=REMOTE_WORK_DIR,
+        bucket=tracked.state.bucket,
+        commit=judge.commit,
+        instance_id=judge.instance_id,
+        instance_type=judge.instance_type,
+        output_timeout=output_timeout,
+        total_timeout=total_timeout,
+    )
+    pid = parse_dispatched_pid(ssh_exec(host, command, timeout=DISPATCH_TIMEOUT_SECONDS))
+    _remember(tracked, judge.instance_id, pid=pid, state=Vigilance.RUNNING)
+    _report(
+        f"{judge.instance_id}: run_quality.sh disparado, PID {pid}, "
+        f"log em {REMOTE_WORK_DIR}/{DISPATCH_LOG_NAME}"
+    )
+
+
 def _terminate_all(tracked: _StateFile) -> int:
     """Termina o que está de pé, numa chamada só, e o marca morto; devolve quantas eram.
 
     O `replace` sobre **todas** apagaria, da arquitetura que o marcador já
     encerrou, o `outcome` de que saem o resumo final e o código de saída.
     """
-    standing = _standing(tracked)
+    standing = [each for each in tracked.state.instances if is_standing(each.state)]
     if standing:
         _report(f"terminando {', '.join(architecture.instance_id for architecture in standing)}")
         terminate_instances([architecture.instance_id for architecture in standing])
@@ -1306,7 +1525,6 @@ def _put_and_list(host: str, bucket: str, key: str) -> int:
 
 def _launch_judge(
     *,
-    image_id: str,
     infra: InfraConfig,
     config: ExperimentConfig,
     commit: str,
@@ -1321,18 +1539,15 @@ def _launch_judge(
     local.write_text(text, encoding="utf-8")
     s3_cp(str(local), f"s3://{bucket}/{QUALITY_PLAN_KEY}")
 
-    return launch_judge(
-        judge=config.quality.judge,
-        image_id=image_id,
-        infra=infra,
+    launch = judge_launch(
+        config,
+        infra,
         commit=commit,
         bucket=bucket,
-        plan_key=QUALITY_PLAN_KEY,
         manifest_key=f"{MASTERS_PREFIX}{MANIFEST_NAME}",
         masters_prefix=MASTERS_PREFIX,
-        volume_size_gb=JUDGE_VOLUME_SIZE_GB,
-        name=PREFLIGHT_NAME_TAG,
     )
+    return launch_instance(replace(launch, tags={**launch.tags, "Name": PREFLIGHT_NAME_TAG}))
 
 
 def _probe_vmaf(
@@ -1436,8 +1651,9 @@ _FAILURES = (
     LaunchError,
     PreparationError,
     PreflightError,
-    PlanError,
     CampaignError,
+    JudgeError,
+    PlanError,
     StateError,
     StatusError,
     OSError,

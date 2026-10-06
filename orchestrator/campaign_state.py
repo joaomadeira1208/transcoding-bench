@@ -10,19 +10,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any
 
 from field_checks import FieldError, check_fields, check_int, check_non_empty_str
 from status_check import (
     DoneMarker,
+    JudgeProgress,
     Progress,
     Role,
     StatusError,
     StatusKeys,
     check_done_marker,
+    check_judge_progress,
     check_progress,
+    judge_progress_line,
     progress_line,
 )
 from vigilance import Vigilance
@@ -43,6 +46,8 @@ class TrackedInstance:
     pid: int | None
     block_count: int
     runs_total: int
+    commit: str
+    total_timeout: int
     state: Vigilance
     outcome: DoneMarker | None
 
@@ -51,12 +56,16 @@ class TrackedInstance:
         """Os dois objetos de `status/` desta entrada, nomeados pelo papel dela."""
         return StatusKeys.of(self.role, self.instance_type)
 
-    def read_progress(self, payload: Any) -> Progress | None:
+    def read_progress(self, payload: Any) -> Progress | JudgeProgress | None:
         """O objeto de progresso desta entrada, pelo leitor que ela escolhe."""
+        if self.role is Role.JUDGE:
+            return check_judge_progress(payload, instance_id=self.instance_id)
         return check_progress(payload, instance_id=self.instance_id)
 
-    def render_progress(self, progress: Progress | None) -> str:
-        """A linha desta entrada neste poll, com o total de runs da fatia dela."""
+    def render_progress(self, progress: Progress | JudgeProgress | None) -> str:
+        """A linha desta entrada neste poll, pelo renderizador do papel dela."""
+        if self.role is Role.JUDGE:
+            return judge_progress_line(progress)
         return progress_line(progress, instance=self.instance, runs_total=self.runs_total)
 
 
@@ -75,16 +84,22 @@ class CampaignState:
 def parse_state(payload: Any) -> CampaignState:
     """Valida o arquivo já parseado, falhando alto no primeiro campo defeituoso."""
     values = _values(CampaignState, _object(payload, "estado"), "")
+    launch = {"commit": values["commit"], "total_timeout": values["total_timeout"]}
     return CampaignState(
         **{
             **values,
             "slice_keys": _slice_keys(values["slice_keys"]),
             "instances": tuple(
-                _tracked(entry, f"instances[{index}]")
+                _tracked(entry, f"instances[{index}]", launch)
                 for index, entry in enumerate(values["instances"])
             ),
         }
     )
+
+
+def appended(state: CampaignState, entry: TrackedInstance) -> CampaignState:
+    """O arquivo com mais uma entrada ao fim, e o que ele já registrava intocado (D17)."""
+    return replace(state, instances=(*state.instances, entry))
 
 
 def serialize_state(state: CampaignState) -> str:
@@ -92,8 +107,8 @@ def serialize_state(state: CampaignState) -> str:
     return json.dumps(asdict(state), indent=2, separators=(",", ": "), default=_enum_value) + "\n"
 
 
-def _tracked(payload: Any, where: str) -> TrackedInstance:
-    raw = {"role": Role.ENCODE.value, **_object(payload, where)}
+def _tracked(payload: Any, where: str, launch: Mapping[str, Any]) -> TrackedInstance:
+    raw = {"role": Role.ENCODE.value, **launch, **_object(payload, where)}
     values = _values(TrackedInstance, raw, f"{where}.")
     return TrackedInstance(
         **{

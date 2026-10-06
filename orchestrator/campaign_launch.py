@@ -99,13 +99,15 @@ def refuse_standing_instances(state: CampaignState) -> str | None:
     return "\n".join(
         [
             f"{len(standing)} instância(s) de um lançamento anterior ainda de pé: "
-            f"rode o watch --abort antes de um run novo",
+            f"rode o watch --abort antes de lançar de novo",
             *(f"  {each.instance_id} ({each.instance}): {each.state.value}" for each in standing),
         ]
     )
 
 
-def launched_instance(each: ArchitectureSlice, instance_id: str) -> TrackedInstance:
+def launched_instance(
+    each: ArchitectureSlice, instance_id: str, *, commit: str, total_timeout: int
+) -> TrackedInstance:
     """A arquitetura recém-lançada como o arquivo de estado a guarda, antes do disparo."""
     return TrackedInstance(
         role=Role.ENCODE,
@@ -115,6 +117,8 @@ def launched_instance(each: ArchitectureSlice, instance_id: str) -> TrackedInsta
         pid=None,
         block_count=each.block_count,
         runs_total=each.runs_total,
+        commit=commit,
+        total_timeout=total_timeout,
         state=Vigilance.BOOTSTRAPPING,
         outcome=None,
     )
@@ -210,6 +214,11 @@ def dispatch_command(
             str(total_timeout),
         ]
     )
+    return detached_command(launch, work_dir=work_dir)
+
+
+def detached_command(launch: str, *, work_dir: str) -> list[str]:
+    """Um `launch_container.sh` já citado, desacoplado da sessão SSH, com o PID no stdout."""
     log = shlex.quote(f"{work_dir}/{DISPATCH_LOG_NAME}")
     pid_file = shlex.quote(f"{work_dir}/{DISPATCH_PID_NAME}")
     return [

@@ -700,12 +700,7 @@ def judge(
     output_timeout: int,
     total_timeout: int,
 ) -> int:
-    """O Pass de qualidade: plano no bucket, o Juiz, e a mesma vigilância do `run`.
-
-    Até o `cloud-init` qualquer falha termina o Juiz: um build quebrado custa
-    minutos. Depois do disparo ele é auto-dirigido como o encode, e o que o
-    termina é o marcador dele, o prazo ou o `watch --abort`.
-    """
+    """O Pass de qualidade: plano no bucket, o Juiz, e a mesma vigilância do `run`."""
     started = time.monotonic()
     results: list[StepResult] = []
     try:

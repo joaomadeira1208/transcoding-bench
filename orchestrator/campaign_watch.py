@@ -24,12 +24,7 @@ RESUME_CLI = "python orchestrator/resume.py"
 
 
 def watched(state: CampaignState) -> tuple[TrackedInstance, ...]:
-    """As entradas do último lançamento do arquivo: é sobre elas que a vigilância responde.
-
-    O Juiz é acrescentado ao arquivo da campanha (D17 da Spec 5), e a arquitetura
-    que morreu dias antes já teve o veredito dela: contada de novo, faria todo
-    Pass sobre uma campanha retomada sair com erro.
-    """
+    """As entradas do último lançamento do arquivo: é sobre elas que a vigilância responde."""
     if state.instances and state.instances[-1].role is Role.JUDGE:
         return state.instances[-1:]
     return tuple(each for each in state.instances if each.role is Role.ENCODE)

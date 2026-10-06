@@ -82,11 +82,7 @@ def judge_state(
     commit: str,
     total_timeout: int,
 ) -> CampaignState:
-    """O arquivo a que a entrada do Juiz vai ser acrescentada, ou o que nasce para ela (D17).
-
-    O bucket do arquivo é o que o poll lista: um Juiz acrescentado ao arquivo de
-    outro bucket seria vigiado onde o marcador dele nunca aparece.
-    """
+    """O arquivo a que a entrada do Juiz vai ser acrescentada, ou o que nasce para ela (D17)."""
     if previous is None:
         return CampaignState(
             bucket=bucket,

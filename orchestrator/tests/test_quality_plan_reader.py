@@ -9,8 +9,15 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from conftest import ABSENT, make_plan_output, make_quality_plan, make_quality_plan_json
-from quality_plan import PlanError, check_plan
+from conftest import (
+    ABSENT,
+    make_plan_output,
+    make_quality_plan,
+    make_quality_plan_json,
+    real_config,
+)
+from quality_plan import PlanError, check_empty_plan, check_plan, empty_plan
+from scenario_plan import serialize_plan
 
 TEXT_FIELDS = (
     "run_id",
@@ -153,3 +160,37 @@ class TestTheEntry:
 
         with pytest.raises(PlanError, match=r"outputs\[1\]"):
             check_plan(make_quality_plan_json(outputs=outputs))
+
+
+class TestTheEmptyPlanOfThePreflight:
+    # O `preflight --judge` sobe um plano sem output nenhum só para provar o
+    # `GetObject` do papel; o `judge` que o recebesse lançaria um Juiz de 16 vCPU
+    # para não julgar nada.
+    def test_the_empty_plan_is_accepted_by_the_preflight(self):
+        plan = empty_plan(real_config())
+
+        assert check_empty_plan(serialize_plan(plan)) == plan
+
+    def test_the_empty_plan_is_refused_by_the_judge(self):
+        with pytest.raises(PlanError, match="outputs"):
+            check_plan(serialize_plan(empty_plan(real_config())))
+
+    def test_the_empty_plan_carries_the_model_of_the_definition(self):
+        config = real_config()
+
+        assert empty_plan(config)["quality"]["vmaf_model"] == config.quality.vmaf_model
+
+    def test_a_plan_with_outputs_is_not_the_empty_plan(self):
+        with pytest.raises(PlanError, match="outputs"):
+            check_empty_plan(make_quality_plan_json())
+
+    def test_an_empty_plan_without_the_model_is_refused(self):
+        quality = {key: value for key, value in make_quality_plan()["quality"].items()}
+        del quality["vmaf_model"]
+
+        with pytest.raises(PlanError, match="vmaf_model"):
+            check_empty_plan(make_quality_plan_json(quality=quality, outputs=[]))
+
+    def test_an_empty_plan_with_an_unknown_schema_version_is_refused(self):
+        with pytest.raises(PlanError, match="schema_version"):
+            check_empty_plan(make_quality_plan_json(schema_version="2", outputs=[]))

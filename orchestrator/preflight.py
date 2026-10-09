@@ -1,8 +1,8 @@
-"""O núcleo puro do `preflight`: o veredito sobre o `perf` e a tabela do passo.
+"""O núcleo puro do `preflight`: os vereditos sobre o `perf` e o `libvmaf`, e a tabela.
 
 As funções recebem dado já buscado e devolvem dado — quem lança a instância é o
 `instance_launch.py`, e quem abre o SSH e lista o bucket é o `orchestrator.py`,
-sobre o `external.py`. Os dois `docker run` daqui são argv, e como o resto do
+sobre o `external.py`. Os `docker run` daqui são argv, e como o resto do
 argv do sistema ficam sem teste (ADR-0022): o que ganha teste é a decisão que se
 toma sobre a saída deles — e o que o `perf stat` carrega no `-e`, que é desenho
 experimental (ADR-0006) e não argv de sistema.
@@ -11,6 +11,8 @@ experimental (ADR-0006) e não argv de sistema.
 from __future__ import annotations
 
 import json
+import math
+import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -28,9 +30,10 @@ NOT_COUNTED = "<not counted>"
 PROBE_CONTENT = "preflight"
 PROBE_PATH = "/tmp/preflight"
 
-# Os mesmos do `encode/launch_container.sh`: o probe só prova o que roda pelo
-# caminho da campanha, e um mount a menos aqui mede outro container.
+# Os mesmos dos `launch_container.sh` de cada papel: o probe só prova o que roda
+# pelo caminho da campanha, e um mount a menos aqui mede outro container.
 SCRIPTS_MOUNT = "/opt/encode"
+JUDGE_SCRIPTS_MOUNT = "/opt/judge"
 WORK_MOUNT = "/work"
 MASTERS_DIR_NAME = "masters"
 
@@ -39,6 +42,8 @@ MASTERS_DIR_NAME = "masters"
 PROBE_SECONDS = 5
 
 PERF_STDOUT = "/dev/stdout"
+
+VMAF_PROBE_LOG = "/tmp/vmaf.json"
 
 HEADER = ("passo", "resultado", "detalhe")
 
@@ -57,13 +62,32 @@ class Step(Enum):
     LAUNCH = "launch"
     BOOTSTRAP = "bootstrap"
     PERF = "perf-stat"
-    ENCODE_PUT = "s3-put"
+    VMAF = "vmaf"
+    PUT = "s3-put"
     TERMINATE = "terminate"
 
 
-STEPS = tuple(Step)
-
 SELF_CHECK_STEPS = (Step.STS, Step.BUCKETS, Step.SSM, Step.GIT, Step.SYNC)
+
+ENCODE_STEPS = (
+    *SELF_CHECK_STEPS,
+    Step.AMI,
+    Step.LAUNCH,
+    Step.BOOTSTRAP,
+    Step.PERF,
+    Step.PUT,
+    Step.TERMINATE,
+)
+
+JUDGE_STEPS = (
+    *SELF_CHECK_STEPS,
+    Step.AMI,
+    Step.LAUNCH,
+    Step.BOOTSTRAP,
+    Step.VMAF,
+    Step.PUT,
+    Step.TERMINATE,
+)
 
 
 class Outcome(Enum):
@@ -149,8 +173,49 @@ def probe_encode_argv(run: Mapping[str, Any]) -> list[str]:
     return [*argv, "-f", "null", "/dev/null"]
 
 
-def encode_put_command(*, bucket: str, key: str) -> list[str]:
-    """O `s3 cp` do papel `encode`, pelo caminho real: de dentro do container."""
+def vmaf_probe_command(
+    *,
+    master: Mapping[str, Any],
+    scale_flags: str,
+    vmaf_model: str,
+    repo_dir: str,
+    work_dir: str,
+) -> list[str]:
+    """O `libvmaf` sobre segundos de um Master contra ele mesmo, pelo caminho do Juiz.
+
+    O filtro é o do `judge/run_quality.sh`, e o `cat` do log vai mesmo quando o
+    FFmpeg falha: um `&&` no lugar do `;` apagaria a evidência do passo que reprovou.
+    """
+    source = f"{WORK_MOUNT}/{MASTERS_DIR_NAME}/{master['name']}"
+    clip = ["-t", str(PROBE_SECONDS), "-i", source]
+    filtergraph = (
+        f"[1:v]scale={master['width']}:{master['height']}:flags={scale_flags}[ref];"
+        f"[0:v][ref]libvmaf=model=version={vmaf_model}:feature=name=float_ssim"
+        f":log_fmt=json:log_path={VMAF_PROBE_LOG}"
+    )
+    ffmpeg = ["ffmpeg", "-nostdin", "-y", *clip, *clip, "-filter_complex", filtergraph]
+    script = (
+        f"{shlex.join([*ffmpeg, '-f', 'null', '-'])} >/dev/null; status=$?; "
+        f"cat {VMAF_PROBE_LOG} 2>/dev/null; exit $status"
+    )
+    return [
+        "sudo",
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{repo_dir}/judge:{JUDGE_SCRIPTS_MOUNT}:ro",
+        "-v",
+        f"{work_dir}:{WORK_MOUNT}",
+        IMAGE_TAG,
+        "bash",
+        "-c",
+        script,
+    ]
+
+
+def put_command(*, bucket: str, key: str) -> list[str]:
+    """O `s3 cp` do papel de dentro do container, e não do Orquestrador."""
     return [
         "sudo",
         "docker",
@@ -204,6 +269,46 @@ def perf_detail(counted: Mapping[str, Counter]) -> str:
     return "dentro do container: " + ", ".join(
         f"{event} = {counter.value:.0f} ({counter.regime})" for event, counter in counted.items()
     )
+
+
+@dataclass(frozen=True)
+class VmafScore:
+    frames: int
+    vmaf: float
+
+
+def vmaf_score(raw: str) -> VmafScore:
+    if not raw.strip():
+        raise PreflightError("log do libvmaf ausente: o container não deixou log nenhum")
+    try:
+        log = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise PreflightError(f"o log do libvmaf não é JSON válido: {error}") from error
+    if not isinstance(log, Mapping):
+        raise PreflightError(f"o log do libvmaf não é um objeto JSON: {type(log).__name__}")
+
+    frames = log.get("frames")
+    if not isinstance(frames, list) or not frames:
+        raise PreflightError(
+            f"frames: o libvmaf não comparou frame nenhum (veio {_abridged(frames)})"
+        )
+
+    pooled = log.get("pooled_metrics")
+    vmaf = pooled.get("vmaf") if isinstance(pooled, Mapping) else None
+    mean = vmaf.get("mean") if isinstance(vmaf, Mapping) else None
+    if type(mean) not in (int, float) or not math.isfinite(mean):
+        raise PreflightError(
+            f"VMAF: pooled_metrics.vmaf.mean não é numérico, veio {_abridged(mean)}"
+        )
+    return VmafScore(frames=len(frames), vmaf=float(mean))
+
+
+def vmaf_detail(score: VmafScore) -> str:
+    return f"dentro do container: {score.frames} frames, VMAF médio {score.vmaf:.2f}"
+
+
+def _abridged(value: object) -> str:
+    return repr(value) if not isinstance(value, list) else f"lista de {len(value)}"
 
 
 @dataclass(frozen=True)
@@ -262,7 +367,7 @@ def _implausible(metric: MetricRecord, counted: Mapping[str, Counter]) -> str | 
 
 
 def summarize(
-    observed: Sequence[StepResult], steps: Sequence[Step] = STEPS
+    observed: Sequence[StepResult], steps: Sequence[Step] = ENCODE_STEPS
 ) -> tuple[StepResult, ...]:
     """A tabela inteira, na ordem declarada: o que não rodou aparece dizendo isso."""
     seen: dict[Step, StepResult] = {}

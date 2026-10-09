@@ -16,10 +16,12 @@ import re
 import pytest
 from conftest import real_config
 from preflight import (
+    ENCODE_STEPS,
+    JUDGE_STEPS,
     NOT_COUNTED,
     NOT_SUPPORTED,
     PROBE_SECONDS,
-    STEPS,
+    SELF_CHECK_STEPS,
     Outcome,
     PreflightError,
     Step,
@@ -31,6 +33,8 @@ from preflight import (
     probe_encode_argv,
     render_table,
     summarize,
+    vmaf_detail,
+    vmaf_score,
 )
 from scenario_plan import build_canonical_plan
 
@@ -350,50 +354,52 @@ def passed(step: Step, detail: str = "") -> StepResult:
 
 class TestTheResultTable:
     def test_a_step_that_did_not_run_is_neither_pass_nor_fail(self):
-        results = summarize([passed(STEPS[0])])
+        results = summarize([passed(ENCODE_STEPS[0])])
 
         assert results[0].outcome is Outcome.PASSED
         assert all(result.outcome is Outcome.SKIPPED for result in results[1:])
 
     def test_every_declared_step_reaches_the_table(self):
-        assert tuple(result.step for result in summarize([])) == STEPS
+        assert tuple(result.step for result in summarize([])) == ENCODE_STEPS
 
     def test_the_table_follows_the_declared_order_and_not_the_observed_one(self):
-        observed = [passed(STEPS[2]), passed(STEPS[0])]
+        observed = [passed(ENCODE_STEPS[2]), passed(ENCODE_STEPS[0])]
 
-        assert tuple(result.step for result in summarize(observed)) == STEPS
+        assert tuple(result.step for result in summarize(observed)) == ENCODE_STEPS
 
     def test_a_step_recorded_twice_is_refused(self):
         # O laço registra o passo pelo nome; dois registros do mesmo nome são um
         # passo cujo resultado foi sobrescrito por outro — e some da tabela.
-        with pytest.raises(PreflightError, match=STEPS[0].value):
-            summarize([passed(STEPS[0]), passed(STEPS[0])])
+        with pytest.raises(PreflightError, match=ENCODE_STEPS[0].value):
+            summarize([passed(ENCODE_STEPS[0]), passed(ENCODE_STEPS[0])])
 
     def test_a_failure_anywhere_is_a_failure(self):
-        results = summarize([StepResult(STEPS[0], Outcome.FAILED, "AccessDenied")])
+        results = summarize([StepResult(ENCODE_STEPS[0], Outcome.FAILED, "AccessDenied")])
 
         assert failed(results) is True
 
     def test_a_table_without_failures_passes_even_with_steps_that_did_not_run(self):
-        assert failed(summarize([passed(STEPS[0])])) is False
+        assert failed(summarize([passed(ENCODE_STEPS[0])])) is False
 
     def test_a_full_table_of_passes_passes(self):
-        assert failed(summarize([passed(step) for step in STEPS])) is False
+        assert failed(summarize([passed(step) for step in ENCODE_STEPS])) is False
 
 
 class TestTheRenderedTable:
     def test_every_step_gets_its_own_line(self):
         rendered = render_table(summarize([]))
 
-        for step in STEPS:
+        for step in ENCODE_STEPS:
             lines = [line for line in rendered.splitlines() if line.startswith(step.value)]
             assert len(lines) == 1
 
     def test_the_outcome_and_the_detail_of_a_step_are_on_its_line(self):
-        results = summarize([StepResult(STEPS[0], Outcome.FAILED, "AccessDenied no sts")])
+        results = summarize([StepResult(ENCODE_STEPS[0], Outcome.FAILED, "AccessDenied no sts")])
 
         line = next(
-            line for line in render_table(results).splitlines() if line.startswith(STEPS[0].value)
+            line
+            for line in render_table(results).splitlines()
+            if line.startswith(ENCODE_STEPS[0].value)
         )
         assert Outcome.FAILED.value in line
         assert "AccessDenied no sts" in line
@@ -403,7 +409,7 @@ class TestTheRenderedTable:
 
     def test_the_outcome_column_is_aligned(self):
         results = summarize(
-            [passed(STEPS[0], "detalhe"), StepResult(STEPS[-1], Outcome.FAILED, "")]
+            [passed(ENCODE_STEPS[0], "detalhe"), StepResult(ENCODE_STEPS[-1], Outcome.FAILED, "")]
         )
         lines = render_table(results).splitlines()
 
@@ -414,11 +420,163 @@ class TestTheRenderedTable:
         # O detalhe de uma falha é o `stderr` do comando externo, e um
         # `AccessDenied` da AWS CLI chega quebrado em linhas: solto, ele desmonta
         # a tabela que o passo existe para imprimir.
-        results = summarize([StepResult(STEPS[0], Outcome.FAILED, "erro\n  na segunda linha")])
+        results = summarize(
+            [StepResult(ENCODE_STEPS[0], Outcome.FAILED, "erro\n  na segunda linha")]
+        )
 
-        assert len(render_table(results).splitlines()) == len(STEPS) + 1
+        assert len(render_table(results).splitlines()) == len(ENCODE_STEPS) + 1
 
     def test_no_line_carries_trailing_whitespace(self):
-        rendered = render_table(summarize([passed(STEPS[0], "detalhe")]))
+        rendered = render_table(summarize([passed(ENCODE_STEPS[0], "detalhe")]))
 
         assert rendered == "\n".join(line.rstrip() for line in rendered.splitlines())
+
+
+def vmaf_log(frames: int = 3, vmaf: object = 97.4) -> str:
+    return json.dumps(
+        {
+            "version": "3.0.0",
+            "fps": 12.5,
+            "frames": [
+                {"frameNum": index, "metrics": {"float_ssim": 0.99, "vmaf": vmaf}}
+                for index in range(frames)
+            ],
+            "pooled_metrics": {
+                "float_ssim": {"min": 0.99, "max": 0.99, "mean": 0.99, "harmonic_mean": 0.99},
+                "vmaf": {"min": vmaf, "max": vmaf, "mean": vmaf, "harmonic_mean": vmaf},
+            },
+            "aggregate_metrics": {},
+        }
+    )
+
+
+class TestTheVmafVerdict:
+    # O `libvmaf` que roda e não compara frame nenhum sai zero e deixa um log;
+    # quem só olha o status dá o `libvmaf` do container por provado.
+    def test_a_log_with_frames_and_a_numeric_vmaf_passes(self):
+        score = vmaf_score(vmaf_log(frames=3, vmaf=97.4))
+
+        assert score.frames == 3
+        assert score.vmaf == 97.4
+
+    def test_an_integer_vmaf_is_numeric(self):
+        assert vmaf_score(vmaf_log(vmaf=100)).vmaf == 100.0
+
+    def test_an_absent_log_is_refused_saying_so(self):
+        with pytest.raises(PreflightError, match="ausente"):
+            vmaf_score("")
+
+    def test_a_log_of_whitespace_is_absent(self):
+        with pytest.raises(PreflightError, match="ausente"):
+            vmaf_score("\n")
+
+    def test_a_log_that_is_not_json_is_refused_saying_so(self):
+        with pytest.raises(PreflightError, match="JSON"):
+            vmaf_score(vmaf_log()[:40])
+
+    def test_a_log_that_is_not_an_object_is_refused(self):
+        with pytest.raises(PreflightError, match="objeto"):
+            vmaf_score("[]")
+
+    def test_a_log_without_frames_is_refused_naming_them(self):
+        with pytest.raises(PreflightError, match="frames"):
+            vmaf_score(vmaf_log(frames=0))
+
+    def test_a_log_whose_frames_is_not_a_list_is_refused_naming_them(self):
+        raw = json.loads(vmaf_log())
+        raw["frames"] = 3
+
+        with pytest.raises(PreflightError, match="frames"):
+            vmaf_score(json.dumps(raw))
+
+    def test_a_log_missing_the_frames_is_refused_naming_them(self):
+        raw = json.loads(vmaf_log())
+        del raw["frames"]
+
+        with pytest.raises(PreflightError, match="frames"):
+            vmaf_score(json.dumps(raw))
+
+    @pytest.mark.parametrize("vmaf", ["97.4", None, True, float("nan")], ids=repr)
+    def test_a_vmaf_that_is_not_a_number_is_refused_naming_it(self, vmaf):
+        with pytest.raises(PreflightError, match="VMAF"):
+            vmaf_score(vmaf_log(vmaf=vmaf))
+
+    def test_a_log_without_the_pooled_vmaf_is_refused_naming_it(self):
+        raw = json.loads(vmaf_log())
+        del raw["pooled_metrics"]["vmaf"]
+
+        with pytest.raises(PreflightError, match="VMAF"):
+            vmaf_score(json.dumps(raw))
+
+    def test_a_log_without_pooled_metrics_is_refused_naming_the_vmaf(self):
+        raw = json.loads(vmaf_log())
+        del raw["pooled_metrics"]
+
+        with pytest.raises(PreflightError, match="VMAF"):
+            vmaf_score(json.dumps(raw))
+
+    def test_frames_are_judged_before_the_vmaf(self):
+        # Sem frame comparado, a média é de nada: o diagnóstico é o dos frames.
+        with pytest.raises(PreflightError, match="frames"):
+            vmaf_score(vmaf_log(frames=0, vmaf=None))
+
+    def test_the_line_carries_the_frames_and_the_vmaf(self):
+        detail = vmaf_detail(vmaf_score(vmaf_log(frames=125, vmaf=99.87)))
+
+        assert "125 frames" in detail
+        assert "99.87" in detail
+
+
+class TestTheJudgeTable:
+    def test_the_judge_leg_runs_the_self_check_first(self):
+        assert JUDGE_STEPS[: len(SELF_CHECK_STEPS)] == SELF_CHECK_STEPS
+
+    def test_the_judge_leg_has_its_own_lines(self):
+        assert JUDGE_STEPS[len(SELF_CHECK_STEPS) :] == (
+            Step.AMI,
+            Step.LAUNCH,
+            Step.BOOTSTRAP,
+            Step.VMAF,
+            Step.PUT,
+            Step.TERMINATE,
+        )
+
+    def test_the_encode_leg_is_unchanged(self):
+        assert ENCODE_STEPS[len(SELF_CHECK_STEPS) :] == (
+            Step.AMI,
+            Step.LAUNCH,
+            Step.BOOTSTRAP,
+            Step.PERF,
+            Step.PUT,
+            Step.TERMINATE,
+        )
+
+    def test_neither_leg_shows_the_probe_of_the_other(self):
+        assert Step.PERF not in JUDGE_STEPS
+        assert Step.VMAF not in ENCODE_STEPS
+
+    def test_the_lines_of_the_judge_sit_next_to_the_self_check(self):
+        observed = [passed(step) for step in SELF_CHECK_STEPS]
+        observed += [passed(Step.AMI), StepResult(Step.LAUNCH, Outcome.FAILED, "PassRole")]
+        rendered = render_table(summarize(observed, JUDGE_STEPS)).splitlines()
+
+        assert [line.split()[0] for line in rendered[1:]] == [step.value for step in JUDGE_STEPS]
+
+    def test_a_judge_step_that_did_not_run_says_so(self):
+        observed = [passed(step) for step in SELF_CHECK_STEPS]
+        observed += [passed(Step.AMI), passed(Step.LAUNCH), passed(Step.BOOTSTRAP)]
+        observed += [StepResult(Step.VMAF, Outcome.FAILED, "log ausente")]
+        observed += [passed(Step.TERMINATE)]
+        results = summarize(observed, JUDGE_STEPS)
+
+        assert {result.step: result.outcome for result in results}[Step.PUT] is Outcome.SKIPPED
+        assert failed(results) is True
+
+    def test_the_vmaf_line_survives_the_table(self):
+        detail = vmaf_detail(vmaf_score(vmaf_log(frames=125, vmaf=99.87)))
+        results = summarize([StepResult(Step.VMAF, Outcome.PASSED, detail)], JUDGE_STEPS)
+
+        line = next(
+            line for line in render_table(results).splitlines() if line.startswith(Step.VMAF.value)
+        )
+        assert "99.87" in line

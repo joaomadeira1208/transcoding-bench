@@ -132,6 +132,21 @@ class TestTheGuardOverTheStateFile:
     def test_the_refusal_names_the_way_out(self):
         assert "watch --abort" in (standing(tracked(c7g=Vigilance.RUNNING)) or "")
 
+    def test_a_judge_still_standing_after_the_campaign_is_refused_naming_its_id(self):
+        judge = make_tracked_instance(
+            role="judge", instance="judge", instance_id="i-judge", state="running"
+        )
+
+        message = standing([*tracked(c7g=Vigilance.FINISHED), judge]) or ""
+
+        assert "i-judge" in message
+        assert "watch --abort" in message
+
+    def test_a_judge_that_finished_does_not_hold_the_next_launch(self):
+        judge = make_tracked_instance(role="judge", instance="judge", state="finished")
+
+        assert standing([*tracked(c7g=Vigilance.FINISHED), judge]) is None
+
     def test_every_standing_architecture_is_named_and_the_dead_one_is_not(self):
         message = (
             standing(
@@ -191,16 +206,23 @@ def campaign_upload(config: Any, key: str) -> dict[str, Any]:
     return full_campaign(config).uploads[key]
 
 
+COMMIT = "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900"
+
+
+def launch(each: Any, instance_id: str = INSTANCE_ID) -> Any:
+    return launched_instance(each, instance_id, commit=COMMIT, total_timeout=432000)
+
+
 class TestTheArchitectureAsTheStateFileGuardsIt:
     def test_what_the_run_launches_is_an_encode(self):
         each = full_campaign(real_pilot_config()).slices[0]
 
-        assert launched_instance(each, INSTANCE_ID).role is Role.ENCODE
+        assert launch(each).role is Role.ENCODE
 
     def test_it_is_born_bootstrapping_without_pid_and_without_marker(self):
         each = full_campaign(real_pilot_config()).slices[0]
 
-        launched = launched_instance(each, INSTANCE_ID)
+        launched = launch(each)
 
         assert (launched.state, launched.pid, launched.outcome) == (
             Vigilance.BOOTSTRAPPING,
@@ -211,13 +233,18 @@ class TestTheArchitectureAsTheStateFileGuardsIt:
     def test_it_carries_the_record_that_launched_it_and_the_totals_of_its_slice(self):
         each = full_campaign(real_pilot_config()).slices[0]
 
-        launched = launched_instance(each, INSTANCE_ID)
+        launched = launch(each)
 
         assert (launched.instance, launched.instance_type) == (
             each.instance.id,
             each.instance.instance_type,
         )
         assert (launched.block_count, launched.runs_total) == (each.block_count, each.runs_total)
+
+    def test_it_carries_the_commit_and_the_cap_of_the_launch_that_raised_it(self):
+        launched = launch(full_campaign(real_pilot_config()).slices[0])
+
+        assert (launched.commit, launched.total_timeout) == (COMMIT, 432000)
 
     def test_the_launch_of_the_three_round_trips_through_the_state_file(self):
         # O round-trip inteiro, e não só a construção: um campo novo do
@@ -230,7 +257,7 @@ class TestTheArchitectureAsTheStateFileGuardsIt:
                 **make_campaign_state(),
                 "slice_keys": tuple(each.key for each in campaign.slices),
                 "instances": tuple(
-                    launched_instance(each, f"i-{each.instance.id}") for each in campaign.slices
+                    launch(each, f"i-{each.instance.id}") for each in campaign.slices
                 ),
             }
         )

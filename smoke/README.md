@@ -235,6 +235,19 @@ não pode ter. O `acceptance.sh` é esse harness, e chega ao container pelo stdi
 `bash -s`, sem bind-mount: quais diretórios do Mac a VM do Docker compartilha
 varia de máquina para máquina.
 
+O Juiz atravessa a mesma imagem. O `libvmaf` de verdade julga o clip contra ele
+mesmo, gerado na geometria do primeiro output que o `run_quality.sh` julgou na
+camada de baixo, e o argv é o que o shim do `ffmpeg` registrou daquele
+julgamento: as duas entradas viram o clip e o `log_path` vira o diretório que
+volta ao host, e nada mais muda — o `scale=` com o `flags=` da definição vira
+identidade e fica no filtergraph como o bash o montou. O veredito é o FFmpeg
+saindo zero, um frame no log por frame do clip, o VMAF numérico e acima de 99, e
+o SSIM acima de 0,999. O harness é o `judge_acceptance.sh`, pelo mesmo stdin.
+
+Foi este aceite que achou a imagem sem os modelos embutidos do `libvmaf`: sem o
+`xxd`, o meson os omite sem erro, e o shim responde a qualquer
+`model=version=`.
+
 ### Regenerar as fixtures
 
     .venv-smoke/bin/python -m pytest smoke/ --docker \
@@ -243,7 +256,8 @@ varia de máquina para máquina.
 Copia as saídas cruas capturadas para onde os testes dos parsers do `analysis/`
 as leem. Sem o flag, a captura morre no `tmp_path` e nada de runtime chega perto
 do histórico. É passo manual, e a hora de rodá-lo é quando um pin do
-`docker/Dockerfile` muda.
+`docker/Dockerfile` muda. O `vmaf.json` do Juiz vai junto, sem prefixo de
+encoder.
 
 O par de `status/` que o `run_all.sh` escreve tem flag e destino próprios,
 `--status-capture-dir` — ver `orchestrator/tests/fixtures/README.md`.

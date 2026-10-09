@@ -7,11 +7,13 @@ analítica que o artigo reporta.
 O papel repete o seam do `orchestrator/`. **Núcleo puro**, que recebe dado já
 lido e devolve estrutura: `run_meta.py` (o modelo do `meta.json`),
 `judgement.py` (o modelo do `judge.json`), `run_artifacts.py` (os parsers do
-`time.json`, do `perf.json`, da `pidstat.txt` e do `ffmpeg.log`) e `run_table.py`
-(os derivados e o construtor da tabela). **Casca fina**, que abre arquivo e
-traduz erro em código de saída: `validate_meta.py`, `validate_judge.py` e
-`consolidate.py`. O `conftest.py` deste nível é o que torna o núcleo importável
-pelos testes sem `pyproject.toml` nem `sys.path` manipulado.
+`time.json`, do `perf.json`, da `pidstat.txt` e do `ffmpeg.log`), `run_table.py`
+(os derivados e o construtor da tabela), `vmaf_log.py` (o parser do log do
+`libvmaf`) e `quality_table.py` (as métricas e as duas tabelas do Pass).
+**Casca fina**, que abre arquivo e traduz erro em código de saída:
+`validate_meta.py`, `validate_judge.py`, `consolidate.py` e `quality.py`. O
+`conftest.py` deste nível é o que torna o núcleo importável pelos testes sem
+`pyproject.toml` nem `sys.path` manipulado.
 
 Os dois modelos e as duas CLIs de validação saem do `json_contract.py`: o modo
 estrito, as anotações de campo, o `offending_fields` e a casca de `argparse` são
@@ -149,13 +151,101 @@ que a camada de aceite do `smoke/` trouxe de dentro da imagem; a factory do
 outra âncora é o `smoke/` consolidando a árvore que o `run_all.sh` acabou de
 escrever (ADR-0022).
 
+## As tabelas do Pass de qualidade
+
+    aws s3 sync s3://<bucket>/quality/ quality/
+    .venv-analysis/bin/python analysis/quality.py --results quality/results \
+        --config config/pilot.toml \
+        --outputs quality_outputs.parquet --groups quality_groups.parquet
+
+O mesmo desenho do `consolidate.py`: o `sync` é do pesquisador, o `quality.py`
+recebe o diretório local. O `--config` é a definição do lançamento julgado — dela
+saem os frames de cada vídeo, as arquiteturas declaradas e os dois limiares de
+`[quality]`. Sai 0 com as duas tabelas escritas, 1 para um `judge.json` inválido
+ou ausente — nomeando o arquivo, sem escrever nada — e 2 para diretório,
+definição ou Parquet que não se lê ou não se escreve.
+
+Quem entra:
+
+- todo `{run_id}/` sob `--results`, menos `preflight/`: a evidência que o
+  `preflight --judge` deixa ali não é julgamento, e nada a apaga (ADR-0016);
+- todo `judge.json` é validado pelo modelo estrito, e um inválido **derruba** a
+  leitura nomeando o arquivo;
+- mais de um julgamento com o mesmo `run_id` é resolvido por "último
+  `finished_at` vence", comparando instantes;
+- julgamentos com `exit_code != 0` **permanecem**, com métricas nulas.
+
+O `vmaf.json` é parseado frame a frame, e um log truncado, ou um frame sem
+`vmaf` ou sem `float_ssim`, é recusado com o motivo: pular o frame encolheria a
+série, e a contagem de frames é a guarda. Como no `consolidate.py`, o log
+recusado não derruba a leitura — vira métricas nulas e é **relatado** no stderr,
+nomeando o run, mas só quando o julgamento terminou bem.
+
+**A guarda de frames (D20).** A contagem de frames do log é conferida contra o
+`frames` do vídeo na **definição**, não contra o do `judge.json`, que é a cópia
+do plano. Diferente, o output sai com `frames_match = false` e é relatado com as
+duas contagens: uma referência desalinhada ou um output truncado produziria um
+VMAF plausível e errado.
+
+### Tabela de outputs
+
+Uma linha por `run_id` julgado, ordenada por `scenario_id`.
+
+| coluna | o quê |
+|---|---|
+| `scenario_id`, `codec`, `encoder`, `input_res`, `output_res`, `video`, `instance` | o Cenário, pelo representante |
+| `run_id` | o representante do bitstream |
+| `sha256` | o bitstream, e a chave da junção com a tabela principal |
+| `cell_divergent` | a célula do representante teve mais de um bitstream (D3) |
+| `exit_code` | do julgamento |
+| `instance_id`, `instance_type`, `versions` | o Juiz e a imagem |
+| `vmaf_mean`, `vmaf_std`, `vmaf_p5` | média, desvio populacional e percentil 5 (interpolação linear) do VMAF por frame |
+| `ssim_mean` | média do `float_ssim` por frame |
+| `frames` | frames comparados, pelo log |
+| `frames_match` | `frames` igual ao do vídeo na definição |
+
+### Tabela de grupos
+
+Uma linha por Cenário (`codec × input_res × output_res × vídeo`), ordenada pelo
+nome.
+
+| coluna | o quê |
+|---|---|
+| `scenario` | o nome do Cenário: a `scenario_id` sem Instância e Replicação |
+| `codec`, `encoder`, `input_res`, `output_res`, `video` | o Cenário |
+| `bitstreams` | quantos bitstreams distintos foram julgados |
+| `sha256_{id}` | uma coluna por `[[instance]]` declarado: a lista ordenada dos hashes que aquela arquitetura produziu — um só, salvo célula divergente; nula se nenhum julgamento a cobre |
+| `vmaf_delta`, `ssim_delta` | máximo menos mínimo das médias entre os bitstreams; nulas sem `judged_ok` |
+| `judged_ok` | todo bitstream com `exit_code == 0` e `frames_match`, e toda arquitetura coberta |
+| `equivalent` | as duas distâncias dentro de `vmaf_delta_max` e `ssim_delta_max`, inclusive; **nulo**, nunca verdadeiro, sem `judged_ok` |
+
+A cobertura por arquitetura está em `judged_ok` porque um resultado que nunca
+chegou ao bucket não se anuncia: o grupo teria um bitstream a menos e as
+distâncias medidas sobre o que sobrou. A coluna `sha256_{id}` vazia é o que o
+denuncia. O limite dessa guarda é a célula divergente (D3): se só um dos dois
+bitstreams de uma arquitetura chegar, ela continua coberta pelo outro, e o que
+denuncia a falta é `bitstreams` menor que o do relatório do triage — o leitor
+não lê o `quality/plan.json`.
+
+Nenhuma das duas tabelas carrega `shared_by`. O VMAF de um bitstream é o VMAF de
+toda Execução que o produziu (ADR-0025), e a atribuição é a junção com a tabela
+principal:
+
+    runs = pd.read_parquet("runs.parquet")
+    outputs = pd.read_parquet("quality_outputs.parquet")
+    runs.merge(outputs[["sha256", "vmaf_mean", "ssim_mean"]],
+               left_on="output_sha256", right_on="sha256", how="left")
+
+O determinismo é o da tabela consolidada: de conteúdo e ordem, não de bytes.
+
 ## O gate, e a projeção da campanha
 
 Dois scripts sobre o Parquet, e nenhum deles é parte da consolidação: eles
 **decidem** se um lançamento passou, e é a ADR-0022 que lista o que decidem.
 
     .venv-analysis/bin/python analysis/gate.py --parquet runs.parquet \
-        --config config/pilot.toml --prices analysis/prices.toml --covers piloto
+        --config config/pilot.toml --prices analysis/prices.toml --covers piloto \
+        --quality quality_groups.parquet
 
     aws s3 ls s3://<bucket>/runs/ --recursive | grep output.mkv > outputs.txt
     .venv-analysis/bin/python analysis/extrapolate.py --parquet runs.parquet \
@@ -164,9 +254,21 @@ Dois scripts sobre o Parquet, e nenhum deles é parte da consolidação: eles
 O `gate.py` cobre os itens que o Parquet sozinho responde — os quatro primeiros
 da checklist, mais três leituras que a checklist não pede e o piloto mostrou
 valerem: o `pcnt-running`, o coeficiente de variação e a concordância de
-bitstream. O item 5 depende do Juiz e não sai daqui. O `--config` é a definição
-do lançamento que o Parquet mediu: os frames de cada Master, os eventos e os
-pares de cada métrica saem dela, não de uma cópia no script.
+bitstream. O `--config` é a definição do lançamento que o Parquet mediu: os
+frames de cada Master, os eventos e os pares de cada métrica saem dela, não de
+uma cópia no script.
+
+O item 5 depende do Juiz, e entra pelo `--quality`, opcional, com a tabela de
+grupos do `quality.py`:
+
+    [ok] 5  triage e Juiz: 6 grupos, 13 bitstreams julgados, X/6 equivalentes
+
+O item passa se todo grupo tem `judged_ok`, e os que não têm são nomeados na
+linha. A equivalência é **reportada, não exigida** (ADR-0005): os grupos
+julgados fora dos limiares saem listados pelo nome, com as duas distâncias, sob
+`grupos não equivalentes` — é de lá que sai a subseção de casos divergentes do
+artigo. Sem `--quality`, o item sai `[em aberto]` e não entra no código de
+saída; nada mais muda.
 
 **Por que o `pcnt-running` é reportado em duas famílias.** Os quatro contadores
 de hardware multiplexam onde a PMU tem menos registradores que eventos; os quatro

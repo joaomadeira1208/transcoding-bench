@@ -29,3 +29,10 @@ um roda contra a captura de `fixtures/`, que a camada de aceite do `smoke/`
 trouxe das ferramentas de verdade. A factory guarda o que a ferramenta não produz
 sob encomenda. A outra âncora é o `smoke/` consolidando a árvore recém-escrita
 pelo `run_all.sh`.
+
+No Pass de qualidade, as falhas caladas são outras: o VMAF de um bitstream
+atribuído à arquitetura errada, um output truncado dando um VMAF plausível, um
+grupo com um julgamento falho declarado equivalente pelo que sobrou e um grupo
+divergente sumindo da lista do gate. O parser do log do `libvmaf` tem o caso
+feliz contra a captura real de `fixtures/vmaf.json`; a factory guarda o frame
+sem `float_ssim` e o log truncado.

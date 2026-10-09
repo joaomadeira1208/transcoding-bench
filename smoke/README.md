@@ -168,6 +168,20 @@ e as dos outros vão; sem `status/judge_done`, ou com um inválido, o `clean` re
 marcador e não apaga nada; com um `s3 rm` falhado, a chave é nomeada, o status
 é não-zero e as outras 31 são apagadas assim mesmo.
 
+**O leitor do Pass lê o que o Juiz deixou.** O `analysis/quality.py` entra como
+caixa-preta sobre o `quality/results/` do bucket falso, e o `gate.py --quality`
+sobre a tabela de grupos que ele escreveu. Para que saia um grupo equivalente e
+outro não, o output do ARM sobre um dos vídeos é julgado **de novo**, sobre o
+bucket do Pass são e com outro `SMOKE_VMAF`: o resultado novo sobrescreve o
+antigo sob o mesmo `run_id`, como num Pass repetido. Um grupo fica a distância
+zero e sai equivalente; o outro sai a 11,5 de VMAF e não equivalente, e é o que
+o gate lista. O `--config` é o mesmo do triage com os `frames` de cada vídeo
+trocados pelos que o shim escreve no log — o único fato da definição que um
+`libvmaf` shimado não tem como honrar —, e a contagem sai dos logs, não de uma
+constante. Sem a troca, a guarda de frames invalida todo output, nenhum grupo
+sai julgado e cada divergência é relatada: é a mesma árvore provando o outro
+lado. O `pandas` do `requirements-dev.txt` é o do `gate.py`.
+
 A asserção central é a do **argv**, e ela é feita contra a **definição** — a
 geometria do tier daquele vídeo, o `scale_flags` do `[encode]`, o modelo do
 `[quality]` —, nunca contra o plano: comparar com o plano pularia o elo

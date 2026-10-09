@@ -179,6 +179,24 @@ def make_judgement_json(**overrides: Any) -> str:
     return json.dumps(make_judgement(**overrides), indent=2) + "\n"
 
 
+# O log do `libvmaf` reduzido ao que o parser lê: a série por frame. A captura
+# real em `tests/fixtures/vmaf.json` é a âncora; a factory fica com as variações
+# que o `libvmaf` não escreve sob encomenda.
+def make_vmaf_log(
+    vmaf: Sequence[float] = (90.0, 92.0, 94.0),
+    ssim: Sequence[float] | None = None,
+) -> str:
+    """Um `vmaf.json` com um frame por valor de `vmaf`; `ssim` sai de `vmaf / 100`
+    quando não é dado."""
+    if ssim is None:
+        ssim = [score / 100 for score in vmaf]
+    frames = [
+        {"frameNum": index, "metrics": {"float_ssim": structural, "vmaf": score}}
+        for index, (score, structural) in enumerate(zip(vmaf, ssim, strict=True))
+    ]
+    return json.dumps({"version": "6375a4b", "fps": 28.38, "frames": frames}, indent=2) + "\n"
+
+
 def make_time_json(**overrides: Any) -> str:
     """Um `time.json`, como o `/usr/bin/time` o emite pelo seu format string."""
     return json.dumps(_with_overrides(_VALID_TIME, overrides)) + "\n"

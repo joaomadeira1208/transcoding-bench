@@ -25,6 +25,24 @@ A allowlist do `.gitignore` admite `.json`, `.txt` e `.log` sob um diretório
 `fixtures/` (ADR-0017), e é por isso que o `output.mkv` da mesma captura não está
 aqui.
 
+## `vmaf.json`
+
+O log JSON que o `libvmaf` v3.1.0 da imagem — o `libvmaf` do `versions.json`
+dela — escreveu no aceite do Juiz: o clip `testsrc2` de 5 s contra ele mesmo,
+escalado para a própria geometria pelo filtergraph que o `run_quality.sh`
+montou, com o modelo da definição e o `float_ssim`. É a âncora do parser do log
+do `libvmaf` pela mesma razão das outras: até aqui ele só existia na forma que
+o shim do `ffmpeg` inventou.
+
+E a forma inventada diverge em dois pontos: o `version` do log é o commit do
+`libvmaf` (`6375a4b`), não a tag, e cada frame traz as features `integer_*` além
+do `vmaf` e do `float_ssim`. O primeiro frame fica abaixo de 100 porque o
+`integer_motion` dele é zero, e o pooled fica em 99,98.
+
+Sai do mesmo `--capture-dir`, e a hora de regenerá-lo é o bump do `libvmaf` no
+`docker/Dockerfile` — o aceite falha enquanto este parágrafo nomear outra versão
+que não a da imagem.
+
 ## `campaign_meta.json`
 
 O `meta.json` que o `run_scenario.sh` escreveu na **primeira Execução real do

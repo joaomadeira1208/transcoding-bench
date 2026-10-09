@@ -14,6 +14,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 # `/usr/lib/linux-tools-$(uname -r)/perf`, e dentro do container `uname -r` é o
 # kernel do host EC2 — ele recusa em vez de rodar. O symlink é o que faz
 # `perf stat` existir na Execução.
+#
+# Sem o `xxd` o meson do `libvmaf` compila sem os modelos embutidos e sem erro, e
+# todo julgamento do Juiz morre no `model=version=`.
 # hadolint ignore=DL3008
 RUN apt-get update \
   && apt-get install --no-install-recommends -y \
@@ -34,6 +37,7 @@ RUN apt-get update \
     time \
     unzip \
     uuid-runtime \
+    xxd \
     zlib1g-dev \
   && rm -rf /var/lib/apt/lists/* \
   && perf_bin="$(find /usr/lib -maxdepth 3 -type f -name perf | sort | tail -n 1)" \

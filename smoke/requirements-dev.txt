@@ -12,8 +12,13 @@
 # saiu de lá é como se verifica que os parsers atravessaram o texto das
 # ferramentas.
 #
+# O `pandas` é o mesmo motivo outra vez: o item 5 da checklist é verificado
+# invocando `analysis/gate.py --quality` sobre a tabela de grupos que o
+# `quality.py` escreveu, e o `gate.py` lê os Parquets por ele.
+#
 # Os linters não entram aqui: o pre-commit gerencia os próprios ambientes.
 
 pytest==9.1.1
 pydantic==2.13.5
 pyarrow==25.0.1
+pandas==3.0.5

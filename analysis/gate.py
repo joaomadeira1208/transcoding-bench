@@ -2,7 +2,7 @@
 """A checklist do gate sobre o Parquet de um lançamento — ver `analysis/README.md`.
 
 python analysis/gate.py --parquet runs.parquet --config config/pilot.toml \\
-    --prices analysis/prices.toml --covers piloto
+    --prices analysis/prices.toml --covers piloto [--quality quality_groups.parquet]
 """
 
 from __future__ import annotations
@@ -118,6 +118,53 @@ def check_metric_pairs(df: pd.DataFrame, definition: Definition) -> tuple[bool, 
     return True, f"{len(definition.metrics)} pares na mesma janela em todas as {len(df)} linhas"
 
 
+def check_quality(groups: pd.DataFrame, df: pd.DataFrame) -> tuple[bool, str]:
+    """Passa se todo Cenário do Parquet foi julgado, com todos os seus bitstreams;
+    a equivalência é reportada, não exigida (ADR-0005)."""
+    detail = (
+        f"{len(groups)} grupos, {int(groups.bitstreams.sum())} bitstreams julgados, "
+        f"{int(_verdicts(groups).sum())}/{len(groups)} equivalentes"
+    )
+    if groups.empty:
+        return False, f"{detail}; nenhum grupo julgado"
+    measured = df.groupby(_scenario_names(df)).output_sha256.nunique()
+    judged = groups.set_index("scenario").bitstreams
+    missing = measured.index.difference(judged.index).tolist()
+    if missing:
+        return False, f"{detail}; Cenário sem grupo: {', '.join(missing)}"
+    short = [
+        f"{name} ({judged[name]}/{measured[name]})"
+        for name in judged.index.intersection(measured.index)
+        if judged[name] != measured[name]
+    ]
+    if short:
+        return False, f"{detail}; bitstreams julgados/medidos: {', '.join(short)}"
+    unjudged = groups.scenario[~groups.judged_ok.astype(bool)].tolist()
+    if unjudged:
+        return False, f"{detail}; sem julgamento válido: {', '.join(unjudged)}"
+    return True, detail
+
+
+def _scenario_names(df: pd.DataFrame) -> pd.Series:
+    """O nome do grupo no `quality.py`: a `scenario_id` sem Instância e Replicação."""
+    return df.encoder + "_" + df.input_res + "_" + df.output_res + "_" + df.video
+
+
+def nonequivalent(groups: pd.DataFrame) -> list[str]:
+    """Os grupos julgados fora dos limiares — de onde sai a subseção de casos
+    divergentes do artigo. Nulo não entra: sem julgamento não há distância."""
+    divergent = groups[~_verdicts(groups) & groups.equivalent.notna()]
+    return [
+        f"{row.scenario}: vmaf_delta {row.vmaf_delta:.3f}, ssim_delta {row.ssim_delta:.5f}"
+        for row in divergent.itertuples()
+    ]
+
+
+def _verdicts(groups: pd.DataFrame) -> pd.Series:
+    """`equivalent` com o nulo como não-equivalente, para contar."""
+    return groups.equivalent.astype("boolean").fillna(False).astype(bool)
+
+
 def multiplexing_by_instance(df: pd.DataFrame, definition: Definition) -> pd.DataFrame:
     """As duas famílias de evento separadas.
 
@@ -159,12 +206,14 @@ def main() -> int:
     parser.add_argument("--config", required=True, type=Path, help="a definição do lançamento")
     parser.add_argument("--prices", required=True, type=Path)
     parser.add_argument("--covers", required=True, help="qual consulta de preço usar")
+    parser.add_argument("--quality", type=Path, help="a tabela de grupos do quality.py")
     args = parser.parse_args()
 
     try:
         df = pd.read_parquet(args.parquet)
         definition = load_definition(args.config)
         rate = load_rate(args.prices, args.covers)
+        groups = pd.read_parquet(args.quality) if args.quality else None
     except (OSError, KeyError, tomllib.TOMLDecodeError) as error:
         print(error, file=sys.stderr)
         return EXIT_UNREADABLE
@@ -176,10 +225,19 @@ def main() -> int:
         ("2  dez colunas de PMU", check_pmu_complete(df, definition)),
         ("3  ffmpeg_frames vs master", check_frames(df, definition)),
         ("4  cpu_pct_avg acima de um core", check_cpu_saturation(df)),
+        ("5  triage e Juiz", check_quality(groups, df) if groups is not None else None),
         ("-  pares de métrica na mesma janela", check_metric_pairs(df, definition)),
     ]
-    for label, (passed, detail) in checks:
+    for label, verdict in checks:
+        if verdict is None:
+            print(f"[em aberto] {label}: sem --quality")
+            continue
+        passed, detail = verdict
         print(f"[{'ok' if passed else 'FALHOU'}] {label}: {detail}")
+
+    if groups is not None and (divergent := nonequivalent(groups)):
+        print("\ngrupos não equivalentes (ADR-0005):")
+        print("\n".join(f"  {line}" for line in divergent))
 
     print(f"\n{len(df)} Replicações, {len(df.groupby(CELL))} células")
     print("\npcnt-running por instância (ADR-0006):")
@@ -194,7 +252,8 @@ def main() -> int:
     print("\ncusto por Cenário, US$ (ADR-0024):")
     print(df.groupby(["instance", "codec"]).cost_usd.mean().round(4).to_string())
 
-    return EXIT_OK if all(passed for _, (passed, _) in checks) else EXIT_FAILED
+    verdicts = [verdict for _, verdict in checks if verdict is not None]
+    return EXIT_OK if all(passed for passed, _ in verdicts) else EXIT_FAILED
 
 
 if __name__ == "__main__":

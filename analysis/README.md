@@ -263,8 +263,11 @@ grupos do `quality.py`:
 
     [ok] 5  triage e Juiz: 6 grupos, 13 bitstreams julgados, X/6 equivalentes
 
-O item passa se todo grupo tem `judged_ok`, e os que não têm são nomeados na
-linha. A equivalência é **reportada, não exigida** (ADR-0005): os grupos
+O item passa se todo Cenário do `--parquet` tem um grupo, se cada grupo julgou
+tantos bitstreams quantos `output_sha256` distintos o Parquet mediu, e se todo
+grupo tem `judged_ok`; o que falta é nomeado na linha. Sem a conferência contra
+o Parquet, um Cenário cujos outputs ficaram todos depois do teto do
+`--total-timeout` sumiria da tabela, e o item passaria com um grupo a menos. A equivalência é **reportada, não exigida** (ADR-0005): os grupos
 julgados fora dos limiares saem listados pelo nome, com as duas distâncias, sob
 `grupos não equivalentes` — é de lá que sai a subseção de casos divergentes do
 artigo. Sem `--quality`, o item sai `[em aberto]` e não entra no código de

@@ -118,19 +118,36 @@ def check_metric_pairs(df: pd.DataFrame, definition: Definition) -> tuple[bool, 
     return True, f"{len(definition.metrics)} pares na mesma janela em todas as {len(df)} linhas"
 
 
-def check_quality(groups: pd.DataFrame) -> tuple[bool, str]:
-    """Passa se todo grupo foi julgado; a equivalência é reportada, não exigida
-    (ADR-0005)."""
+def check_quality(groups: pd.DataFrame, df: pd.DataFrame) -> tuple[bool, str]:
+    """Passa se todo Cenário do Parquet foi julgado, com todos os seus bitstreams;
+    a equivalência é reportada, não exigida (ADR-0005)."""
     detail = (
         f"{len(groups)} grupos, {int(groups.bitstreams.sum())} bitstreams julgados, "
         f"{int(_verdicts(groups).sum())}/{len(groups)} equivalentes"
     )
     if groups.empty:
         return False, f"{detail}; nenhum grupo julgado"
+    measured = df.groupby(_scenario_names(df)).output_sha256.nunique()
+    judged = groups.set_index("scenario").bitstreams
+    missing = measured.index.difference(judged.index).tolist()
+    if missing:
+        return False, f"{detail}; Cenário sem grupo: {', '.join(missing)}"
+    short = [
+        f"{name} ({judged[name]}/{measured[name]})"
+        for name in judged.index.intersection(measured.index)
+        if judged[name] != measured[name]
+    ]
+    if short:
+        return False, f"{detail}; bitstreams julgados/medidos: {', '.join(short)}"
     unjudged = groups.scenario[~groups.judged_ok.astype(bool)].tolist()
     if unjudged:
         return False, f"{detail}; sem julgamento válido: {', '.join(unjudged)}"
     return True, detail
+
+
+def _scenario_names(df: pd.DataFrame) -> pd.Series:
+    """O nome do grupo no `quality.py`: a `scenario_id` sem Instância e Replicação."""
+    return df.encoder + "_" + df.input_res + "_" + df.output_res + "_" + df.video
 
 
 def nonequivalent(groups: pd.DataFrame) -> list[str]:
@@ -208,7 +225,7 @@ def main() -> int:
         ("2  dez colunas de PMU", check_pmu_complete(df, definition)),
         ("3  ffmpeg_frames vs master", check_frames(df, definition)),
         ("4  cpu_pct_avg acima de um core", check_cpu_saturation(df)),
-        ("5  triage e Juiz", check_quality(groups) if groups is not None else None),
+        ("5  triage e Juiz", check_quality(groups, df) if groups is not None else None),
         ("-  pares de métrica na mesma janela", check_metric_pairs(df, definition)),
     ]
     for label, verdict in checks:

@@ -175,7 +175,8 @@ outro não, o output do ARM sobre um dos vídeos é julgado **de novo**, sobre o
 bucket do Pass são e com outro `SMOKE_VMAF`: o resultado novo sobrescreve o
 antigo sob o mesmo `run_id`, como num Pass repetido. Um grupo fica a distância
 zero e sai equivalente; o outro sai a 11,5 de VMAF e não equivalente, e é o que
-o gate lista. O `--config` é o mesmo do triage com os `frames` de cada vídeo
+o gate lista. Sem o grupo divergente, o item 5 reprova nomeando o Cenário que o
+Parquet mediu e o Juiz não julgou. O `--config` é o mesmo do triage com os `frames` de cada vídeo
 trocados pelos que o shim escreve no log — o único fato da definição que um
 `libvmaf` shimado não tem como honrar —, e a contagem sai dos logs, não de uma
 constante. Sem a troca, a guarda de frames invalida todo output, nenhum grupo

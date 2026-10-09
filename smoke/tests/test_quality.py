@@ -171,6 +171,19 @@ def gate(rejudged, reading, one_codec_toml, tmp_path_factory) -> subprocess.Comp
     )
 
 
+@pytest.fixture(scope="session")
+def gate_without_a_scenario(
+    rejudged, reading, one_codec_toml, tmp_path_factory
+) -> subprocess.CompletedProcess[str]:
+    """O gate sobre a tabela de grupos sem o Cenário divergente, como fica quando
+    o teto do `--total-timeout` para o Pass antes dos outputs dele."""
+    scratch = tmp_path_factory.mktemp("gate")
+    table = pq.read_table(reading.out_dir / "groups.parquet")
+    kept = [row["video"] != DIVERGENT_VIDEO for row in table.to_pylist()]
+    pq.write_table(table.filter(kept), scratch / "groups.parquet")
+    return gate_with_cli(rejudged, one_codec_toml, scratch / "groups.parquet", scratch)
+
+
 class TestTheOutputsTable:
     def test_it_succeeds(self, reading):
         assert reading.returncode == 0, reading.stderr
@@ -250,3 +263,14 @@ class TestTheGate:
         name = reading.group(DIVERGENT_VIDEO)["scenario"]
 
         assert f"  {name}: vmaf_delta 11.500, ssim_delta 0.11500" in gate.stdout.splitlines()
+
+    def test_a_scenario_without_a_group_fails_item_5_by_name(
+        self, gate_without_a_scenario, reading
+    ):
+        name = reading.group(DIVERGENT_VIDEO)["scenario"]
+
+        assert gate_without_a_scenario.returncode == 1
+        assert (
+            "[FALHOU] 5  triage e Juiz: 1 grupos, 2 bitstreams julgados, 1/1 equivalentes; "
+            f"Cenário sem grupo: {name}"
+        ) in gate_without_a_scenario.stdout.splitlines()

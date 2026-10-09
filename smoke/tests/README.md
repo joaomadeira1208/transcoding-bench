@@ -34,7 +34,8 @@ acabou de julgar, e a asserção central é a do bucket antes e depois: quais
 
 O `test_quality.py` dirige o `analysis/quality.py` e o `gate.py --quality`
 sobre os resultados que o Juiz deixou no mesmo bucket, e a asserção central é a
-das duas tabelas — um grupo equivalente, outro não — e a da linha 5 do gate.
+das duas tabelas — um grupo equivalente, outro não — e a da linha 5 do gate,
+que reprova quando um dos Cenários some da tabela de grupos.
 
 O `test_pilot_block.py` repete o que aquele laço assere, com o plano do piloto no
 lugar do da campanha, e acrescenta o argv contra o `config/pilot.toml` e a

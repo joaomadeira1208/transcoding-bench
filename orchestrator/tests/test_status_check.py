@@ -28,6 +28,7 @@ from status_check import (
     StatusError,
     StatusKeys,
     check_done_marker,
+    check_judge_done,
     check_judge_progress,
     check_progress,
     judge_progress_line,
@@ -444,3 +445,30 @@ class TestJudgeProgressLine:
         encoded = progress_line(progress_of(), instance="c7g", runs_total=36)
 
         assert judged.index("output") == encoded.index("bloco")
+
+
+class TestTheMarkerTheCleanReads:
+    def test_the_marker_of_any_judge_is_read(self):
+        marker = check_judge_done(make_done_marker(instance_id=PREVIOUS_ATTEMPT, runs_total=13))
+
+        assert marker == DoneMarker(
+            instance_id=PREVIOUS_ATTEMPT,
+            finished_at="2026-09-07T14:32:07+00:00",
+            runs_total=13,
+            runs_failed=0,
+            capped=False,
+            exit_status=0,
+        )
+
+    @pytest.mark.parametrize("field", MARKER_FIELDS)
+    def test_a_missing_field_is_refused_by_name(self, field):
+        with pytest.raises(StatusError, match=field):
+            check_judge_done(make_done_marker(**{field: ABSENT}))
+
+    def test_a_field_of_the_wrong_type_is_refused_by_name(self):
+        with pytest.raises(StatusError, match="capped"):
+            check_judge_done(make_done_marker(capped=0))
+
+    def test_a_marker_that_is_not_an_object_is_refused(self):
+        with pytest.raises(StatusError, match="marcador do Juiz"):
+            check_judge_done([])

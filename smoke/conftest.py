@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ VALIDATE_MANIFEST = REPO_ROOT / "orchestrator" / "validate_manifest.py"
 CONSOLIDATE = REPO_ROOT / "analysis" / "consolidate.py"
 RESUME = REPO_ROOT / "orchestrator" / "resume.py"
 QUALITY_TRIAGE = REPO_ROOT / "orchestrator" / "quality_triage.py"
+ORCHESTRATOR = REPO_ROOT / "orchestrator" / "orchestrator.py"
 ORCHESTRATOR_DIR = REPO_ROOT / "orchestrator"
 EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
@@ -263,6 +265,32 @@ class Pass(ShimTrail):
     def local_output(self, output: dict[str, Any]) -> Path:
         """O `.mkv` daquele output no work dir, que o Juiz apaga depois de julgá-lo."""
         return self.work_dir / f"{output['run_id']}.{output['container']}"
+
+
+@dataclass(frozen=True)
+class Clean(ShimTrail):
+    """O que uma invocação do `orchestrator.py clean` deixou para trás."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    before: dict[str, bytes]
+
+    def objects(self) -> dict[str, bytes]:
+        """Cada objeto do bucket falso depois do `clean`, pela chave."""
+        return bucket_objects(self.s3_root)
+
+    def removed(self) -> set[str]:
+        return set(self.before) - set(self.objects())
+
+
+def bucket_objects(s3_root: Path) -> dict[str, bytes]:
+    bucket = s3_root / BUCKET
+    return {
+        path.relative_to(bucket).as_posix(): path.read_bytes()
+        for path in bucket.rglob("*")
+        if path.is_file()
+    }
 
 
 def _report_without(stdout: str, written_line: str) -> list[str]:
@@ -884,6 +912,80 @@ def run_quality(
         )
 
     return _run_quality
+
+
+# O `clean` não lê nada do arquivo de infra, mas o `orchestrator.py` o exige de
+# todo subcomando e o recusa malformado.
+INFRA = {
+    "subnet_id": "subnet-0123456789abcdef0",
+    "security_groups": {"orchestrator": "sg-0a", "ephemeral": "sg-0b"},
+    "instance_profiles": {
+        "orchestrator": "transcoding-bench-orchestrator",
+        "encode": "transcoding-bench-encode",
+        "judge": "transcoding-bench-judge",
+        "masters": "transcoding-bench-masters",
+    },
+    "key_pair_name": "transcoding-bench",
+    "amis": {"orchestrator": "ami-0a", "encode_amd64": "ami-0b", "encode_arm64": "ami-0c"},
+    "buckets": {"campaign": BUCKET, "pilot": BUCKET},
+    "ssh_private_key_parameter_name": "/transcoding-bench/orchestrator/ssh-private-key",
+}
+
+
+@pytest.fixture(scope="session")
+def clean(tmp_path_factory: pytest.TempPathFactory, shim_bin: Path):
+    """Roda o `orchestrator.py clean` de verdade sobre uma **cópia** do bucket que o
+    rastro dado deixou, com o plano dado.
+
+    Cópia pelo motivo do Juiz: com `--apply` o `clean` apaga, e o bucket julgado é
+    o mesmo para todo caminho. `prepare` recebe a raiz da cópia antes da
+    invocação, que é como um caminho tira do bucket o que ele não deve ter.
+    """
+
+    def _clean(
+        trail: ShimTrail,
+        plan: Path,
+        *flags: str,
+        prepare: Callable[[Path], None] | None = None,
+        **shim_env: str,
+    ) -> Clean:
+        workdir = tmp_path_factory.mktemp("clean")
+        s3_root = workdir / "s3"
+        shutil.copytree(trail.s3_root, s3_root)
+        if prepare is not None:
+            prepare(s3_root / BUCKET)
+        env = shim_environment(shim_bin, workdir, shim_env, s3_root=s3_root)
+        infra = workdir / "infra.json"
+        infra.write_text(json.dumps(INFRA), encoding="utf-8")
+        before = bucket_objects(s3_root)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ORCHESTRATOR),
+                "--infra",
+                str(infra),
+                "clean",
+                "--bucket",
+                BUCKET,
+                "--plan",
+                str(plan),
+                *flags,
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return Clean(
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            before=before,
+            argv_dir=Path(env["SMOKE_ARGV_DIR"]),
+            s3_root=s3_root,
+        )
+
+    return _clean
 
 
 @pytest.fixture(scope="session")

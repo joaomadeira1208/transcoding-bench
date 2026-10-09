@@ -20,6 +20,7 @@ from command_output import (
     parse_list_objects,
     parse_run_instances,
 )
+from judgement_check import JUDGE_FILENAME
 
 # A AMI Ubuntu 24.04 (ADR-0015) expõe o volume raiz aqui; o `--block-device-mappings`
 # de um device que a AMI não declara é aceito e cria um volume extra, deixando o
@@ -40,6 +41,8 @@ RUNS_PREFIX = "runs/"
 RUN_META_FILENAME = "meta.json"
 
 RUN_HASH_FILENAME = "output.sha256"
+
+QUALITY_RESULTS_PREFIX = "quality/results/"
 
 SSH_USER = "ubuntu"
 
@@ -236,6 +239,24 @@ def s3_sync_run_metas_and_hashes(bucket: str, destination: Path) -> None:
             "--include",
             f"*/{RUN_HASH_FILENAME}",
             f"s3://{bucket}/{RUNS_PREFIX}",
+            str(destination),
+        ]
+    )
+
+
+def s3_sync_judgements(bucket: str, destination: Path) -> None:
+    """Baixa todo `quality/results/*/judge.json` do bucket de uma vez, e nada mais."""
+    _run(
+        [
+            "aws",
+            "s3",
+            "sync",
+            "--only-show-errors",
+            "--exclude",
+            "*",
+            "--include",
+            f"*/{JUDGE_FILENAME}",
+            f"s3://{bucket}/{QUALITY_RESULTS_PREFIX}",
             str(destination),
         ]
     )

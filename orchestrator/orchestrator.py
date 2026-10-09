@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import time
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
@@ -72,6 +73,8 @@ from external import (
     s3_list_prefix,
     s3_rm,
     s3_sync,
+    s3_sync_judgements,
+    s3_sync_run_metas_and_hashes,
     ssh_capture,
     ssh_exec,
     ssm_get_parameter,
@@ -107,9 +110,11 @@ from judge_launch import (
     judge_state,
     launched_judge,
 )
+from judgement_check import JudgementError
 from manifest_check import check_manifest
 from masters_launch import mirror_differences, prepare_masters_command
 from masters_plan import build_masters_plan, iter_masters
+from meta_check import MetaError
 from preflight import (
     ENCODE_STEPS,
     JUDGE_STEPS,
@@ -132,6 +137,15 @@ from preflight import (
     vmaf_score,
 )
 from quality_plan import PLAN_FILENAME, PlanError, check_empty_plan, check_plan, empty_plan
+from retention import (
+    CleanError,
+    decide,
+    deletions,
+    read_judgements,
+    render_decision,
+    require_finished_pass,
+)
+from run_tree import read_runs
 from scenario_plan import (
     build_canonical_plan,
     build_instance_slices,
@@ -140,10 +154,13 @@ from scenario_plan import (
 )
 from status_check import (
     STATUS_PREFIX,
+    DoneMarker,
     JudgeProgress,
     Progress,
     Role,
     StatusError,
+    StatusKeys,
+    check_judge_done,
 )
 from vigilance import Liveness, Vigilance, decide_vigilance, is_standing, marker_verdict
 
@@ -422,6 +439,41 @@ def main() -> int:
     )
     watch.set_defaults(
         run=lambda args, **common: (watch_abort if args.abort else watch_campaign)(**common)
+    )
+    retention = subcommands.add_parser(
+        "clean",
+        help="a retenção seletiva da ADR-0007: imprime o que apagaria, e só apaga com --apply",
+        description=(
+            "Exige status/judge_done válido, re-enumera os meta.json e os output.sha256 de "
+            "runs/, baixa os judge.json de quality/results/ e decide, sobre o plano que o "
+            "Juiz leu, qual output.{container} de cada Execução fica. Mantém um por "
+            "bitstream julgado com exit_code 0; apaga as cópias dele no mesmo Cenário, os "
+            "warm-ups, os runs falhos e os superados; mantém tudo o mais."
+        ),
+    )
+    retention.add_argument(
+        "--bucket",
+        required=True,
+        help="bucket cujo runs/ é limpo: o do piloto ou o da campanha",
+    )
+    retention.add_argument(
+        "--plan",
+        required=True,
+        type=Path,
+        help="o quality/plan.json que o triage escreveu e o Juiz julgou",
+    )
+    retention.add_argument(
+        "--apply",
+        action="store_true",
+        help="apaga as chaves decididas, um s3 rm por chave; sem ele nada é apagado",
+    )
+    retention.set_defaults(
+        run=lambda args, **common: clean(
+            bucket=args.bucket,
+            plan_path=args.plan.expanduser(),
+            apply=args.apply,
+            **common,
+        )
     )
     args = parser.parse_args()
 
@@ -910,6 +962,66 @@ def watch_abort(*, infra: InfraConfig, work_dir: Path) -> int:
         f"o Juiz julgou, em s3://{tracked.state.bucket}/{QUALITY_RESULTS_PREFIX}"
     )
     return EXIT_OK
+
+
+def clean(*, infra: InfraConfig, work_dir: Path, bucket: str, plan_path: Path, apply: bool) -> int:
+    """A única operação destrutiva da pipeline: a decisão sempre, a remoção só com `--apply`."""
+    plan = check_plan(plan_path.read_bytes())
+
+    with tempfile.TemporaryDirectory(prefix="clean-") as workspace:
+        marker = _judge_done(bucket, Path(workspace))
+        runs = Path(workspace) / RUNS_PREFIX
+        s3_sync_run_metas_and_hashes(bucket, runs)
+        metas, hashes, warnings = read_runs(runs)
+        results = Path(workspace) / "results"
+        s3_sync_judgements(bucket, results)
+        judgements = read_judgements(results)
+
+    for warning in warnings:
+        _report(warning)
+    require_finished_pass(marker.finished_at, judgements)
+    decision = decide(plan, metas, hashes, judgements)
+    print(render_decision(decision))
+
+    doomed = deletions(decision)
+    if not apply:
+        _report(f"sem --apply: nada foi apagado; com ele, {len(doomed)} s3 rm em s3://{bucket}/")
+        return EXIT_OK
+
+    failures = _remove(bucket, doomed)
+    if failures:
+        _fail(_lines(f"{len(failures)} de {len(doomed)} s3 rm falharam:", failures))
+        return EXIT_FAILURE
+    _report(f"{len(doomed)} output(s) apagado(s) de s3://{bucket}/{RUNS_PREFIX}")
+    return EXIT_OK
+
+
+def _judge_done(bucket: str, workspace: Path) -> DoneMarker:
+    """O marcador do Juiz, sem o qual a limpeza recusa: o Pass pode estar no meio."""
+    key = StatusKeys.of(Role.JUDGE, "").done
+    if not any(listed.key == key for listed in s3_list_prefix(bucket, key)):
+        raise CleanError(
+            f"s3://{bucket}/{key}: ausente — o Juiz não terminou, e a limpeza não corre "
+            f"com o Pass no meio"
+        )
+    local = workspace / key
+    local.parent.mkdir(parents=True, exist_ok=True)
+    s3_cp(f"s3://{bucket}/{key}", str(local))
+    try:
+        return check_judge_done(json.loads(local.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, StatusError) as error:
+        raise CleanError(f"s3://{bucket}/{key}: {error}") from error
+
+
+def _remove(bucket: str, keys: Sequence[str]) -> list[str]:
+    """Um `s3 rm` por chave, até o fim: uma falha não poupa as outras chaves."""
+    failures: list[str] = []
+    for key in keys:
+        try:
+            s3_rm(f"s3://{bucket}/{key}")
+        except ExternalCommandError as error:
+            failures.append(f"{key}: {error}")
+    return failures
 
 
 def _drive_vigilance(tracked: _StateFile, *, started: float) -> int:
@@ -1656,6 +1768,9 @@ _FAILURES = (
     PlanError,
     StateError,
     StatusError,
+    CleanError,
+    MetaError,
+    JudgementError,
     OSError,
     json.JSONDecodeError,
     tomllib.TOMLDecodeError,

@@ -115,6 +115,11 @@ def check_done_marker(payload: Any, *, instance_id: str) -> DoneMarker | None:
     return _checked(DoneMarker, payload, "marcador", instance_id)
 
 
+def check_judge_done(payload: Any) -> DoneMarker:
+    """O marcador do Juiz sem a identidade: o `clean` não tem a entrada que o lançou."""
+    return DoneMarker(**_fields(DoneMarker, payload, "marcador do Juiz"))
+
+
 def check_progress(payload: Any, *, instance_id: str) -> Progress | None:
     """O progresso, ou `None` quando ele é o da tentativa anterior — a ignorar."""
     return _checked(Progress, payload, "progresso", instance_id)
@@ -167,17 +172,20 @@ def hour_of(timestamp: str) -> str:
 
 def _checked[T](record: type[T], payload: Any, what: str, instance_id: str) -> T | None:
     """Os campos do registro, conferidos um a um, e só então a identidade."""
+    values = _fields(record, payload, what)
+    if values["instance_id"] != instance_id:
+        return None
+    return record(**values)
+
+
+def _fields(record: type, payload: Any, what: str) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise StatusError(f"{what}: não é um objeto JSON: {type(payload).__name__}")
 
     try:
-        values = check_fields(record, payload, _CHECKS)
+        return check_fields(record, payload, _CHECKS)
     except FieldError as error:
         raise StatusError(str(error)) from error
-
-    if payload["instance_id"] != instance_id:
-        return None
-    return record(**values)
 
 
 def _index_over_total(index: int, total: int) -> str:

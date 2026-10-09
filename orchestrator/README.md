@@ -455,6 +455,7 @@ junto. São cinco:
     python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
         --instance-type c7g.xlarge
+    python orchestrator/orchestrator.py --infra ~/work/infra.json preflight --judge
     python orchestrator/orchestrator.py --infra ~/work/infra.json run \
         --config config/pilot.toml --bucket <piloto>
     python orchestrator/orchestrator.py --infra ~/work/infra.json judge \
@@ -464,8 +465,10 @@ junto. São cinco:
 
 A escada em que eles se encaixam, cada degrau disparado pelo pesquisador
 (ADR-0022): smoke local → aceite com Docker → preparação dos Masters → **gate
-humano** sobre o manifesto → preflight nos três tipos → piloto e **gate humano**
-sobre o relatório → campanha. O `prepare-masters` é o primeiro exercício real de
+humano** sobre o manifesto → preflight nas quatro rodadas (os três tipos de
+encode e o Juiz) → piloto e **gate humano** sobre o relatório → campanha. A
+ordem operacional inteira, com o Pass de qualidade, está em
+[O procedimento da campanha](#o-procedimento-da-campanha). O `prepare-masters` é o primeiro exercício real de
 `PassRole`, condição de tipo e chave via SSM; o preflight prova o resto do
 caminho do encode, incluindo a validação dos Masters, que só existe com Masters
 no bucket. Não há degrau entre o preflight e o piloto: o smoke AWS saiu da
@@ -624,6 +627,64 @@ pesquisador captura a saída de cada um desses comandos (`aws ec2 run-instances`
 — **sem** o valor, que é a chave privada —, `aws sts get-caller-identity`) e
 substitui os payloads da factory pelos capturados. É passo manual do pesquisador,
 fora do ticket que escreveu o subcomando.
+
+### O `preflight --judge`
+
+A quarta rodada, e a única que lança um Juiz (ADR-0016/0022). O `--judge` exclui
+o `--instance-type`: o tipo e a arquitetura saem de `[quality.judge]` do
+`config/experiment.toml`, e a AMI é a de encode daquela arquitetura — nenhuma AMI
+nova. O `--bucket` tem o mesmo default do piloto. As cinco linhas da
+auto-checagem são as mesmas; as do Juiz vêm depois delas, na mesma tabela:
+
+| passo | o que prova |
+|---|---|
+| `ami` | a arquitetura de `[quality.judge]` tem AMI no arquivo de infra |
+| `launch` | sobe um plano **vazio** válido para `quality/plan.json` e lança o Juiz com o tipo da definição, o perfil `judge`, 100 GB gp3 e as tags `role=judge`, `commit` e `Name=transcoding-bench-preflight` — `PassRole` do `judge` e a condição de tipo do `c7i.4xlarge` juntas |
+| `bootstrap` | o `judge/bootstrap.sh` inteiro: clone no SHA, build, o `GetObject` de `quality/plan.json` e do manifesto e os Masters baixados e validados pelo papel |
+| `vmaf` | o `libvmaf` dentro do container, sobre segundos de um Master contra ele mesmo |
+| `s3-put` | um objeto escrito de dentro do container em `quality/results/preflight/<instance-id>/` e listado pelo Orquestrador |
+| `terminate` | em todo caminho de saída |
+
+O plano vazio é o do `quality_plan.py` sem output nenhum: `schema_version`, a
+tabela `quality` copiada da definição e `outputs: []`. Ele passa por um leitor
+próprio (`check_empty_plan`) antes do upload, e o `check_plan` do `judge` o
+**recusa** — um Juiz de 16 vCPU lançado para não julgar nada é o erro que aquele
+leitor existe para barrar. O preflight sobrescreve o `quality/plan.json` do
+bucket: por isso ele roda **antes** do triage, como na escada, e nunca entre o
+`judge` e o `clean` de um mesmo Pass.
+
+O probe do `vmaf` roda na mesma imagem e com os mesmos dois mounts do
+`judge/launch_container.sh` — o clone de `judge/` read-only e o work dir —, mas
+não pelo script em si: o lançador executa o `run_quality.sh` sobre o plano, e o
+plano do preflight é vazio. O filtro é o do `run_quality.sh`: o primeiro Master
+do plano dos Masters (o 4K do primeiro vídeo), como primeira **e** segunda
+entrada, a segunda escalada para a geometria do próprio Master com o
+`scale_flags` do `[encode]`, e o `libvmaf` com o `vmaf_model` da definição,
+`float_ssim` e log JSON. Cada entrada é truncada nos mesmos segundos do probe do
+`perf`.
+
+O veredito é puro, sobre o log: exige um objeto JSON com `frames` não vazio e
+`pooled_metrics.vmaf.mean` numérico. Log ausente, que não é JSON, sem frame
+comparado ou com VMAF não numérico reprova o passo nomeando o motivo — um
+`libvmaf` que sai zero sem comparar frame nenhum não provou nada. O status do
+FFmpeg reprova antes do veredito. Passando, a linha traz os frames e o VMAF médio,
+que é de um vídeo contra ele mesmo e fica perto de 100.
+
+**A saída crua fica no bucket.** O log do `libvmaf` (`vmaf.json`) e o stderr do
+FFmpeg (`ffmpeg.log`) vão para o log do Orquestrador, para
+`~/work/preflight/<instance-id>/` e para `quality/results/preflight/<instance-id>/`,
+guardados **antes** do veredito. O objeto do `s3-put` vai para o mesmo prefixo.
+Nenhum dos três é apagado: o `DeleteObject` do Orquestrador é escopado a `runs/*`
+e não alcança `quality/` (ADR-0016), e o leitor de resultados do `analysis/`
+ignora o prefixo `preflight/`. O `<instance-id>` mantém as corridas separadas.
+
+O `apply` do `compute/` com o `c7i.4xlarge` na allowlist é pré-requisito — ver
+`infra/README.md`.
+
+O que ganha teste é o veredito do `vmaf`, as linhas do Juiz na tabela ao lado das
+da auto-checagem com o passo que não rodou, o plano vazio aceito aqui e recusado
+pelo `judge`, e a AMI do Juiz. O `docker run` do probe e o lançamento são argv e
+ficam sem teste (ADR-0022).
 
 ### O `--copy-props` do `s3 sync`
 
@@ -1102,3 +1163,46 @@ sobre um plano que não é o que o Juiz leu. O `s3_sync_run_metas_and_hashes` é
 argv e fica sem teste, como o resto do adaptador; a prova de que a amostragem é
 decidida sobre `meta.json` e `output.sha256` que o bash de verdade escreveu é a
 caixa-preta do `smoke/`.
+
+## O procedimento da campanha
+
+Do `preflight` ao `clean`, na ordem de D28 da Spec 5, para operar quatro dias de
+campanha sem reconstruí-la de cabeça. Cada passo é disparado pelo pesquisador; o
+"onde" diz de qual máquina. Na instância do Orquestrador, todo comando roda
+dentro de `tmux` e a partir do clone (`cd ~/transcoding-bench`), com o venv dele.
+O `judge` e o `clean` do Orquestrador, o `analysis/quality.py` e o `--quality`
+do `gate.py` chegam com #100, #101 e #99: os argumentos abaixo são os da spec, e
+a forma exata é a do README de cada um.
+
+| # | passo | onde | o que conferir |
+|---|---|---|---|
+| 1 | smoke local: `.venv-smoke/bin/python -m pytest smoke/` | Mac | verde |
+| 2 | aceite: `.venv-smoke/bin/python -m pytest smoke/ --docker`, com a fixture do `libvmaf` capturada | Mac, com Docker | verde, VMAF perto de 100 |
+| 3 | `terraform -chdir=infra/compute plan`, depois `apply` | Mac | o `plan` só atualiza a policy in-place (`infra/README.md`) |
+| 4 | `git fetch origin && git checkout <sha>` | Orquestrador | `git rev-parse HEAD` é o SHA da campanha |
+| 5 | `preflight --instance-type` em `c7g.xlarge`, `c7i.xlarge` e `c7a.xlarge`, e `preflight --judge` | Orquestrador | as quatro tabelas sem `falhou`; os dez eventos e o `pcnt-running` nas três de encode; frames e VMAF na do Juiz |
+| 6 | `quality_triage.py --config config/pilot.toml --bucket <piloto> --out ~/work/quality-pilot` | Orquestrador | nenhum bloco pendente; o histograma e as células divergentes |
+| 7 | `judge --config config/pilot.toml --bucket <piloto> --plan ~/work/quality-pilot/plan.json` | Orquestrador | o laço termina com `status/judge_done` sem `runs_failed` |
+| 8 | `aws s3 sync s3://<piloto>/quality/results/ quality-pilot/`, `analysis/quality.py` e `analysis/gate.py --quality` | Mac | o item 5: todo grupo julgado, e a lista dos não equivalentes |
+| 9 | o item 5 e o veredito no relatório do piloto, commitados | Mac | relatório **aprovado** |
+| 10 | `clean --bucket <piloto> --plan ~/work/quality-pilot/plan.json`, e com `--apply` | Orquestrador | opcional: as contagens do dry-run antes do `--apply` |
+| 11 | `git tag campaign-1 <sha>` e push da tag | Mac | o SHA é o do passo 4 |
+| 12 | `run --config config/experiment.toml --bucket <campanha>` | Orquestrador | a tabela da auto-checagem e o primeiro poll; depois, até ~4 dias de vigilância |
+| 13 | se a campanha terminar com pendência: `resume.py` e `run --slices` | Orquestrador | o relatório do `resume.py`, e de novo o passo 12 até não sobrar pendência |
+| 14 | `aws s3 sync s3://<campanha>/runs/ runs/`, `consolidate.py` e `gate.py` itens 1–4 | Mac | itens 1–4 passando |
+| 15 | `quality_triage.py`, `judge`, sync de `quality/results/`, `quality.py` e `gate.py --quality`, como em 6–8 sobre a campanha | Orquestrador e Mac | o item 5 da campanha |
+| 16 | `clean --bucket <campanha> --plan <plano da campanha>`, depois com `--apply` | Orquestrador | as contagens do dry-run; com `--apply`, nenhuma falha nomeada |
+| 17 | o relatório da campanha em `docs/reports/`, commitado | Mac | SHA, tag, custo, os itens 1–5, o Juiz e a retenção |
+
+O `terraform destroy` do `compute/` vem depois, e é decisão do pesquisador
+(ADR-0020), não deste procedimento.
+
+Três avisos que a ordem carrega:
+
+- **O passo 3 vem antes do 5.** Sem o `apply`, o `preflight --judge` sobe o
+  plano vazio e só então descobre o `UnauthorizedOperation` no `run-instances`.
+- **O `preflight` repete a cada SHA novo**, as quatro rodadas: é o que a classe 2
+  da ADR-0021 exige, e o passo 4 é o que muda o SHA.
+- **O `--out` do triage é um diretório novo a cada Pass**, e o plano que o `judge`
+  executou é o mesmo que o `clean` lê: trocar o plano entre os dois faria a
+  retenção decidir sobre representantes que o Juiz nunca viu.

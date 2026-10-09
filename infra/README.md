@@ -78,7 +78,7 @@ com um bucket seu.
 | `state_bucket` | — | o bucket de state; o mesmo nome que o `-backend-config` do `init` recebe |
 | `researcher_ssh_cidr` | — | de onde a porta 22 do Orquestrador aceita conexão; o seu IP público em `/32` |
 | `budget_notification_email` | — | quem recebe os dois alertas do orçamento (ADR-0012) |
-| `allowed_instance_types` | `["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "t3.micro"]` | os tipos que o Orquestrador pode lançar (ADR-0016); o tipo do Juiz entra aqui quando a spec do Pass o fixar |
+| `allowed_instance_types` | `["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "c7i.4xlarge", "t3.micro"]` | os tipos que o Orquestrador pode lançar (ADR-0016); o `c7i.4xlarge` é o Juiz de `[quality.judge]` (ADR-0025) |
 | `orchestrator_ami_id` | `ami-025d99823a4caad37` | Ubuntu 24.04 LTS amd64 do Orquestrador |
 | `encode_amd64_ami_id` | `ami-025d99823a4caad37` | Ubuntu 24.04 LTS amd64 das efêmeras c7i e c7a |
 | `encode_arm64_ami_id` | `ami-0246d714afcc1d494` | Ubuntu 24.04 LTS arm64 da efêmera c7g e da preparação dos Masters |
@@ -141,6 +141,23 @@ buckets e `ssh_private_key_parameter_name`.
 **A partir deste `apply` a conta passa a ter custo recorrente**: a t3.micro
 fatura continuamente, com o volume de 16 GB, até o `destroy` do `compute/`. É o
 orçamento de $150 acima quem a vigia.
+
+### O `apply` antes do `preflight --judge`
+
+O `c7i.4xlarge` entrou no default de `allowed_instance_types` depois do primeiro
+`apply`, e a condição de `ec2:InstanceType` da policy do Orquestrador só o aceita
+depois de um `apply` do `compute/` com esse default. O `apply` é **obrigatório
+antes do `preflight --judge`**, e é classe 2 (ADR-0021): muda a infra, nenhum
+parâmetro de encode. Sem ele, o `run-instances` do Juiz volta
+`UnauthorizedOperation` — com o plano vazio já em `quality/plan.json`, que é o
+passo que o precede.
+
+O que o `plan` tem de mostrar é uma atualização **in-place** da policy do
+Orquestrador e nada mais. A allowlist também decide a AZ da subnet (a primeira
+que oferece todos os tipos, acima): se o `c7i.4xlarge` não for oferecido na AZ
+atual, o `plan` mostra a subnet e a instância do Orquestrador sendo
+**substituídas**. Nesse caso não aplique — com uma campanha de pé, isso mata o
+`tmux` e deixa as efêmeras órfãs — e volte para decidir a AZ.
 
 ## A instância do Orquestrador
 

@@ -230,7 +230,10 @@ quer verificar.
     .venv-smoke/bin/python -m pytest smoke/
 
 O `bootstrap.sh` e o `launch_container.sh` ficam de fora, como os homônimos do
-`encode/`: um é provisionamento e o outro é o `docker run`, e o que os prova é o
-`preflight --judge`, que lança um Juiz descartável e atravessa os dois.
+`encode/`: um é provisionamento e o outro é o `docker run`. O que os prova é o
+`preflight --judge`, que lança um Juiz descartável: o `bootstrap.sh` roda
+inteiro, e o `libvmaf` roda na mesma imagem e com os mesmos mounts do
+`launch_container.sh` — não pelo script, que executaria o `run_quality.sh` sobre
+um plano vazio (`orchestrator/README.md`).
 
 `shellcheck` e `shfmt` rodam no pre-commit, que é a casa oficial dos linters.

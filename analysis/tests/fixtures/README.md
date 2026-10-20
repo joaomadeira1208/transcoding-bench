@@ -82,6 +82,10 @@ Quem o lê é o `test_judge_agreement.py` de cada papel: o deste, pelo
 Os inválidos dos dois testes são esta âncora com um campo trocado, e não mais
 um válido escrito à mão em cada papel.
 
+Do Mac, com o bucket do Pass e o `run_id` do representante:
+
+    aws s3 cp s3://<bucket>/quality/results/<run_id>/judge.json judge.json
+
 Mesmo scrub: o `instance_id` é o único campo trocado, pelo
 `i-0123456789abcdef0` das factories. E a mesma regra de regeneração: só com um
 Pass novo, quando o `schema_version` do `judge.json` subir.

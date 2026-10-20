@@ -472,3 +472,25 @@ class TestTheMarkerTheCleanReads:
     def test_a_marker_that_is_not_an_object_is_refused(self):
         with pytest.raises(StatusError, match="marcador do Juiz"):
             check_judge_done([])
+
+
+class TestWhatTheJudgeWrote:
+    def test_the_captured_progress_is_accepted(self):
+        progress = capture("judge-progress.json", check_judge_progress)
+
+        assert (progress.output_index, progress.output_count) == (13, 13)
+        assert progress.runs_failed == 0
+
+    def test_the_captured_progress_renders_a_line(self):
+        line = judge_progress_line(capture("judge-progress.json", check_judge_progress))
+
+        assert HOUR.match(line)
+        assert line.endswith("13/13 runs, 0 falhas, 32m")
+
+    def test_the_watch_and_the_clean_read_the_captured_marker_alike(self):
+        payload = json.loads(captured("judge-done.json"))
+
+        marker = check_judge_done(payload)
+
+        assert check_done_marker(payload, instance_id=LAUNCHED) == marker
+        assert (marker.runs_total, marker.runs_failed, marker.exit_status) == (13, 0, 0)

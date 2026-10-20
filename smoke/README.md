@@ -263,6 +263,15 @@ Foi este aceite que achou a imagem sem os modelos embutidos do `libvmaf`: sem o
 `xxd`, o meson os omite sem erro, e o shim responde a qualquer
 `model=version=`.
 
+O mesmo argv julga também o output de cada encoder da definição: o harness
+codifica o clip com aquele encoder, e o output entra no lugar da primeira
+entrada. O veredito é o FFmpeg saindo zero e um frame no log por frame do clip;
+o VMAF não tem piso, porque um encode não é o clip. Este é o único lugar fora da
+campanha em que alguém decodifica o que os encoders escreveram — o clip contra
+ele mesmo é FFV1, e o `preflight --judge` mede o Master contra ele mesmo. Sem
+ele, a imagem sem decoder de AV1 por software chegou ao Pass do piloto e
+reprovou os quatro outputs de `libsvtav1` (#116).
+
 ### Regenerar as fixtures
 
     .venv-smoke/bin/python -m pytest smoke/ --docker \

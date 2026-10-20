@@ -9,6 +9,7 @@ import json
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -319,11 +320,13 @@ class TestBitstream:
         assert digest != hashlib.sha256(output_path(captured).read_bytes()).hexdigest()
 
 
-def judgement_argv(traced: list[str], clip: str) -> list[str]:
+def judgement_argv(traced: list[str], clip: str, distorted: str) -> list[str]:
+    """O primeiro `-i` é o output e o segundo o Master, na ordem do `run_quality.sh`."""
     argv = [FFMPEG, *traced]
+    inputs = iter((distorted, clip))
     for index, argument in enumerate(argv):
         if argument == "-i":
-            argv[index + 1] = clip
+            argv[index + 1] = next(inputs)
         elif argument == "-filter_complex":
             argv[index + 1] = LOG_PATH_OPTION.sub(
                 f"log_path={CONTAINER_OUT}/{VMAF_LOG}", argv[index + 1]
@@ -337,26 +340,43 @@ def judged_by_the_shim(triaged, campaign, run_quality) -> Pass:
 
 
 @pytest.fixture(scope="session")
-def judged_for_real(
-    tmp_path_factory: pytest.TempPathFactory, image: str, judged_by_the_shim: Pass, capture_dir
-) -> Capture:
+def judge_in_image(
+    tmp_path_factory: pytest.TempPathFactory, image: str, judged_by_the_shim: Pass
+) -> Callable[..., Capture]:
     traced = judged_by_the_shim.argv("ffmpeg")[0]
     *_, master = (traced[index + 1] for index, each in enumerate(traced) if each == "-i")
     clip = f"{CONTAINER_MASTERS}/{Path(master).name}"
     width, height = SCALE.search(traced[traced.index("-filter_complex") + 1]).groups()
-    out_dir = tmp_path_factory.mktemp("judge-capture")
 
-    result = run_in_image(
-        image,
-        JUDGE_ACCEPTANCE,
-        out_dir,
-        ["--clip", clip, "--clip-size", f"{width}x{height}", "--", *judgement_argv(traced, clip)],
-    )
+    def _judge(encoder: str | None = None) -> Capture:
+        out_dir = tmp_path_factory.mktemp("judge-capture")
+        arguments = ["--clip", clip, "--clip-size", f"{width}x{height}"]
+        distorted = clip
+        if encoder is not None:
+            distorted = f"{CONTAINER_OUT}/encoded.mkv"
+            arguments += ["--encoder", encoder, "--encoded", distorted]
+        result = run_in_image(
+            image,
+            JUDGE_ACCEPTANCE,
+            out_dir,
+            [*arguments, "--", *judgement_argv(traced, clip, distorted)],
+        )
+        return Capture(returncode=result.returncode, stderr=result.stderr, out_dir=out_dir)
 
-    captured = Capture(returncode=result.returncode, stderr=result.stderr, out_dir=out_dir)
+    return _judge
+
+
+@pytest.fixture(scope="session")
+def judged_for_real(judge_in_image, capture_dir) -> Capture:
+    captured = judge_in_image()
     if capture_dir is not None and captured.wrote(VMAF_LOG):
-        shutil.copyfile(out_dir / VMAF_LOG, capture_dir / VMAF_LOG)
+        shutil.copyfile(captured.out_dir / VMAF_LOG, capture_dir / VMAF_LOG)
     return captured
+
+
+@pytest.fixture(scope="session", params=ENCODERS)
+def judged_encode(request, judge_in_image) -> Capture:
+    return judge_in_image(request.param)
 
 
 def vmaf_log(captured: Capture) -> dict[str, Any]:
@@ -386,3 +406,13 @@ class TestJudge:
         version = json.loads(judged_for_real.artifact("versions.json"))["libvmaf"]
 
         assert f"`libvmaf` {version}" in FIXTURES_README.read_text(encoding="utf-8")
+
+
+class TestJudgeDecodesEveryEncoder:
+    def test_the_real_ffmpeg_judged_the_output_of_the_encoder(self, judged_encode):
+        assert judged_encode.returncode == 0, (
+            judged_encode.stderr + judged_encode.artifact("ffmpeg.log")[-2000:]
+        )
+
+    def test_the_log_has_one_entry_per_frame_of_the_clip(self, judged_encode):
+        assert len(vmaf_log(judged_encode)["frames"]) == CLIP_SECONDS * CLIP_FPS

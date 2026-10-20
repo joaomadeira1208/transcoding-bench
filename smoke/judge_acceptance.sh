@@ -11,7 +11,7 @@ CLIP_PIX_FMT=yuv420p
 
 usage_error() {
   printf 'judge_acceptance.sh: %s\n' "$*" >&2
-  printf 'uso: judge_acceptance.sh --out-dir <dir> --clip <path> --clip-size <WxH> --clip-seconds <n> --clip-fps <n> -- <julgamento>\n' >&2
+  printf 'uso: judge_acceptance.sh --out-dir <dir> --clip <path> --clip-size <WxH> --clip-seconds <n> --clip-fps <n> [--encoder <name> --encoded <path>] -- <julgamento>\n' >&2
   exit "$EXIT_USAGE"
 }
 
@@ -20,6 +20,8 @@ clip=""
 clip_size=""
 clip_seconds=""
 clip_fps=""
+encoder=""
+encoded=""
 
 while (($#)); do
   if [[ $1 == -- ]]; then
@@ -33,6 +35,8 @@ while (($#)); do
     --clip-size) clip_size=$2 ;;
     --clip-seconds) clip_seconds=$2 ;;
     --clip-fps) clip_fps=$2 ;;
+    --encoder) encoder=$2 ;;
+    --encoded) encoded=$2 ;;
     *) usage_error "argumento desconhecido: $1" ;;
   esac
   shift 2
@@ -42,12 +46,19 @@ for name in out_dir clip clip_size clip_seconds clip_fps; do
   [[ -n ${!name} ]] || usage_error "faltou --${name//_/-}"
 done
 (($#)) || usage_error "faltou o julgamento depois do --"
+[[ -z $encoder && -z $encoded || -n $encoder && -n $encoded ]] ||
+  usage_error "--encoder e --encoded vêm juntos"
 
 mkdir -p "$out_dir" "$(dirname "$clip")"
 
 ffmpeg -nostdin -y -hide_banner -loglevel error \
   -f lavfi -i "testsrc2=size=$clip_size:rate=$clip_fps" \
   -t "$clip_seconds" -pix_fmt "$CLIP_PIX_FMT" -c:v "$CLIP_CODEC" "$clip"
+
+if [[ -n $encoder ]]; then
+  ffmpeg -nostdin -y -hide_banner -loglevel error \
+    -i "$clip" -pix_fmt "$CLIP_PIX_FMT" -c:v "$encoder" "$encoded"
+fi
 
 cp "$VERSIONS_FILE" "$out_dir/versions.json"
 

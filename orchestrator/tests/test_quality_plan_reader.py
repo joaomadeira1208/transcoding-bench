@@ -11,10 +11,12 @@ from typing import Any
 import pytest
 from conftest import (
     ABSENT,
+    captured,
     make_plan_output,
     make_quality_plan,
     make_quality_plan_json,
     real_config,
+    real_pilot_config,
 )
 from quality_plan import PlanError, check_empty_plan, check_plan, empty_plan
 from scenario_plan import serialize_plan
@@ -194,3 +196,16 @@ class TestTheEmptyPlanOfThePreflight:
     def test_an_empty_plan_with_an_unknown_schema_version_is_refused(self):
         with pytest.raises(PlanError, match="schema_version"):
             check_empty_plan(make_quality_plan_json(schema_version="2", outputs=[]))
+
+
+class TestWhatTheTriageWrote:
+    def test_the_plan_of_the_pilot_pass_is_accepted(self):
+        plan = check_plan(captured("quality-plan.json"))
+
+        assert len(plan["outputs"]) == 13
+        assert sum(len(output["shared_by"]) for output in plan["outputs"]) == 90
+
+    def test_the_plan_carries_the_model_of_the_pilot(self):
+        plan = check_plan(captured("quality-plan.json"))
+
+        assert plan["quality"]["vmaf_model"] == real_pilot_config().quality.vmaf_model

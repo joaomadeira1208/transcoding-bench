@@ -1,0 +1,87 @@
+{
+  "schema_version": "1",
+  "run_id": "87cb0051-f371-48e1-bbd8-7dbcc94eeb7f",
+  "scenario_id": "libx264_1080p_720p_tos_c7i_rep1",
+  "codec": "h264",
+  "encoder": "libx264",
+  "input_res": "1080p",
+  "output_res": "720p",
+  "video": "tos",
+  "instance": "c7i",
+  "sha256": "fdb405819b1e10c8671de95d532826019c9bc77e1945f5465777e84d0f57bb38",
+  "master": "tos_1080p.mkv",
+  "output_width": 1280,
+  "output_height": 572,
+  "scale_flags": "lanczos",
+  "container": "mkv",
+  "frames": 17616,
+  "shared_by": [
+    {
+      "instance": "c7i",
+      "scenario_id": "libx264_1080p_720p_tos_c7i_rep1",
+      "run_id": "87cb0051-f371-48e1-bbd8-7dbcc94eeb7f"
+    },
+    {
+      "instance": "c7i",
+      "scenario_id": "libx264_1080p_720p_tos_c7i_rep2",
+      "run_id": "18613b0f-2d78-457d-9bc9-b5b255d85773"
+    },
+    {
+      "instance": "c7i",
+      "scenario_id": "libx264_1080p_720p_tos_c7i_rep3",
+      "run_id": "98242f8f-98a3-4d0b-afa9-3502b72c8e53"
+    },
+    {
+      "instance": "c7i",
+      "scenario_id": "libx264_1080p_720p_tos_c7i_rep4",
+      "run_id": "0385ac84-0bfe-481e-85dc-f97d96fff1d9"
+    },
+    {
+      "instance": "c7i",
+      "scenario_id": "libx264_1080p_720p_tos_c7i_rep5",
+      "run_id": "4a7189b9-f2a7-4007-aa1a-1db7328159e7"
+    },
+    {
+      "instance": "c7a",
+      "scenario_id": "libx264_1080p_720p_tos_c7a_rep1",
+      "run_id": "60038093-be44-49ce-897b-e7f5618a26f7"
+    },
+    {
+      "instance": "c7a",
+      "scenario_id": "libx264_1080p_720p_tos_c7a_rep2",
+      "run_id": "7cd48f0e-35d6-4c84-b5af-d4641ebded46"
+    },
+    {
+      "instance": "c7a",
+      "scenario_id": "libx264_1080p_720p_tos_c7a_rep3",
+      "run_id": "1260891f-2fe8-4b3b-b0be-ed58a160cc85"
+    },
+    {
+      "instance": "c7a",
+      "scenario_id": "libx264_1080p_720p_tos_c7a_rep4",
+      "run_id": "a446b134-12af-487e-97ae-4855046d172b"
+    },
+    {
+      "instance": "c7a",
+      "scenario_id": "libx264_1080p_720p_tos_c7a_rep5",
+      "run_id": "d5a43313-595c-496a-9d30-e9fb3322fb39"
+    }
+  ],
+  "cell_divergent": false,
+  "started_at": "2026-10-20T03:43:16+00:00",
+  "finished_at": "2026-10-20T03:45:42+00:00",
+  "exit_code": 0,
+  "commit": "c7aff85db0fa99f12de9469186b5b36115123bfb",
+  "instance_id": "i-0123456789abcdef0",
+  "instance_type": "c7i.4xlarge",
+  "versions": {
+    "base_image": "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
+    "ffmpeg": "n8.1.2",
+    "libx264": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+    "libx265": "4.2",
+    "libsvtav1": "v4.1.0",
+    "libvmaf": "v3.1.0",
+    "libdav1d": "1.5.4",
+    "aws_cli": "2.36.38"
+  }
+}

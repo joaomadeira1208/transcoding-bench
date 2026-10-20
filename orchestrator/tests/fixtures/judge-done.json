@@ -1,0 +1,8 @@
+{
+  "instance_id": "i-0123456789abcdef0",
+  "finished_at": "2026-10-20T03:55:53+00:00",
+  "runs_total": 13,
+  "runs_failed": 0,
+  "capped": false,
+  "exit_status": 0
+}

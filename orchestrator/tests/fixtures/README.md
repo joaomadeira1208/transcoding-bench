@@ -24,6 +24,9 @@ listagem truncada, e é exatamente isso que os parsers recusam.
 | `get-caller-identity.json` | o ARN de `assumed-role` que o perfil do Orquestrador resolve |
 | `status-progress.json` | o objeto de progresso como o `jq -n` do `run_all.sh` o escreve |
 | `status-done.json` | o marcador de término do mesmo laço, com o `capped` booleano |
+| `quality-plan.json` | o `quality/plan.json` do Pass do piloto, como o `quality_triage.py` o subiu |
+| `judge-progress.json` | o progresso do Juiz como o `jq -n` do `run_quality.sh` o escreve |
+| `judge-done.json` | o marcador do Juiz, lido pelo `watch` e pelo `clean` |
 
 As duas linhas em negrito eram suposição do `command_output.py` (`default=[]` e
 `_optional_field`) até esta captura.
@@ -89,19 +92,29 @@ offset qualquer em vez de casar um prefixo de string.
 
 A hora de fazer isso é quando o `run_all.sh` mudar o que escreve em `status/`.
 
-## O que ainda não está aqui: o `judge.json` e o par do Juiz
+## O plano e o par do Juiz
 
-O `judge.json` e os dois objetos de `status/` que o Juiz escreve têm leitores
-neste papel — `judgement_check.py` e o `check_judge_progress` do
-`status_check.py` — e **nenhuma captura ainda**: o `run_quality.sh` não existe,
-e as três chegam do Pass do piloto (execução I, #103), com o mesmo scrub de
-`instance_id` da tabela abaixo.
+Os três vêm do **Pass do piloto**, em `c7aff85`, baixados do bucket depois de o
+Juiz terminar: o `quality/plan.json` que ele julgou e o `status/judge_progress`
+e o `status/judge_done` que ele deixou. O `judge.json` do mesmo Pass é um
+arquivo só, lido pelos dois papéis, e mora em `analysis/tests/fixtures/` ao
+lado do `campaign_meta.json`.
 
-Até lá os testes rodam sobre as factories do `conftest.py`, e o válido do
-`test_judge_agreement.py` é escrito à mão aqui e no `analysis/`. É o estado em
-que o `meta.json` esteve antes do piloto: a concordância entre os dois leitores
-já é verificável sem a âncora, e o que falta é a prova de que o shell escreve os
-nomes, a ordem e os tipos que os dois esperam.
+O `quality-plan.json` é o de 13 outputs e 90 Replicações em `shared_by`, e é
+lido pelo `test_quality_plan_reader.py`. O par é lido pelo
+`test_status_check.py`: o progresso pelo `check_judge_progress`, e o marcador
+pelo `check_done_marker` do `watch` e pelo `check_judge_done` do `clean`, que
+têm de concordar sobre ele.
+
+Do Mac, com o bucket do Pass:
+
+    aws s3 cp s3://<bucket>/quality/plan.json quality-plan.json
+    aws s3 cp s3://<bucket>/status/judge_progress judge-progress.json
+    aws s3 cp s3://<bucket>/status/judge_done judge-done.json
+
+O `instance_id` dos dois de `status/` é trocado pelo `i-0123456789abcdef0` da
+tabela abaixo; o plano não tem nenhum. A hora de fazer isso é quando o
+`run_quality.sh` mudar o que escreve em `status/`, ou o triage a forma do plano.
 
 ## O scrub
 

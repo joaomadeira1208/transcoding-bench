@@ -1,0 +1,11 @@
+{
+  "instance_id": "i-0123456789abcdef0",
+  "output_index": 13,
+  "output_count": 13,
+  "run_id": "4856c4c7-c764-4a5e-b13c-5bd082c5fe11",
+  "scenario_id": "libx265_1080p_720p_tos_c7a_rep1",
+  "runs_total": 13,
+  "runs_failed": 0,
+  "elapsed_seconds": 1979,
+  "written_at": "2026-10-20T03:55:52+00:00"
+}

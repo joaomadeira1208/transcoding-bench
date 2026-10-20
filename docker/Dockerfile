@@ -122,6 +122,22 @@ RUN git clone --depth 1 --branch "${VMAF_VERSION}" https://github.com/Netflix/vm
   && ninja -C /tmp/vmaf/build install \
   && rm -rf /tmp/vmaf
 
+# O decoder de AV1 do Juiz. ADR-0008.
+ARG DAV1D_VERSION=1.5.4
+WORKDIR /tmp/dav1d
+RUN git clone --depth 1 --branch "${DAV1D_VERSION}" https://code.videolan.org/videolan/dav1d.git . \
+  && meson setup /tmp/dav1d/build /tmp/dav1d \
+    --prefix=/usr/local \
+    --libdir=lib \
+    --buildtype=release \
+    --default-library=static \
+    -Denable_tools=false \
+    -Denable_tests=false \
+    -Dc_args="${NATIVE_FLAGS}" \
+  && ninja -C /tmp/dav1d/build \
+  && ninja -C /tmp/dav1d/build install \
+  && rm -rf /tmp/dav1d
+
 # `--pkg-config-flags=--static`: sem ele o linker não vê as dependências
 # transitivas que o `Libs.private` de cada `.pc` declara. O `-lstdc++` ainda vai
 # explícito porque o `libvmaf.pc` do upstream não a declara, e o configure falha
@@ -142,6 +158,7 @@ RUN git clone --depth 1 --branch "${FFMPEG_VERSION}" https://github.com/FFmpeg/F
     --enable-libx265 \
     --enable-libsvtav1 \
     --enable-libvmaf \
+    --enable-libdav1d \
     --disable-shared \
     --enable-static \
     --disable-filter=ciescope \
@@ -164,19 +181,23 @@ RUN jq -n \
   --arg libx265 "${X265_VERSION}" \
   --arg libsvtav1 "${SVTAV1_VERSION}" \
   --arg libvmaf "${VMAF_VERSION}" \
+  --arg libdav1d "${DAV1D_VERSION}" \
   --arg aws_cli "${AWSCLI_VERSION}" \
   '$ARGS.named' > "${VERSIONS_FILE}"
 
-# Sem isto, um encoder que o configure aceitou mas não expôs só apareceria na
-# hora 30 da campanha. A saída vai para arquivo antes do `grep` porque `grep -q`
-# fecha o pipe cedo, e o SIGPIPE sob `pipefail` derrubaria o build.
+# Sem isto, um encoder ou decoder que o configure aceitou mas não expôs só
+# apareceria na hora 30 da campanha. A saída vai para arquivo antes do `grep`
+# porque `grep -q` fecha o pipe cedo, e o SIGPIPE sob `pipefail` derrubaria o
+# build.
 RUN ffmpeg -hide_banner -encoders > /tmp/encoders.txt \
   && grep -q libx264 /tmp/encoders.txt \
   && grep -q libx265 /tmp/encoders.txt \
   && grep -q libsvtav1 /tmp/encoders.txt \
   && ffmpeg -hide_banner -filters > /tmp/filters.txt \
   && grep -q libvmaf /tmp/filters.txt \
-  && rm -f /tmp/encoders.txt /tmp/filters.txt \
+  && ffmpeg -hide_banner -decoders > /tmp/decoders.txt \
+  && grep -q libdav1d /tmp/decoders.txt \
+  && rm -f /tmp/encoders.txt /tmp/filters.txt /tmp/decoders.txt \
   && perf --version \
   && pidstat -V \
   && /usr/bin/time --version \

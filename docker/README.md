@@ -5,8 +5,9 @@ Dois Dockerfiles divergiriam, e a `libvmaf` que só o Juiz usa custa alguns
 minutos de build a mais — barato perto de manter dois ambientes em sincronia.
 
 A imagem carrega **só o ambiente**: FFmpeg com `libx264`, `libx265` e
-`libsvtav1` compilados from source com `-march=native`, mais `libvmaf`, `perf`,
-`sysstat` (`pidstat`), `/usr/bin/time`, `jq` e a AWS CLI v2. Os `run_*.sh` e o
+`libsvtav1` compilados from source com `-march=native`, mais `libvmaf`, o
+decoder `dav1d`, `perf`, `sysstat` (`pidstat`), `/usr/bin/time`, `jq` e a AWS
+CLI v2. Os `run_*.sh` e o
 work dir chegam por bind-mount na hora do `docker run`, de duas proveniências
 distintas (ADR-0018): script é código versionado, `scenarios.json` é dado de
 runtime.
@@ -44,6 +45,7 @@ oposto do que a ADR-0008 quer.
 | x265 | `4.2` | tag |
 | SVT-AV1 | `v4.1.0` | tag |
 | libvmaf | `v3.1.0` | tag |
+| dav1d | `1.5.4` | tag |
 | AWS CLI | `2.36.38` | versão no instalador oficial |
 
 São `ARG` com default, e o default é o que a campanha reporta: trocar de versão
@@ -53,6 +55,11 @@ O FFmpeg está no `8.1.x` e não no `9.0.x`, e cada encoder na última versão
 estável anterior ao lançamento desse `8.1.2`: é a combinação com que aquele
 release conviveu. Um major de encoder mais novo que o FFmpeg pinado é onde as
 remoções de API aparecem.
+
+O `dav1d` não é encoder e fica fora dessa regra. É o decoder de AV1 do Juiz: o
+`libsvtav1` só codifica, e o decoder `av1` nativo do FFmpeg só decodifica por
+hwaccel, que as instâncias não têm. Decodificar AV1 é normativo e bit-exato, então
+a versão dele não muda o VMAF de nenhum output (ADR-0008, emenda).
 
 ## O arquivo de versões
 

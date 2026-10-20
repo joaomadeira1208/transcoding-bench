@@ -72,6 +72,7 @@ VERSIONS = {
     "libx265": "4.2",
     "libsvtav1": "v4.1.0",
     "libvmaf": "v3.1.0",
+    "libdav1d": "1.5.4",
     "aws_cli": "2.36.38",
 }
 

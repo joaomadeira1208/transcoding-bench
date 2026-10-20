@@ -25,6 +25,12 @@ Das saídas possíveis, esta é a única que preserva a premissa desta ADR. Baix
 
 A assimetria que sobra é aceita e é de outra natureza: o filtro some nas três arquiteturas igualmente, porque o Dockerfile é um só.
 
+## Emenda: o decoder de AV1 é o `dav1d`
+
+O `libsvtav1` do FFmpeg é só encoder, e o decoder `av1` nativo do FFmpeg só decodifica por hwaccel. Sem decoder de AV1 por software, o Juiz não lê nenhum output de `libsvtav1`: no Pass do piloto, os quatro reprovaram com `Your platform doesn't support hardware accelerated AV1 decoding` (#116). O FFmpeg passa a ser configurado com `--enable-libdav1d`, e o `dav1d` é compilado from source, estático, pinado por tag como o resto.
+
+Ele não entra no que se mede. O encode não decodifica AV1 — os Masters são FFV1 —, e no Juiz a decodificação de AV1 é normativa e bit-exata: qualquer decoder conforme entrega os mesmos frames, então a versão do `dav1d` não muda o VMAF de nenhum output. Ela vai ao `versions.json` mesmo assim, como todo componente da imagem.
+
 ## Consequences
 
 - O Dockerfile multi-arch (`docker buildx`) compila nativamente em cada arch — mesmo Dockerfile, build diferente por plataforma. Tempo de build é não-trivial (minutos) mas acontece uma vez.

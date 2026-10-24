@@ -92,12 +92,14 @@ quando o argumento não veio.
     ffmpeg -nostdin -y \
         -i /work/{run_id}.mkv \
         -i /work/masters/{master} \
-        -filter_complex '[1:v]scale={W}:{H}:flags={scale_flags}[ref];
-                         [0:v][ref]libvmaf=model=version={vmaf_model}
+        -filter_complex '[0:v]setpts=PTS-STARTPTS[dist];
+                         [1:v]setpts=PTS-STARTPTS,scale={W}:{H}:flags={scale_flags}[ref];
+                         [dist][ref]libvmaf=model=version={vmaf_model}
                                           :feature=name=float_ssim
                                           :n_threads={threads}
                                           :log_fmt=json
                                           :log_path=.../vmaf.json' \
+        -an \
         -f null -
 
 A referência é o **Master da `input_res` do Cenário**, escalado para a geometria
@@ -109,6 +111,14 @@ encoder em vez da cadeia de downscale (ADR-0005) — e é por isso que o
 O output é a **primeira** entrada e a referência a segunda, que é a ordem em que
 o filtro lê distorcido e referência. Trocá-la reporta um número que não é o do
 encoder.
+
+Os dois ramos começam no frame zero, e o par é por índice, não pelo timestamp de
+origem (emenda da ADR-0025). O FFmpeg tira de cada arquivo o `start` do
+container. No Master remuxado com `-c copy`, esse `start` vem do áudio, que
+começa antes do vídeo, enquanto o output não tem áudio. Sem o `setpts`, o
+`libvmaf` comparou o frame *n* de cada output do BBB de 2160p com o *n−2* do
+Master (#120). O `-an` deixa o áudio do Master fora da passada, que antes o
+decodificava para nada.
 
 Tudo o que aparece entre chaves acima chega pelo plano: o bash copia, nunca
 deriva (ADR-0019). O modelo do VMAF e a geometria são dado da definição, não

@@ -44,6 +44,8 @@ ARTIFACTS = frozenset({VMAF_LOG, JUDGE_FILENAME, FFMPEG_LOG})
 # porque o que se verifica é que o log do bucket é o que o `libvmaf` escreveu.
 SMOKE_VMAF = "91.5"
 
+ZEROED_START = "setpts=PTS-STARTPTS"
+
 # O contrato cross-language do `status/` do Juiz: o Orquestrador lê estes campos
 # com estes tipos, e `bool` não é `int` do lado de quem lê.
 PROGRESS_TYPES = {
@@ -94,6 +96,11 @@ def values_after(argv: list[str], flag: str) -> list[str]:
 
 def filtergraph(argv: list[str]) -> str:
     return value_after(argv, "-filter_complex")
+
+
+def filtergraph_chains(argv: list[str]) -> tuple[str, str, str]:
+    distorted, reference, comparison = filtergraph(argv).split(";")
+    return distorted, reference, comparison
 
 
 def libvmaf_options(argv: list[str]) -> list[str]:
@@ -243,17 +250,30 @@ class TestArgv:
         for output, argv in zip(judged.outputs(), judged.argv("ffmpeg"), strict=True):
             geometry = geometry_of(output)
 
-            assert filtergraph(argv).startswith(
-                f"[1:v]scale={geometry['width']}:{geometry['height']}:flags={flags}[ref];"
+            _, reference, _ = filtergraph_chains(argv)
+
+            assert reference.endswith(
+                f",scale={geometry['width']}:{geometry['height']}:flags={flags}[ref]"
             )
+
+    def test_both_inputs_are_paired_from_their_first_frame(self, judged):
+        for argv in judged.argv("ffmpeg"):
+            distorted, reference, _ = filtergraph_chains(argv)
+
+            assert distorted == f"[0:v]{ZEROED_START}[dist]"
+            assert reference.startswith(f"[1:v]{ZEROED_START},")
 
     def test_the_distorted_input_is_the_first_and_the_reference_the_second(self, judged):
         # Trocar a ordem aqui é medir o Master contra o output e reportar o
         # número como se fosse o do encoder.
         for argv in judged.argv("ffmpeg"):
-            _, _, comparison = filtergraph(argv).partition(";")
+            *_, comparison = filtergraph_chains(argv)
 
-            assert comparison.startswith("[0:v][ref]libvmaf=")
+            assert comparison.startswith("[dist][ref]libvmaf=")
+
+    def test_only_the_video_is_decoded(self, judged):
+        for argv in judged.argv("ffmpeg"):
+            assert "-an" in argv
 
     def test_the_model_is_the_one_the_definition_declares(self, judged):
         declared = f"model=version={PILOT['quality']['vmaf_model']}"

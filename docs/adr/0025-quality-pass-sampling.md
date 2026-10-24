@@ -52,6 +52,21 @@ O `scale_flags` da referência **não** entra: é o do `[encode]`, e medir o enc
 
 O validador exige a tabela e cada campo, sem default, e a guarda de subconjunto do CI a compara como compara `[encode]`. O objeto de run, o `meta.json`, o argv do encode e os planos de Cenários não mudam: a emenda é **classe 2 da ADR-0021**, e o piloto não se repete.
 
+## Emenda: o output e a referência são pareados por índice de frame
+
+O primeiro Pass da campanha recusou os 23 julgamentos do Big Buck Bunny feitos a partir do Master de 2160p (#120). O `libvmaf` pareia as duas entradas por timestamp, e o FFmpeg tira de cada arquivo o `start` do **container**, e não o de cada stream. O `bbb_2160p.mkv` é a fonte remuxada com `-c copy`: o áudio AC3 começa em 0 e o vídeo em 0,067 s, dois frames a 30 fps, que são o atraso de composição dos B-frames do H.264 da fonte. Todo output é só vídeo (`strip_audio`), e o container dele começa em 0,067. Do output o FFmpeg tira 0,067 s, do Master não tira nada, e o frame *n* do output foi comparado com o *n−2* do Master. O VMAF ficou em ~45–50, contra ~92–96 do mesmo vídeo a partir dos Masters derivados. Estes não têm áudio (`-an`), e o Master de 2160p do Tears of Steel começa em zero. Por isso o erro só apareceu no BBB de 2160p.
+
+Os encodes não estão em causa. Um encode sem perda pela mesma cadeia do `run_scenario.sh` (o `scale=` e o `-an`) bate com o Master escalado frame a frame, por índice, e só os pts diferem.
+
+**O Juiz zera o início dos dois ramos** (`setpts=PTS-STARTPTS`) antes do `libvmaf`, e não mapeia o áudio (`-an`). O par vale por índice porque o encode é 1:1: o item 3 do gate exige `ffmpeg_frames` igual ao Master, e o encode não reamostra a taxa. O frame *n* do output **é** o encode do frame *n* do Master, e o timestamp de origem é do container, não do conteúdo. O encode também leva o pts de cada frame do Master ao output, sem descartar nem duplicar frames. Com o primeiro pts dos dois lados zerado, as duas séries coincidem, e o par por timestamp é o par por índice.
+
+A contagem do `probe_master` por pacotes não deixou passar nada: o `bbb_2160p.mkv` decodifica 19 036 frames, o mesmo número de pacotes, e o `-count_packets` fica.
+
+A emenda é **classe 2 da ADR-0021**. Os encodes e as métricas de desempenho não passam pelo Juiz, então a campanha não se repete. Repetem-se os quatro preflights sobre o SHA novo e o Pass de qualidade.
+
+- **Remuxar os Masters de 2160p sem áudio** — rejeitado: muda o `sha256` de Masters que a campanha já encodou, e o defeito está numa premissa do Juiz, não no Master. Outra fonte com o vídeo começando depois do áudio voltaria a desalinhar.
+- **`-copyts`** — rejeitado: os dois ramos manteriam o 0,067 e o par sairia certo, mas só porque o encoder copiou os timestamps da fonte. O par dependeria de uma propriedade do muxer, e não da contagem de frames que o gate verifica.
+
 ## Considered Options
 
 - **Manter os 270 grupos por Replicação** — rejeitado: computa cinco vezes o mesmo número. O piloto mediu bit-identity intra-célula em 18 de 18 casos, e os cinco VMAF idênticos custariam horas de 4K por nenhuma informação.

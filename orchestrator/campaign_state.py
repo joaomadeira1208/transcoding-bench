@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any
 
+from experiment_config import CpuOptions
 from field_checks import FieldError, check_fields, check_int, check_non_empty_str
 from status_check import (
     DoneMarker,
@@ -50,11 +51,12 @@ class TrackedInstance:
     total_timeout: int
     state: Vigilance
     outcome: DoneMarker | None
+    cpu_options: CpuOptions | None
 
     @property
     def status_keys(self) -> StatusKeys:
         """Os dois objetos de `status/` desta entrada, nomeados pelo papel dela."""
-        return StatusKeys.of(self.role, self.instance_type)
+        return StatusKeys.of(self.role, self.instance)
 
     def read_progress(self, payload: Any) -> Progress | JudgeProgress | None:
         """O objeto de progresso desta entrada, pelo leitor que ela escolhe."""
@@ -108,7 +110,7 @@ def serialize_state(state: CampaignState) -> str:
 
 
 def _tracked(payload: Any, where: str, launch: Mapping[str, Any]) -> TrackedInstance:
-    raw = {"role": Role.ENCODE.value, **launch, **_object(payload, where)}
+    raw = {"role": Role.ENCODE.value, "cpu_options": None, **launch, **_object(payload, where)}
     values = _values(TrackedInstance, raw, f"{where}.")
     return TrackedInstance(
         **{
@@ -116,8 +118,15 @@ def _tracked(payload: Any, where: str, launch: Mapping[str, Any]) -> TrackedInst
             "role": Role(values["role"]),
             "state": Vigilance(values["state"]),
             "outcome": _outcome(values["outcome"], values["instance_id"], f"{where}.outcome"),
+            "cpu_options": _cpu_options(values["cpu_options"], f"{where}.cpu_options"),
         }
     )
+
+
+def _cpu_options(payload: Any, where: str) -> CpuOptions | None:
+    if payload is None:
+        return None
+    return CpuOptions(**_values(CpuOptions, payload, f"{where}."))
 
 
 def _outcome(payload: Any, instance_id: str, where: str) -> DoneMarker | None:
@@ -178,6 +187,11 @@ def _check_outcome(field: str, value: Any) -> None:
         raise FieldError(f"{field}: esperava o marcador ou nulo, veio {type(value).__name__}")
 
 
+def _check_cpu_options(field: str, value: Any) -> None:
+    if value is not None and not isinstance(value, Mapping):
+        raise FieldError(f"{field}: esperava a topologia ou nulo, veio {type(value).__name__}")
+
+
 def _check_timeout(field: str, value: Any) -> None:
     check_int(field, value)
     if value <= 0:
@@ -220,4 +234,7 @@ _CHECKS: dict[str, Callable[[str, Any], None]] = {
     "runs_total": check_int,
     "state": _check_state,
     "outcome": _check_outcome,
+    "cpu_options": _check_cpu_options,
+    "core_count": check_int,
+    "threads_per_core": check_int,
 }

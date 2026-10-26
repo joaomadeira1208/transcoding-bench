@@ -11,6 +11,7 @@ from conftest import (
     INSTANCE_ID,
     INSTANCE_TYPE,
     PILOT,
+    PILOT_TOML,
     Loop,
     check_with_stdlib_checker,
     consolidate_with_cli,
@@ -68,7 +69,7 @@ def replication_argv(pilot_loop: Loop) -> list[str]:
 @pytest.fixture(scope="session")
 def pilot_consolidation(pilot_loop: Loop, tmp_path_factory: pytest.TempPathFactory):
     out = tmp_path_factory.mktemp("pilot-consolidated") / "runs.parquet"
-    result = consolidate_with_cli(pilot_loop.runs_dir, out)
+    result = consolidate_with_cli(pilot_loop.runs_dir, out, PILOT_TOML)
     assert result.returncode == 0, result.stderr
     return result, pq.read_table(out)
 

@@ -11,9 +11,16 @@ from dataclasses import replace
 
 import pytest
 from conftest import make_infra, real_config
-from experiment_config import InstanceRecord
+from experiment_config import CpuOptions, InstanceRecord
 from infra_config import parse_infra
-from instance_launch import ENCODE_ROLE, LaunchError, encode_name, encode_tags, encode_target
+from instance_launch import (
+    ENCODE_ROLE,
+    LaunchError,
+    encode_name,
+    encode_tags,
+    encode_target,
+    instance_target,
+)
 
 
 def amis():
@@ -50,11 +57,52 @@ class TestTheAmiOfTheRequestedType:
             encode_target(real_config(), amis(), "c7q.xlarge")
 
     def test_an_arch_with_no_ami_is_refused_naming_the_arch(self):
-        strange = InstanceRecord(id="c7x", instance_type="c7x.xlarge", arch="riscv")
+        strange = InstanceRecord(
+            id="c7x", instance_type="c7x.xlarge", arch="riscv", cpu_options=None
+        )
         config = replace(real_config(), instances=(strange,))
 
         with pytest.raises(LaunchError, match="riscv"):
             encode_target(config, amis(), "c7x.xlarge")
+
+
+def two_arms():
+    """Os dois braços da topologia: o mesmo tipo, e só o `CpuOptions` os separa."""
+    return replace(
+        real_config(),
+        instances=tuple(
+            InstanceRecord(
+                id=f"c7i-{name}",
+                instance_type="c7i.2xlarge",
+                arch="x86_64",
+                cpu_options=CpuOptions(core_count=cores, threads_per_core=threads),
+            )
+            for name, cores, threads in (("smt", 2, 2), ("nosmt", 4, 1))
+        ),
+    )
+
+
+class TestTwoInstancesOfTheSameType:
+    def test_the_type_alone_is_refused_naming_both_ids(self):
+        # Escolher um dos dois em silêncio lança o outro braço com o `CpuOptions`
+        # errado, e o preflight confere a topologia de quem não vai medir.
+        with pytest.raises(LaunchError) as raised:
+            encode_target(two_arms(), amis(), "c7i.2xlarge")
+
+        assert "c7i-smt" in str(raised.value) and "c7i-nosmt" in str(raised.value)
+
+    @pytest.mark.parametrize(("instance", "threads"), [("c7i-smt", 2), ("c7i-nosmt", 1)])
+    def test_the_id_picks_the_arm_with_its_own_topology(self, instance, threads):
+        target = instance_target(two_arms(), amis(), instance)
+
+        assert target.instance.id == instance
+        assert target.instance.cpu_options is not None
+        assert target.instance.cpu_options.threads_per_core == threads
+        assert target.image_id == amis().encode_amd64
+
+    def test_an_id_the_definition_does_not_declare_is_refused_naming_the_declared_ones(self):
+        with pytest.raises(LaunchError, match="c7i-nosmt"):
+            instance_target(two_arms(), amis(), "c7i-ht")
 
 
 class TestTheTagsOfALaunchedInstance:

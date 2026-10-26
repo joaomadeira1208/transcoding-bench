@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from experiment_config import Instrumentation, MetricRecord
+from experiment_config import CpuOptions, Instrumentation, MetricRecord
 from masters_launch import IMAGE_TAG
 
 # Os três modos de falha que a primeira rodada mostrou, e que pedem decisões
@@ -47,6 +47,8 @@ VMAF_PROBE_LOG = "/tmp/vmaf.json"
 
 HEADER = ("passo", "resultado", "detalhe")
 
+THREADS_PER_CORE_LABEL = "Thread(s) per core"
+
 
 class PreflightError(Exception):
     """O resultado que um passo do `preflight` observou e recusou."""
@@ -61,6 +63,7 @@ class Step(Enum):
     AMI = "ami"
     LAUNCH = "launch"
     BOOTSTRAP = "bootstrap"
+    TOPOLOGY = "topologia"
     PERF = "perf-stat"
     VMAF = "vmaf"
     PUT = "s3-put"
@@ -74,6 +77,7 @@ ENCODE_STEPS = (
     Step.AMI,
     Step.LAUNCH,
     Step.BOOTSTRAP,
+    Step.TOPOLOGY,
     Step.PERF,
     Step.PUT,
     Step.TERMINATE,
@@ -212,6 +216,61 @@ def vmaf_probe_command(
         "-c",
         script,
     ]
+
+
+def topology_probe_command() -> list[str]:
+    """O `nproc` e o `lscpu` de dentro do container, que é onde o FFmpeg conta os vCPUs."""
+    return ["sudo", "docker", "run", "--rm", IMAGE_TAG, "bash", "-c", "nproc && lscpu"]
+
+
+@dataclass(frozen=True)
+class ContainerTopology:
+    vcpus: int
+    threads_per_core: int
+
+
+def container_topology(raw: str, declared: CpuOptions | None) -> ContainerTopology:
+    """O que o container enxerga, recusado quando não é a topologia declarada (ADR-0026)."""
+    lines = raw.splitlines()
+    try:
+        seen = ContainerTopology(
+            vcpus=int(lines[0]),
+            threads_per_core=int(_lscpu_field(lines[1:], THREADS_PER_CORE_LABEL)),
+        )
+    except (IndexError, ValueError) as error:
+        raise PreflightError(
+            f"o probe não trouxe o nproc e o {THREADS_PER_CORE_LABEL} do lscpu: {raw[:120]!r}"
+        ) from error
+
+    if declared is None:
+        return seen
+    wrong = [
+        f"{label} = {got}, declarado {want}"
+        for label, got, want in (
+            ("nproc", seen.vcpus, declared.vcpus),
+            (THREADS_PER_CORE_LABEL, seen.threads_per_core, declared.threads_per_core),
+        )
+        if got != want
+    ]
+    if wrong:
+        raise PreflightError(
+            f"a topologia dentro do container não é a declarada: {'; '.join(wrong)}"
+        )
+    return seen
+
+
+def topology_detail(seen: ContainerTopology) -> str:
+    return (
+        f"dentro do container: nproc {seen.vcpus}, {THREADS_PER_CORE_LABEL} {seen.threads_per_core}"
+    )
+
+
+def _lscpu_field(lines: Sequence[str], label: str) -> str:
+    for line in lines:
+        name, colon, value = line.partition(":")
+        if colon and name.strip() == label:
+            return value.strip()
+    raise ValueError(label)
 
 
 def put_command(*, bucket: str, key: str) -> list[str]:

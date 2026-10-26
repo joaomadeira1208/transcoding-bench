@@ -12,3 +12,9 @@ Para isolar a arquitetura de CPU como variável independente, escolhemos três f
 
 - A simetria do tamanho `xlarge` (4 vCPU) é estrutural, não comportamental: Graviton 3 entrega 4 cores físicos sem SMT, enquanto Sapphire Rapids e EPYC entregam 2 cores físicos × 2 SMT threads. Essa assimetria é parte do que está sendo medido, não um defeito a corrigir.
 - Comparabilidade direta com [matha2021] (que usou Graviton 2 / Skylake / Naples) fica fragilizada — mas o ganho de relevância para gerações atuais compensa.
+
+## Emenda: a `c7a` tem 4 núcleos físicos, e a assimetria é só da Intel
+
+A primeira consequência acima está errada sobre a `c7a`. Pela API da EC2 (`aws ec2 describe-instance-types`, `VCpuInfo`), a `c7g.xlarge` e a `c7a.xlarge` entregam **4 núcleos × 1 thread**, e só a `c7i.xlarge` entrega **2 núcleos × 2 threads** (SMT). A AMD da família `c7a` não expõe SMT ao guest.
+
+A simetria dos 4 vCPUs continua estrutural, mas a assimetria de topologia é só da Intel. A comparação com a `c7i` mistura o núcleo com o número de núcleos físicos: o IPC por thread dela ficou em ~0,66× o da `c7a` na campanha, o que é consistente com SMT e não estava isolado. A ADR-0026 isola o efeito com um experimento de topologia (uma `c7i.2xlarge` com `CpuOptions` 2 × 2 e outra 4 × 1). A escolha dos três tipos não muda.

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-from run_table import _pcnt_column, _perf_column
+from run_table import PmuColumns, pcnt_column, perf_column, pmu_columns
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -45,23 +45,22 @@ CELL = [*SCENARIO_KEY, "instance"]
 
 REPLICATION_CV_CEILING = 0.05
 
+CYCLES_PER_MS_PER_GHZ = 1e6
+FREQUENCY_QUANTILES = (0.05, 0.5, 0.95)
+FREQUENCY_WINDOW_HOURS = 6
+
 
 @dataclass(frozen=True)
 class Definition:
     frames: dict[str, int]
-    events: tuple[str, ...]
-    metrics: dict[str, tuple[str, str]]
+    pmu: PmuColumns
 
 
 def load_definition(path: Path) -> Definition:
     config = tomllib.loads(path.read_text(encoding="utf-8"))
     return Definition(
         frames={video["slug"]: video["frames"] for video in config["video"]},
-        events=tuple(config["instrumentation"]["pmu_events"]),
-        metrics={
-            metric["name"]: (metric["numerator"], metric["denominator"])
-            for metric in config["instrumentation"]["metric"]
-        },
+        pmu=pmu_columns(config),
     )
 
 
@@ -76,8 +75,11 @@ def check_exit_and_timeout(df: pd.DataFrame) -> tuple[bool, str]:
 
 
 def check_pmu_complete(df: pd.DataFrame, definition: Definition) -> tuple[bool, str]:
-    events = [_perf_column(event) for event in definition.events]
-    metrics = list(definition.metrics)
+    events = [perf_column(event) for event in definition.pmu.events]
+    metrics = list(definition.pmu.metrics)
+    missing = [column for column in (*events, *metrics) if column not in df.columns]
+    if missing:
+        return False, f"coluna(s) que a definição declara e o Parquet não tem: {', '.join(missing)}"
     nulls = int(df[events].isna().sum().sum()) + int(df[metrics].isna().sum().sum())
     return nulls == 0, f"{len(events)} eventos + {len(metrics)} métricas, {nulls} nulo(s)"
 
@@ -108,14 +110,16 @@ def check_cpu_saturation(df: pd.DataFrame) -> tuple[bool, str]:
 
 
 def check_metric_pairs(df: pd.DataFrame, definition: Definition) -> tuple[bool, str]:
-    offending = [
-        f"{name}: {(~same).sum()}/{len(df)} linhas com janelas distintas"
-        for name, (numerator, denominator) in definition.metrics.items()
-        if not (same := df[_pcnt_column(numerator)] == df[_pcnt_column(denominator)]).all()
-    ]
+    offending = []
+    for name, (numerator, denominator) in definition.pmu.metrics.items():
+        columns = [pcnt_column(numerator), pcnt_column(denominator)]
+        if not set(columns) <= set(df.columns):
+            offending.append(f"{name}: sem as colunas de regime no Parquet")
+        elif not (same := df[columns[0]] == df[columns[1]]).all():
+            offending.append(f"{name}: {(~same).sum()}/{len(df)} linhas com janelas distintas")
     if offending:
         return False, "; ".join(offending)
-    return True, f"{len(definition.metrics)} pares na mesma janela em todas as {len(df)} linhas"
+    return True, f"{len(definition.pmu.metrics)} pares na mesma janela em todas as {len(df)} linhas"
 
 
 def check_quality(groups: pd.DataFrame, df: pd.DataFrame) -> tuple[bool, str]:
@@ -171,14 +175,43 @@ def multiplexing_by_instance(df: pd.DataFrame, definition: Definition) -> pd.Dat
     Uma média sobre os oito devolve 75% no Graviton3 e esconde a multiplexação:
     eventos de software não passam pela PMU e voltam sempre 100%.
     """
-    software = [_pcnt_column(e) for e in definition.events if e in PERF_SOFTWARE_EVENTS]
-    hardware = [_pcnt_column(e) for e in definition.events if e not in PERF_SOFTWARE_EVENTS]
+    measured = [e for e in definition.pmu.events if pcnt_column(e) in df.columns]
+    software = [pcnt_column(e) for e in measured if e in PERF_SOFTWARE_EVENTS]
+    hardware = [pcnt_column(e) for e in measured if e not in PERF_SOFTWARE_EVENTS]
     return pd.DataFrame(
         {
             "hardware_pcnt": df[hardware].mean(axis=1).groupby(df.instance).mean(),
             "software_pcnt": df[software].mean(axis=1).groupby(df.instance).mean(),
         }
     ).round(1)
+
+
+def effective_ghz(df: pd.DataFrame) -> pd.Series:
+    """Sobre o tempo de CPU, e não o de parede: com 4 threads, a de parede daria
+    quatro vezes a frequência de um núcleo."""
+    return df.perf_cycles / (df.perf_task_clock * CYCLES_PER_MS_PER_GHZ)
+
+
+def frequency_by_instance(df: pd.DataFrame) -> pd.DataFrame:
+    """p5/p50/p95 da frequência efetiva de cada Instância, em GHz."""
+    quantiles = effective_ghz(df).groupby(df.instance).quantile(list(FREQUENCY_QUANTILES))
+    table = quantiles.unstack()
+    table.columns = [f"p{round(q * 100)}" for q in FREQUENCY_QUANTILES]
+    return table.round(3)
+
+
+def frequency_over_launch(
+    df: pd.DataFrame, window_hours: int = FREQUENCY_WINDOW_HOURS
+) -> pd.DataFrame:
+    """A mediana da frequência por janela de horas desde o primeiro run do lançamento.
+
+    Desde o primeiro run do lançamento, e não o de cada Instância: é o relógio de
+    parede comum que mostra uma mudança de frequência numa só delas (ADR-0026).
+    """
+    started = pd.to_datetime(df.started_at, utc=True)
+    hours = (started - started.min()).dt.total_seconds() / 3600
+    window = (hours // window_hours * window_hours).astype(int).rename("h")
+    return effective_ghz(df).groupby([window, df.instance]).median().unstack().round(3)
 
 
 def replication_cv(df: pd.DataFrame) -> pd.Series:
@@ -222,7 +255,7 @@ def main() -> int:
 
     checks = [
         ("1  exit_code e teto por run", check_exit_and_timeout(df)),
-        ("2  dez colunas de PMU", check_pmu_complete(df, definition)),
+        ("2  colunas de PMU da definição", check_pmu_complete(df, definition)),
         ("3  ffmpeg_frames vs master", check_frames(df, definition)),
         ("4  cpu_pct_avg acima de um core", check_cpu_saturation(df)),
         ("5  triage e Juiz", check_quality(groups, df) if groups is not None else None),
@@ -242,6 +275,14 @@ def main() -> int:
     print(f"\n{len(df)} Replicações, {len(df.groupby(CELL))} células")
     print("\npcnt-running por instância (ADR-0006):")
     print(multiplexing_by_instance(df, definition).to_string())
+
+    if {"perf_cycles", "perf_task_clock"} <= set(df.columns):
+        print("\nfrequência efetiva por instância, GHz (perf_cycles ÷ perf_task_clock, ADR-0026):")
+        print(frequency_by_instance(df).to_string())
+        print(
+            f"\nmediana da frequência por janela de {FREQUENCY_WINDOW_HOURS} h do lançamento, GHz:"
+        )
+        print(frequency_over_launch(df).to_string())
 
     print(f"\nCV intra-célula do tempo (ADR-0003 supôs < {REPLICATION_CV_CEILING:.0%}):")
     print(replication_cv(df).describe().round(4).to_string())

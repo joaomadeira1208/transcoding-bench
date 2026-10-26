@@ -5,9 +5,16 @@
 
 from __future__ import annotations
 
-from conftest import make_ffmpeg_log, make_meta_json, make_perf_json, make_pidstat, make_time_json
+from conftest import (
+    EXPERIMENT_PMU,
+    make_ffmpeg_log,
+    make_meta_json,
+    make_perf_json,
+    make_pidstat,
+    make_time_json,
+)
 from run_meta import load_meta
-from run_table import TABLE_SCHEMA, RawRun, consolidate_runs, summarize
+from run_table import RawRun, consolidate_runs, summarize, table_schema
 
 
 def raw_run(
@@ -30,7 +37,7 @@ def raw_run(
 
 
 def rows(*runs: RawRun) -> list[dict]:
-    return consolidate_runs(runs).table.to_pylist()
+    return consolidate_runs(runs, EXPERIMENT_PMU).table.to_pylist()
 
 
 def single(**overrides: object) -> dict:
@@ -74,7 +81,7 @@ class TestSelection:
         # sumiria sem rastro.
         failed = raw_run(scenario_id="libx264_2160p_1080p_bbb_c7g_rep2", exit_code=70)
 
-        table = consolidate_runs([raw_run(), failed])
+        table = consolidate_runs([raw_run(), failed], EXPERIMENT_PMU)
 
         assert [row["exit_code"] for row in table.table.to_pylist()] == [0, 70]
         assert table.failed == 1
@@ -85,7 +92,8 @@ class TestSelection:
                 raw_run(warmup=True, scenario_id="libx264_2160p_1080p_bbb_c7g_warmup"),
                 raw_run(run_id="original", started_at="2026-08-08T10:00:00+00:00"),
                 raw_run(run_id="refeito", started_at="2026-08-08T11:00:00+00:00"),
-            ]
+            ],
+            EXPERIMENT_PMU,
         )
 
         assert (result.warmups, result.duplicates, result.failed) == (1, 1, 0)
@@ -142,7 +150,7 @@ class TestColumns:
         # Três amostras entram como **uma** linha: a série continua no raw dir, e
         # só o agregado atravessa (ADR-0007).
         assert len(rows(raw_run(pidstat=make_pidstat(cpu_pct=(10.0, 20.0, 30.0))))) == 1
-        assert "cpu_pct_avg" in TABLE_SCHEMA.names
+        assert "cpu_pct_avg" in table_schema(EXPERIMENT_PMU).names
 
     def test_the_row_carries_scenario_run_metadata_and_aggregates(self):
         row = single()
@@ -177,7 +185,7 @@ class TestMalformedArtifacts:
         # instrumentação saiu quebrada: relatá-la de novo afogaria em ruído o
         # caso em que o artefato torto é surpresa.
         result = consolidate_runs(
-            [raw_run(exit_code=70, time="Command exited with non-zero status 1\n")]
+            [raw_run(exit_code=70, time="Command exited with non-zero status 1\n")], EXPERIMENT_PMU
         )
         (row,) = result.table.to_pylist()
 
@@ -190,7 +198,9 @@ class TestMalformedArtifacts:
         # errado, ou a ferramenta mudou de forma — e a coluna sairia vazia para a
         # campanha inteira. Derrubar a consolidação, porém, apagaria as outras
         # 809 linhas por causa de um run.
-        result = consolidate_runs([raw_run(time="Command exited with non-zero status 1\n")])
+        result = consolidate_runs(
+            [raw_run(time="Command exited with non-zero status 1\n")], EXPERIMENT_PMU
+        )
         (row,) = result.table.to_pylist()
 
         assert row["time_elapsed_s"] is None
@@ -199,6 +209,6 @@ class TestMalformedArtifacts:
         assert "time.json" in result.unreadable[0]
 
     def test_the_report_names_the_run(self):
-        result = consolidate_runs([raw_run(perf="sem contador nenhum\n")])
+        result = consolidate_runs([raw_run(perf="sem contador nenhum\n")], EXPERIMENT_PMU)
 
         assert result.unreadable[0].startswith("9f0c4a2e-6b41-4d5f-8a37-2f1c8de0b7a4/perf.json")

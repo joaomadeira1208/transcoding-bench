@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyarrow.parquet as pq
-from conftest import ROLE_ROOT, make_ffmpeg_log, make_meta_json
+from conftest import EXPERIMENT_PMU, ROLE_ROOT, make_ffmpeg_log, make_meta_json
 from gate import check_quality, nonequivalent
 from run_meta import load_meta
 from run_table import RawRun, consolidate_runs
@@ -164,7 +164,8 @@ def run_gate(tmp_path: Path, *quality: str) -> subprocess.CompletedProcess[str]:
                     ("c7g", "9f0c4a2e-6b41-4d5f-8a37-2f1c8de0b7a4", "a3f1c0de"),
                     ("c7i", "2d7e5b13-8c90-4f1a-b6d2-7e3a9c4f0b18", "b4e2d1ef"),
                 ]
-            ]
+            ],
+            EXPERIMENT_PMU,
         ).table,
         runs,
     )

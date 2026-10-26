@@ -32,7 +32,8 @@ ambiente limpo em vez de passar porque a máquina do pesquisador tinha o pacote.
     .venv-analysis/bin/python analysis/validate_meta.py runs/<run_id>/meta.json
     .venv-analysis/bin/python analysis/validate_judge.py \
         quality/results/<run_id>/judge.json
-    .venv-analysis/bin/python analysis/consolidate.py --runs runs/ --out runs.parquet
+    .venv-analysis/bin/python analysis/consolidate.py --runs runs/ \
+        --config config/pilot.toml --out runs.parquet
 
 O nome do venv é outro que o do `orchestrator/` de propósito: os dois papéis
 rodam em ambientes separados (ADR-0017), e um `.venv` só serviria a um deles.
@@ -94,16 +95,25 @@ mão, como foi com o `meta.json` antes do piloto.
 ## A tabela consolidada
 
     aws s3 sync s3://<bucket>/runs/ runs/
-    .venv-analysis/bin/python analysis/consolidate.py --runs runs/ --out runs.parquet
+    .venv-analysis/bin/python analysis/consolidate.py --runs runs/ \
+        --config config/pilot.toml --out runs.parquet
 
 São dois passos, e não um: o `consolidate.py` recebe um diretório **local**. A
 ADR-0014 descreve o `sync` antes da consolidação, e separá-los é o que a mantém
 testável sem rede e capaz de consolidar a árvore que o `smoke/` acabou de
 produzir.
 
+O `--config` é a definição do lançamento, e é dela que saem os eventos de PMU,
+as colunas deles e as razões (emenda da ADR-0006): o `contadores.toml` mede seis
+eventos e uma razão, e o Parquet dele não tem colunas de branch. Uma definição
+que não é a do lançamento não passa calada: todo run terminado bem cujo
+`perf.json` mediu outros eventos que ela declara é **relatado** como artefato
+ilegível, nomeando os dois conjuntos.
+
 Uma linha por Execução, com o Cenário, os metadados do run, os agregados de
-`time` e `perf`, os parseados do FFmpeg e os três derivados — `ipc`,
-`branch_mispredict_rate` e `cpu_pct_avg` (ADR-0006/0007). Não há coluna de cache
+`time` e `perf`, os parseados do FFmpeg e os derivados — as razões que a
+definição declara (`ipc` e `branch_mispredict_rate` na campanha) e o
+`cpu_pct_avg` (ADR-0006/0007). Não há coluna de cache
 miss rate: nenhum par de cache conta o mesmo nível nas três arquiteturas, e a
 ADR-0006 o tirou das métricas-chave. As séries do `pidstat` ficam **fora**: só o agregado entra, e a série
 continua no raw dir, consultada sob demanda, para que a tabela não ganhe centenas
@@ -254,9 +264,21 @@ Dois scripts sobre o Parquet, e nenhum deles é parte da consolidação: eles
 O `gate.py` cobre os itens que o Parquet sozinho responde — os quatro primeiros
 da checklist, mais três leituras que a checklist não pede e o piloto mostrou
 valerem: o `pcnt-running`, o coeficiente de variação e a concordância de
-bitstream. O `--config` é a definição do lançamento que o Parquet mediu: os
-frames de cada Master, os eventos e os pares de cada métrica saem dela, não de
-uma cópia no script.
+bitstream — e a frequência efetiva. O `--config` é a definição do lançamento
+que o Parquet mediu: os frames de cada Master, os eventos e os pares de cada
+métrica saem dela, não de uma cópia no script. O item 2 confere as colunas que
+ela declara, e uma que o Parquet não tem é nomeada na linha.
+
+**A frequência efetiva** é `perf_cycles` ÷ `perf_task_clock`, com o
+`task-clock` em milissegundos de CPU — ciclos por segundo de CPU, a frequência
+de um núcleo, e não a soma dos quatro que o tempo de parede daria. O gate a
+imprime por instância (p5, p50 e p95) e, por janela de 6 h contada do primeiro
+run do lançamento, a mediana de cada instância. A janela é do lançamento, e não
+de cada Instância, porque o que ela mostra é uma mudança de frequência no
+relógio de parede: a `c7i` da campanha rodou a ~3,6 GHz nas primeiras ~20 h e a
+~3,0 GHz depois (ADR-0026). Nos contadores multiplexados, os ciclos são a
+extrapolação do `perf`, e a frequência herda a estimativa — é a dúvida que o
+`contadores.toml` responde.
 
 O item 5 depende do Juiz, e entra pelo `--quality`, opcional, com a tabela de
 grupos do `quality.py`:
@@ -313,6 +335,36 @@ Sobre o piloto, a projeção deu 92 h e 79,5 GB para a `c7i`, a mais lenta — e
 ela que mostrou que as ~46 h estimadas na ADR-0012 eram metade do real, com o par
 `2160p → 2160p` respondendo sozinho por metade da campanha.
 
+## Os experimentos complementares
+
+    .venv-analysis/bin/python analysis/complementares.py \
+        --campaign campaign.parquet --pilot pilot.parquet \
+        --topologia topologia.parquet --repetibilidade repetibilidade.parquet \
+        --contadores contadores.parquet
+
+Lê os Parquets do `consolidate.py`, cada um com a definição do seu lançamento, e
+imprime as tabelas do relatório da ADR-0026. Só o `--campaign` é obrigatório; a
+seção de um experimento que não vier fica de fora.
+
+- **Topologia**: ciclos por quadro (`perf_cycles` ÷ `ffmpeg_frames`, a métrica
+  primária), IPC, frequência efetiva e tempo de cada braço, por codec e por par;
+  o efeito do SMT como `c7i-smt` ÷ `c7i-nosmt`, em ciclos por quadro e em tempo —
+  acima de 1 é o que o SMT custa por thread —; e a ponte, os ciclos por quadro do
+  `c7i-smt` sobre os da `c7i` da campanha, nos mesmos Cenários.
+- **Repetibilidade**: a dispersão do tempo entre os hosts de cada tipo nos três
+  Cenários — CV e amplitude relativa —, somando as instâncias do piloto e da
+  campanha naqueles Cenários, e a frequência mediana de cada host. O host é o
+  `instance_id`, e a média de cada host vem antes da dispersão, para que o host
+  com mais Replicações não pese mais.
+- **Contadores**: a frequência real da `c7g-pmu`, e as instruções por quadro
+  dela, sem multiplexação, contra as multiplexadas da `c7g` da campanha e contra
+  as da `c7i` e da `c7a`, nos mesmos Cenários.
+
+Em todas, a comparação dos hashes de cada (instância, Cenário) com os da
+instância da campanha de que ela descende — o id antes do hífen: `c7i-nosmt` →
+`c7i`, `c7g-r2` → `c7g` —, com os que divergem nomeados. Um Cenário que a
+campanha não rodou conta como divergente.
+
 ## Os preços
 
 `prices.toml` guarda uma seção `[[quote]]` por consulta à Price List API, e a
@@ -320,4 +372,5 @@ análise escolhe pelo campo `covers`. A do piloto não é sobrescrita pela da
 campanha: o relatório de cada um cita um custo, e esse número tem de continuar
 reproduzível depois de a AWS mexer na tabela. O raciocínio inteiro — por que o
 preço não é coluna do `meta.json`, e a diferença entre custo por Cenário e custo
-operacional — está na ADR-0024.
+operacional — está na ADR-0024. A consulta `complementares` cobre os três
+experimentos da ADR-0026, e é a única com a `c7i.2xlarge`.

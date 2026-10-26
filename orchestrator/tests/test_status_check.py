@@ -12,14 +12,14 @@ import pytest
 from conftest import (
     ABSENT,
     captured,
+    every_real_definition,
     make_done_marker,
     make_judge_progress,
     make_progress,
-    real_config,
-    real_pilot_config,
 )
 from scenario_plan import build_canonical_plan
 from status_check import (
+    INSTANCE_WIDTH,
     LONGEST_SCENARIO_ID,
     DoneMarker,
     JudgeProgress,
@@ -167,8 +167,8 @@ class TestProgress:
 # mais larga que a da ilustração de lá, que só traz Replicações: encolhê-la para
 # casar com a ilustração desalinha a linha do warm-up, que é um run em cada seis.
 SPEC_LINE = (
-    "14:32:07 c7g   bloco 4/6  run 3/6  "
-    "libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m"
+    "14:32:07 c7g       bloco 4/6  run 3/6  "
+    "libx265_1080p_720p_tos_c7g_rep2            21/36 runs, 0 falhas, 1h10m"
 )
 
 RUNS_COLUMN = SPEC_LINE.index("21/36 runs")
@@ -194,17 +194,22 @@ class TestProgressLine:
     def test_the_line_has_the_shape_the_spec_shows(self):
         assert progress_line(progress_of(), instance="c7g", runs_total=36) == SPEC_LINE
 
-    def test_the_column_fits_every_scenario_id_the_two_definitions_generate(self):
+    def test_the_column_fits_every_scenario_id_the_definitions_generate(self):
         # Sobre as definições reais: um codec de slug mais comprido entraria no
         # `config/` e desalinharia a coluna sem que nada mais reclamasse.
         generated = [
             run["scenario_id"]
-            for config in (real_config(), real_pilot_config())
+            for config in every_real_definition()
             for block in build_canonical_plan(config)["blocks"]
             for run in block["runs"]
         ]
 
         assert max(len(scenario_id) for scenario_id in generated) == len(LONGEST_SCENARIO_ID)
+
+    def test_the_column_fits_every_instance_the_definitions_declare(self):
+        declared = [each.id for config in every_real_definition() for each in config.instances]
+
+        assert max(len(instance) for instance in declared) == INSTANCE_WIDTH
 
     def test_the_longest_scenario_id_keeps_the_columns_aligned(self):
         line = progress_line(
@@ -261,7 +266,7 @@ class TestProgressLine:
     def test_an_architecture_without_progress_still_gets_a_line(self):
         line = progress_line(None, instance="c7i", runs_total=36)
 
-        assert line == "         c7i   sem progresso ainda, 0/36 runs reportados"
+        assert line == "         c7i       sem progresso ainda, 0/36 runs reportados"
 
 
 class TestWhatTheBashWrote:
@@ -388,7 +393,8 @@ class TestJudgeProgress:
 # `_elapsed`, que abaixo de uma hora não escreve `0h`. Duas formas de escrever
 # uma hora na mesma tela seria a diferença que se lê como informação.
 JUDGE_SPEC_LINE = (
-    "14:32:07 judge output  7/13  libx265_1080p_720p_tos_c7i_rep1       7/13 runs, 0 falhas, 41m"
+    "14:32:07 judge     output  7/13  "
+    "libx265_1080p_720p_tos_c7i_rep1             7/13 runs, 0 falhas, 41m"
 )
 
 
@@ -435,7 +441,8 @@ class TestJudgeProgressLine:
 
     def test_a_judge_without_progress_yet_still_gets_a_line(self):
         assert (
-            judge_progress_line(None) == "         judge sem progresso ainda, nenhum output julgado"
+            judge_progress_line(None)
+            == "         judge     sem progresso ainda, nenhum output julgado"
         )
 
     def test_the_judges_line_sits_in_the_same_column_as_an_architectures(self):

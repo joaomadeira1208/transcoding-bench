@@ -425,3 +425,19 @@ teme, agora do lado da análise. A transcrição fica, e o
 de execução foi rejeitado porque o `consolidate.py` recebe um diretório `runs/` e
 mais nada (ADR-0014), e um TOML novo sobre runs antigos daria um schema errado sem
 dizer nada — o mesmo defeito, de cabeça para baixo.
+
+## Emenda: o orçamento da `c7g` é um par, e a validação é sem multiplexação
+
+### O que a campanha mostrou
+
+O orçamento de contadores da vPMU do Graviton é **um par por vez**: com os dois pares da campanha, `{cycles, instructions}` e `{branch-instructions, branch-misses}` se revezaram, cada um ativo em ~50% do tempo, em todo `perf.json` da `c7g`. As razões continuam corretas, porque cada par é medido junto (a emenda acima), mas o valor absoluto de cada contador é a **extrapolação** do `perf` sobre a metade do tempo em que ele rodou. A frequência que sai disso (~2,39 GHz) fica abaixo dos 2,6 GHz sustentados que a API informa, e por isso o artigo não compara instruções por quadro entre ARM e x86.
+
+### A validação
+
+O `config/contadores.toml` (ADR-0026) roda uma `c7g.xlarge` com o `pmu_events` reduzido a `cycles`, `instructions` e os quatro de software, e só a métrica `ipc`. Com um par só, o orçamento comporta tudo e nada é multiplexado. Ela mede a frequência real da ARM durante o encode e as instruções por quadro sem extrapolação, que se comparam com as das x86 e com as contagens multiplexadas da campanha, nos mesmos três Cenários.
+
+### A lista de eventos da análise sai da definição
+
+A seção "A lista de eventos da análise" acima recusou ler o TOML na consolidação. Com o `contadores.toml`, a transcrição fixa deixa de servir: a definição dele não tem os eventos de branch, as colunas deles nasceriam nulas e o item 2 do gate reprovaria um lançamento são. Agora o `consolidate.py` recebe `--config`, e o `run_table.py` deriva os eventos, as colunas e as razões da definição do lançamento. O `gate.py` item 2 confere as colunas que a definição declara.
+
+O motivo da recusa era real ("um TOML novo sobre runs antigos daria um schema errado sem dizer nada"), e passa a ser tratado onde ele aparece. A consolidação relata, como artefato ilegível, todo run com `exit_code` 0 cujo `perf.json` mediu outros eventos que a definição declara. Uma definição errada sobre runs certos deixa de passar calada. O `analysis/tests/test_pmu_events.py` amarra as colunas de cada definição de `config/` à lista e aos pares que ela declara.

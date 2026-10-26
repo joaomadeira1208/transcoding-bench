@@ -16,6 +16,10 @@ _TOP_LEVEL_KEYS = frozenset(
 )
 
 
+SCENARIO_ID_SEPARATOR = "_"
+
+_CPU_OPTIONS_KEYS = ("core_count", "threads_per_core")
+
 SHA256_DIGITS = 64
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
@@ -85,12 +89,25 @@ class VideoRecord:
 
 
 @dataclass(frozen=True)
+class CpuOptions:
+    """O `CpuOptions` do `run-instances`: a topologia lançada, quando não é a do tipo."""
+
+    core_count: int
+    threads_per_core: int
+
+    @property
+    def vcpus(self) -> int:
+        return self.core_count * self.threads_per_core
+
+
+@dataclass(frozen=True)
 class InstanceRecord:
     """Id curto e instance type declarados lado a lado: nenhum é derivado do outro."""
 
     id: str
     instance_type: str
     arch: str
+    cpu_options: CpuOptions | None
 
 
 @dataclass(frozen=True)
@@ -381,11 +398,33 @@ def _video(record: Mapping[str, Any], index: int) -> VideoRecord:
 
 def _instance(record: Mapping[str, Any], index: int) -> InstanceRecord:
     where = _where("instance", index, record.get("id"))
-    _reject_unknown(record, {"id", "instance_type", "arch"}, where)
+    _reject_unknown(record, {"id", "instance_type", "arch", *_CPU_OPTIONS_KEYS}, where)
+    instance_id = _str(record, "id", where)
+    if SCENARIO_ID_SEPARATOR in instance_id:
+        raise ConfigError(
+            f"{where}: 'id' must not contain '{SCENARIO_ID_SEPARATOR}', "
+            f"the separator of the scenario_id"
+        )
     return InstanceRecord(
-        id=_str(record, "id", where),
+        id=instance_id,
         instance_type=_str(record, "instance_type", where),
         arch=_str(record, "arch", where),
+        cpu_options=_cpu_options(record, where),
+    )
+
+
+def _cpu_options(record: Mapping[str, Any], where: str) -> CpuOptions | None:
+    declared = [key for key in _CPU_OPTIONS_KEYS if key in record]
+    if not declared:
+        return None
+    if len(declared) != len(_CPU_OPTIONS_KEYS):
+        (missing,) = set(_CPU_OPTIONS_KEYS) - set(declared)
+        raise ConfigError(
+            f"{where}: '{declared[0]}' and '{missing}' are declared together or not at all"
+        )
+    return CpuOptions(
+        core_count=_int(record, "core_count", where, minimum=1),
+        threads_per_core=_int(record, "threads_per_core", where, minimum=1),
     )
 
 

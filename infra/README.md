@@ -10,7 +10,7 @@ AWS.
 
 | Root | Cria | Tempo de vida |
 |---|---|---|
-| `storage/` | os dois buckets do experimento (campanha e piloto) | destruído **manualmente, no fim do TCC** (ADR-0011) |
+| `storage/` | um bucket por experimento: campanha, piloto e os três complementares (ADR-0026) | destruído **manualmente, no fim do TCC** (ADR-0011) |
 | `compute/` | rede, IAM, key pair, parâmetro SSM, orçamento e a instância do Orquestrador | destruído **no fim da campanha** |
 
 São dois porque os tempos de vida são dois (ADR-0020): os buckets são o ground
@@ -62,12 +62,14 @@ que estar encriptado at rest e tem que dar para voltar uma versão.
 
 | Variável | Default | O que é |
 |---|---|---|
-| `bucket_prefix` | `transcoding-bench` | primeiro segmento do nome dos dois buckets |
+| `bucket_prefix` | `transcoding-bench` | primeiro segmento do nome dos buckets |
 
-Os nomes saem de `<bucket_prefix>-<account_id>-campaign` e
-`<bucket_prefix>-<account_id>-pilot`, com o account id vindo do
-`aws_caller_identity` — o default serve como está, e só precisa mudar se colidir
-com um bucket seu.
+Os nomes saem de `<bucket_prefix>-<account_id>-<experimento>`, com o account id
+vindo do `aws_caller_identity` e o experimento entre `campaign`, `pilot`,
+`topologia`, `repetibilidade` e `contadores` — o default serve como está, e só
+precisa mudar se colidir com um bucket seu. Um bucket por experimento, e não um
+compartilhado: a guarda do `run` recusa um bucket cujo `runs/` já tem Execuções
+(ADR-0026).
 
 `compute/` tem sete. As três sem default têm que chegar em todo `plan` e todo
 `apply`, por `TF_VAR_*` ou por um `terraform.tfvars` local (que a allowlist do
@@ -78,7 +80,7 @@ com um bucket seu.
 | `state_bucket` | — | o bucket de state; o mesmo nome que o `-backend-config` do `init` recebe |
 | `researcher_ssh_cidr` | — | de onde a porta 22 do Orquestrador aceita conexão; o seu IP público em `/32` |
 | `budget_notification_email` | — | quem recebe os dois alertas do orçamento (ADR-0012) |
-| `allowed_instance_types` | `["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "c7i.4xlarge", "t3.micro"]` | os tipos que o Orquestrador pode lançar (ADR-0016); o `c7i.4xlarge` é o Juiz de `[quality.judge]` (ADR-0025) |
+| `allowed_instance_types` | `["c7g.xlarge", "c7i.xlarge", "c7a.xlarge", "c7i.2xlarge", "c7i.4xlarge", "t3.micro"]` | os tipos que o Orquestrador pode lançar (ADR-0016); o `c7i.4xlarge` é o Juiz de `[quality.judge]` (ADR-0025), e o `c7i.2xlarge`, os dois braços da topologia (ADR-0026) |
 | `orchestrator_ami_id` | `ami-025d99823a4caad37` | Ubuntu 24.04 LTS amd64 do Orquestrador |
 | `encode_amd64_ami_id` | `ami-025d99823a4caad37` | Ubuntu 24.04 LTS amd64 das efêmeras c7i e c7a |
 | `encode_arm64_ami_id` | `ami-0246d714afcc1d494` | Ubuntu 24.04 LTS arm64 da efêmera c7g e da preparação dos Masters |
@@ -107,10 +109,10 @@ uma versão nova, quando for hora de trocar de propósito:
     terraform -chdir=infra/storage plan
     terraform -chdir=infra/storage apply
 
-Os outputs são os dois nomes e os dois ARNs (`campaign_bucket_name`,
-`campaign_bucket_arn`, `pilot_bucket_name`, `pilot_bucket_arn`). É por eles que
-o `compute/` e, depois, os argumentos `--bucket` dos scripts descobrem para onde
-escrever.
+Os outputs são o nome e o ARN de cada bucket (`<experimento>_bucket_name` e
+`<experimento>_bucket_arn`, para `campaign`, `pilot`, `topologia`,
+`repetibilidade` e `contadores`). É por eles que o `compute/` e, depois, os
+argumentos `--bucket` dos scripts descobrem para onde escrever.
 
 Os buckets nascem **vazios**: nenhum objeto do layout de prefixos da ADR-0011 é
 criado pelo Terraform, os prefixos aparecem no primeiro upload. Não têm
@@ -135,8 +137,10 @@ zona, em ordem, que oferece **todos** eles.
 
 Os outputs são `orchestrator_public_ip` — o endereço por onde se entra na
 instância — mais o que o user-data dela injeta: `subnet_id`, os dois security
-groups, os quatro instance profiles, `key_pair_name`, as três AMIs, os dois
-buckets e `ssh_private_key_parameter_name`.
+groups, os quatro instance profiles, `key_pair_name`, as três AMIs,
+`bucket_names` (o mapa de experimento para bucket) e
+`ssh_private_key_parameter_name` — e `orchestrator_infra`, o arquivo de infra
+inteiro, que é o que o user-data grava (abaixo).
 
 **A partir deste `apply` a conta passa a ter custo recorrente**: a t3.micro
 fatura continuamente, com o volume de 16 GB, até o `destroy` do `compute/`. É o
@@ -158,6 +162,42 @@ que oferece todos os tipos, acima): se o `c7i.4xlarge` não for oferecido na AZ
 atual, o `plan` mostra a subnet e a instância do Orquestrador sendo
 **substituídas**. Nesse caso não aplique — com uma campanha de pé, isso mata o
 `tmux` e deixa as efêmeras órfãs — e volte para decidir a AZ.
+
+### O `apply` dos experimentos complementares
+
+Os três buckets da ADR-0026 e a `c7i.2xlarge` entram por dois `apply`s, na ordem
+de sempre:
+
+    terraform -chdir=infra/storage apply
+    terraform -chdir=infra/compute plan
+    terraform -chdir=infra/compute apply
+
+O `plan` do `storage/` mostra três buckets novos, cada um com o bloqueio de
+acesso público e a encriptação, e nada mais. O do `compute/` tem de mostrar
+**atualizações in-place** das policies — a do Orquestrador, pela allowlist e
+pelos ARNs novos, e as dos papéis `encode`, `judge` e `masters`, pelos ARNs — e
+os outputs novos. A subnet não muda: em 2026-10-26, os seis tipos da allowlist,
+a `c7i.2xlarge` inclusive, eram oferecidos nas mesmas cinco zonas de
+`us-east-1`, e a primeira em ordem continua a mesma. Se o `plan` mostrar a
+subnet ou a instância do Orquestrador sendo **substituídas**, não aplique, pelo
+motivo da seção acima.
+
+**A instância do Orquestrador não muda, e o `infra.json` dela fica velho.** O
+mapa `buckets` mora no user-data, e o `user_data` está em `ignore_changes`
+(abaixo): o `plan` não mostra a instância, e o arquivo que o bootstrap gravou no
+boot continua com os buckets que existiam então. Recriá-la para regravá-lo foi
+rejeitado pelo mesmo motivo do `ignore_changes` — com uma campanha de pé, mata o
+`tmux` e deixa as efêmeras órfãs. O caminho é o output `orchestrator_infra`, que
+é o mesmo JSON, levado por cima do arquivo:
+
+    terraform -chdir=infra/compute output -raw orchestrator_infra \
+        | ssh -i ~/.ssh/transcoding-bench.pem \
+            ubuntu@"$(terraform -chdir=infra/compute output -raw orchestrator_public_ip)" \
+            'jq . > ~/work/infra.json.new && mv ~/work/infra.json.new ~/work/infra.json'
+
+O `jq .` recusa um JSON truncado, e o `mv` só roda depois dele: o arquivo velho
+só é substituído por um que parseia. Os diretórios de trabalho dos experimentos
+em paralelo (`orchestrator/README.md`) copiam o arquivo depois deste passo.
 
 ## A instância do Orquestrador
 

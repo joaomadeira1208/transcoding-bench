@@ -14,6 +14,7 @@ from masters_launch import (
     WORK_MOUNT,
     mirror_differences,
     prepare_masters_command,
+    unmirrored,
 )
 
 BUCKET = "transcoding-bench-123456789012-campaign"
@@ -125,3 +126,31 @@ class TestTheMirrorOfTheTwoPrefixes:
         differences = mirror_differences(objects(a=10, b=20, c=30), objects(a=11, c=30, d=40))
 
         assert len(differences) == 3
+
+
+class TestEveryBucketAgainstTheCampaign:
+    # Os buckets dos experimentos complementares recebem os Masters por um `sync`
+    # à mão (ADR-0026): um esquecido só aparece no bootstrap da instância.
+
+    def test_buckets_that_mirror_the_reference_agree(self):
+        listings = {"campaign": objects(a=10), "pilot": objects(a=10), "topologia": objects(a=10)}
+
+        assert unmirrored(listings, "campaign") == ()
+
+    def test_each_divergence_is_named_with_its_bucket(self):
+        listings = {
+            "campaign": objects(a=10, b=20),
+            "topologia": objects(a=10),
+            "contadores": objects(a=10, b=21),
+        }
+
+        differences = unmirrored(listings, "campaign")
+
+        assert len(differences) == 2
+        assert differences[0].startswith("topologia: masters/b.mkv")
+        assert differences[1].startswith("contadores: masters/b.mkv")
+
+    def test_an_empty_bucket_is_named_once_per_missing_master(self):
+        differences = unmirrored({"campaign": objects(a=10, b=20), "novo": []}, "campaign")
+
+        assert len(differences) == 2

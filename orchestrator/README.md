@@ -42,9 +42,10 @@ não é sinal. Campo ausente ou de tipo errado é recusado nomeando o campo, e
 recusado **antes** da comparação de identidade: o `instance_id` pelo qual se
 compararia é um dos campos a conferir.
 
-Quem **nomeia** os dois objetos é a entrada rastreada, pelo papel dela, e não o
-`instance_type` solto: o `StatusKeys.of` devolve `status/{instance_type}_done` e
-`status/{instance_type}_progress` para uma entrada `encode`, e `status/judge_done`
+Quem **nomeia** os dois objetos é a entrada rastreada, pelo papel dela: o
+`StatusKeys.of` devolve `status/{instance}_done` e `status/{instance}_progress`,
+pelo id curto, para uma entrada `encode` (emenda da ADR-0011: pelo tipo, as
+três `c7g.xlarge` da repetibilidade escreveriam o mesmo marcador), e `status/judge_done`
 — a chave que a ADR-0011 fixou para o Juiz — mais `status/judge_progress` para o
 Juiz. O laço pergunta o leitor e o renderizador do progresso à entrada pela
 mesma razão, e não ao `status_check` direto: hoje há um leitor só, e o do objeto
@@ -64,9 +65,9 @@ Orquestrador sabe quantos ela recebeu, porque foi ele quem subiu a fatia. O
 `judge_progress_line` não recebe total nenhum: o Juiz recebeu o plano inteiro, e
 o `output_count` é dele.
 
-    14:32:07 c7g   bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
-             c7i   sem progresso ainda, 0/36 runs reportados
-    14:32:07 judge output  7/13  libx265_1080p_720p_tos_c7i_rep1       7/13 runs, 0 falhas, 41m
+    14:32:07 c7g       bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2            21/36 runs, 0 falhas, 1h10m
+             c7i       sem progresso ainda, 0/36 runs reportados
+    14:32:07 judge     output  7/13  libx265_1080p_720p_tos_c7i_rep1             7/13 runs, 0 falhas, 41m
 
 A coluna do nome tem cinco casas, que é o que o `judge` ocupa.
 
@@ -197,7 +198,13 @@ status zero sobre uma fatia com falhas. Ele é conferido pelo `status_check` na
 leitura, identidade inclusive: um marcador de outra instância guardado ali daria
 por completa uma fatia que não rodou.
 
-O `pid` é o único campo que aceita nulo, e é o intervalo entre o lançamento e o
+O `cpu_options` é a topologia que a EC2 aplicou à instância, lida do
+`describe-instances` antes do bootstrap (`{"core_count": 4, "threads_per_core": 1}`),
+e nulo até lá; o Juiz não o tem. É o registro de que o braço da topologia
+(ADR-0026) mediu com o que declarou. Um arquivo escrito antes do campo é lido
+com ele nulo, pelo mesmo arranjo do papel.
+
+O `pid` é o outro campo que aceita nulo, e é o intervalo entre o lançamento e o
 disparo; o `instance_id` não aceita, porque é por ele que a vigilância pergunta e
 por ele que ela termina. Nulo é o único valor degenerado que o `pid` aceita: ele
 vai para um `kill -0`, onde `0` sinaliza o process group de quem chama e `-1`
@@ -431,7 +438,10 @@ Todo subcomando recebe o caminho por `--infra`; descoberta por tag foi rejeitada
       },
       "buckets": {
         "campaign": "transcoding-bench-123456789012-campaign",
-        "pilot": "transcoding-bench-123456789012-pilot"
+        "pilot": "transcoding-bench-123456789012-pilot",
+        "topologia": "transcoding-bench-123456789012-topologia",
+        "repetibilidade": "transcoding-bench-123456789012-repetibilidade",
+        "contadores": "transcoding-bench-123456789012-contadores"
       },
       "ssh_private_key_parameter_name": "/transcoding-bench/orchestrator/ssh-private-key"
     }
@@ -445,6 +455,18 @@ laço, depois de a instância estar de pé. Chave que o Terraform passe a emitir
 parser não conheça é ignorada: o arquivo é gerado por este mesmo repositório, e
 recusá-la amarraria um `apply` novo a um checkout novo do Orquestrador.
 
+O mapa `buckets` é a exceção à forma fixa: tem um bucket por experimento, chaveado
+pelo papel, e aceita **qualquer número** de entradas — a cada experimento novo o
+`storage/` ganha um bucket e o `compute/` o acrescenta ao mapa (ADR-0026). Só
+`campaign` e `pilot` são obrigatórios, porque o `prepare-masters` e o `s3-sync` da
+auto-checagem os usam por nome; cada entrada tem de ser uma string não-vazia, a
+nova inclusive.
+
+O arquivo é gravado **uma vez**, no boot. O `user_data` do Orquestrador está em
+`ignore_changes` (`infra/README.md`), e um `apply` que acrescente um bucket não o
+regrava: o caminho é o output `orchestrator_infra` do `compute/`, copiado por
+cima do `~/work/infra.json` (o passo está no `infra/README.md`).
+
 ## O CLI: `orchestrator.py`
 
 Um subcomando por passo da campanha, e o `--infra` antes dele, com o caminho do
@@ -455,6 +477,8 @@ junto. São cinco:
     python orchestrator/orchestrator.py --infra ~/work/infra.json prepare-masters
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
         --instance-type c7g.xlarge
+    python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
+        --config config/topologia.toml --instance c7i-nosmt
     python orchestrator/orchestrator.py --infra ~/work/infra.json preflight --judge
     python orchestrator/orchestrator.py --infra ~/work/infra.json run \
         --config config/pilot.toml --bucket <piloto>
@@ -477,7 +501,7 @@ no bucket. Não há degrau entre o preflight e o piloto: o smoke AWS saiu da
 escada, e a primeira Execução real do projeto é o primeiro bloco do piloto.
 
 Nada é descoberto por tag (ADR-0019): a subnet, o security group das efêmeras, o
-perfil, a AMI e os dois buckets saem do `--infra`, e o SHA que as instâncias
+perfil, a AMI e os buckets saem do `--infra`, e o SHA que as instâncias
 clonam sai do `git rev-parse` do clone que contém o próprio `orchestrator.py`
 (ADR-0021) — o `-C` do adaptador é o que impede o SHA de ser o do diretório de
 onde o pesquisador invocou o comando.
@@ -526,23 +550,46 @@ arquitetura (ADR-0006, ADR-0022).
 
 Cada execução é uma instância descartável de poucos minutos, e o tipo é
 argumento — `--instance-type c7i.xlarge` roda o mesmo caminho no x86, sem código
-por arquitetura: a AMI sai do arquivo de infra pela `arch` que o
-`experiment.toml` declara para aquele tipo. O `--bucket` escolhe quem recebe a
-fatia e o objeto de prova, e o default é o do piloto. Exige que os Masters já
-existam.
+por arquitetura: a AMI sai do arquivo de infra pela `arch` que a definição
+declara para aquele tipo. A definição é o `--config`, e o default é o
+`config/experiment.toml`. O `--bucket` escolhe quem recebe a fatia e o objeto de
+prova, e o default é o do piloto. Exige que os Masters já existam.
+
+Quando dois registros `[[instance]]` declaram o mesmo tipo — os dois braços
+`c7i.2xlarge` do `config/topologia.toml` (ADR-0026) —, o tipo não basta, e o
+preflight recusa escolher um deles. O registro é pedido pelo id, com
+`--instance`, exclusivo com `--instance-type` e `--judge`:
+
+    python orchestrator/orchestrator.py --infra ~/work/infra.json preflight \
+        --config config/topologia.toml --instance c7i-smt
+
+A instância sobe com o `CpuOptions` daquele registro (`core_count` e
+`threads_per_core`), que é o que o `run` lançaria.
 
 A tabela que ele imprime tem uma linha por capacidade provada, e é ela o
-resultado do passo — o código de saída é não-zero se alguma falhou. As dez linhas
-mais o `terminate` são os seis passos nomeados da spec. `sts`, `buckets`, `ssm`,
+resultado do passo — o código de saída é não-zero se alguma falhou. `sts`, `buckets`, `ssm`,
 `git` e `s3-sync` são a auto-checagem, que roda inteira **antes de qualquer
-lançamento** e pega credencial ou infra errada de graça; `buckets` lista os dois
-e exige o `masters/manifest.json` naquele que a instância vai ler, porque sem os
-Masters ela só descobriria a ausência depois de pagar o `docker build`. `ami` e
+lançamento** e pega credencial ou infra errada de graça; `buckets` lista o
+`masters/` de **todo** bucket do arquivo de infra, mais o alvo, exige que cada um
+tenha os mesmos objetos, com os mesmos tamanhos, que o da campanha, e exige o
+`masters/manifest.json` naquele que a instância vai ler. Sem os Masters, ela só
+descobriria a ausência depois de pagar o `docker build`; e os buckets dos
+experimentos complementares recebem os Masters por um `s3 sync` à mão, que um
+corte no meio deixaria com o manifesto e um Master pela metade. `ami` e
 `launch` sobem a fatia para `scenarios/` e lançam a instância com o perfil de
 encode, 200 GB gp3, hop limit 2 e o user-data fino real; `bootstrap` espera
 `running` e o `cloud-init`, o que prova o clone no SHA, o build, a fatia, o
-manifesto e os Masters baixados e validados; `perf-stat` e `s3-put` são os dois
-`docker run` do passo 4; e `terminate` roda **em todo caminho de saída**.
+manifesto e os Masters baixados e validados; `topologia` é o `nproc` e o `lscpu`
+de dentro do container; `perf-stat` e `s3-put` são os dois `docker run` do
+passo 4; e `terminate` roda **em todo caminho de saída**.
+
+O passo `topologia` existe pelos braços da ADR-0026. Ele lê, de dentro do
+container — onde o FFmpeg com `-threads 0` conta os vCPUs —, o `nproc` e o
+`Thread(s) per core` do `lscpu`. Num registro com `CpuOptions`, recusa quando o
+`nproc` não é `core_count × threads_per_core` ou o `Thread(s) per core` não é o
+declarado, nomeando os dois valores. Sem `CpuOptions`, só os relata: a
+`c7i.xlarge` mostra os 2 threads por núcleo dela, e é a linha que documenta a
+assimetria da campanha.
 
 O `s3-sync` da auto-checagem é uma emenda ao passo 1, e o motivo é que o D25
 original não exercitava `s3_sync` em lugar nenhum: o único caminho de IAM que
@@ -726,6 +773,12 @@ do `orchestrator.py`: é o `--config` que gera o plano e que dá os registros
 ADR-0012, com os mesmos defaults do `run_all.sh` (4 h e 120 h), e viajam até ele
 pelo `launch_container.sh`; o piloto roda com os mesmos (ADR-0022).
 
+O `run` aceita qualquer número de registros `[[instance]]`, com ids fora de
+`c7g`/`c7i`/`c7a` — as nove instâncias do `config/repetibilidade.toml` sobem num
+lançamento só. Cada uma é lançada pelo **próprio registro**, e não pelo tipo:
+dois registros do mesmo tipo com `CpuOptions` diferentes sobem cada um com o
+seu.
+
 Em passos:
 
 1. **A auto-checagem**, pela mesma função do preflight — `sts`, `buckets` com o
@@ -775,17 +828,27 @@ Em passos:
    a cada disparo (com o PID e `running`) e a cada mudança que o laço decide.
 6. **Uma Instância de encode por arquitetura**, pelo `instance_launch.py`: AMI
    pela `arch`, perfil `encode`, 200 GB gp3, hop limit 2, e as tags `role`,
-   `commit` e `Name=transcoding-bench-encode-{id}` (D14).
-7. **A espera pelos três `cloud-init`**, uma de cada vez. **Qualquer** erro ou
+   `commit` e `Name=transcoding-bench-encode-{id}` (D14). Um registro com
+   `core_count` e `threads_per_core` sobe com `--cpu-options`.
+7. **A conferência do `CpuOptions`** (ADR-0026). De cada Instância lançada, o
+   `run` espera o `describe-instances` mostrá-la `running` e lê o `CpuOptions`
+   que a EC2 aplicou. Ele vai para a entrada dela no arquivo de estado
+   (`cpu_options`, com `core_count` e `threads_per_core`) **antes** de ser
+   conferido, para que a entrada que diverge fique legível depois. Num registro
+   com `CpuOptions`, um aplicado diferente do declarado termina tudo o que subiu
+   e sai com erro nomeando o `instance_id`, pela mesma regra do passo seguinte.
+   Num registro sem `CpuOptions`, a topologia do tipo só é gravada.
+8. **A espera por todos os `cloud-init`**, uma de cada vez. **Qualquer** erro ou
    timeout para a espera ali, termina tudo o que subiu — inclusive a que ainda
    não foi esperada, e o relatório a nomeia como tal — e sai com erro antes de
    qualquer disparo (D7): um build quebrado é `Dockerfile`, e `Dockerfile` é outra
    campanha (ADR-0021). A mesma regra vale para o que falhar entre o primeiro
    lançamento e o último bootstrap, um `run-instances` recusado na segunda
    arquitetura inclusive. As terminadas ficam no arquivo de estado como mortas.
-8. **O disparo desacoplado** (D1): por SSH, o `launch_container.sh` sob
+9. **O disparo desacoplado** (D1): por SSH, o `launch_container.sh` sob
    `setsid`/`nohup`, stdin de `/dev/null`, stdout e stderr em
-   `~/work/launch_container.log` da instância, com os dois timeouts; o comando
+   `~/work/launch_container.log` da instância, com os dois timeouts e o id curto
+   da Instância (`--instance`), que nomeia os objetos de `status/`; o comando
    ecoa o PID, que vai para `~/work/launch_container.pid` lá e para o arquivo de
    estado aqui. O `ssh` volta em segundos, e é o `parse_dispatched_pid` que
    recusa um PID que não seja um inteiro positivo — o `0` e o `-1` são os que o
@@ -793,7 +856,7 @@ Em passos:
    sudo docker run`, de modo que o PID gravado passa a ser de um processo de
    root: quem perguntar por ele com `kill -0` como `ubuntu` recebe `EPERM`, e a
    pergunta do `watch` tem de ser `sudo kill -0` ou `ps -p`.
-9. **A vigilância**, no mesmo processo e com o mesmo laço do `watch`, abaixo.
+10. **A vigilância**, no mesmo processo e com o mesmo laço do `watch`, abaixo.
    A partir do primeiro `ssh` de disparo a regra inverte: nenhuma falha desta
    fase termina instância alguma por si, e uma falha antes do laço sai com erro
    dizendo que o `watch --abort` termina todas. O `run` só volta quando as três
@@ -805,8 +868,10 @@ O que ganha teste é o núcleo do `campaign_launch.py`: a guarda sobre a listage
 arquivo de estado (sem arquitetura, todas mortas, e cada estado de pé recusado
 nomeando o id), a projeção do `--slices` (quais chaves sobem, quais arquiteturas
 são lançadas, `canonical.json` intocado, id não declarado e fatia de outra
-arquitetura recusados) e a decisão de abortar tudo sobre os três status de
-bootstrap; mais o parser do PID no `command_output.py`. Laço, comandos remotos
+arquitetura recusados), a decisão de abortar tudo sobre os status de bootstrap
+e a conferência do `CpuOptions` aplicado contra o declarado; mais o parser do
+PID e o do `CpuOptions` no `command_output.py`, e o `--cpu-options` no argv do
+`run_instances`. Laço, comandos remotos
 e renderização são escritos direto (ADR-0022).
 
 ### O `watch` e o laço de vigilância
@@ -848,9 +913,9 @@ lida como a arquitetura que nunca subiu. A da que está rodando é a
 nota entre colchetes ao fim; e a que já saiu do laço continua na tela com o que
 o marcador dela carregava, sem ser perguntada de novo:
 
-    14:32:07 c7g  bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2      21/36 runs, 0 falhas, 1h10m
-             c7i  sem progresso ainda, 0/36 runs reportados  [bootstrap em curso, ainda sem PID]
-             c7a  finished: 36/36 runs, 0 falhas, sem teto, status 0, marcador de 09:12:44
+    14:32:07 c7g       bloco 4/6  run 3/6  libx265_1080p_720p_tos_c7g_rep2            21/36 runs, 0 falhas, 1h10m
+             c7i       sem progresso ainda, 0/36 runs reportados  [bootstrap em curso, ainda sem PID]
+             c7a       finished: 36/36 runs, 0 falhas, sem teto, status 0, marcador de 09:12:44
 
 A linha de quem saiu do laço é a mesma que o resumo final imprime: as três
 colunas continuam casando, e o que muda entre o penúltimo poll e o resumo é só
@@ -1268,7 +1333,7 @@ a forma exata é a do README de cada um.
 | 2 | aceite: `.venv-smoke/bin/python -m pytest smoke/ --docker`, com a fixture do `libvmaf` capturada | Mac, com Docker | verde, VMAF perto de 100 |
 | 3 | `terraform -chdir=infra/compute plan`, depois `apply` | Mac | o `plan` só atualiza a policy in-place (`infra/README.md`) |
 | 4 | `git fetch origin && git checkout <sha>` | Orquestrador | `git rev-parse HEAD` é o SHA da campanha |
-| 5 | `preflight --instance-type` em `c7g.xlarge`, `c7i.xlarge` e `c7a.xlarge`, e `preflight --judge` | Orquestrador | as quatro tabelas sem `falhou`; os dez eventos e o `pcnt-running` nas três de encode; frames e VMAF na do Juiz |
+| 5 | `preflight --instance-type` em `c7g.xlarge`, `c7i.xlarge` e `c7a.xlarge`, e `preflight --judge` | Orquestrador | as quatro tabelas sem `falhou`; os oito eventos e as duas métricas, com o `pcnt-running`, nas três de encode; frames e VMAF na do Juiz |
 | 6 | `quality_triage.py --config config/pilot.toml --bucket <piloto> --out ~/work/quality-pilot` | Orquestrador | nenhum bloco pendente; o histograma e as células divergentes |
 | 7 | `judge --config config/pilot.toml --bucket <piloto> --plan ~/work/quality-pilot/plan.json` | Orquestrador | o laço termina com `status/judge_done` sem `runs_failed` |
 | 8 | `aws s3 sync s3://<piloto>/quality/results/ quality-pilot/`, `analysis/quality.py` e `analysis/gate.py --quality` | Mac | o item 5: todo grupo julgado, e a lista dos não equivalentes |
@@ -1277,7 +1342,7 @@ a forma exata é a do README de cada um.
 | 11 | `git tag campaign-1 <sha>` e push da tag | Mac | o SHA é o do passo 4 |
 | 12 | `run --config config/experiment.toml --bucket <campanha>` | Orquestrador | a tabela da auto-checagem e o primeiro poll; depois, até ~4 dias de vigilância |
 | 13 | se a campanha terminar com pendência: `resume.py` e `run --slices` | Orquestrador | o relatório do `resume.py`, e de novo o passo 12 até não sobrar pendência |
-| 14 | `aws s3 sync s3://<campanha>/runs/ runs/`, `consolidate.py` e `gate.py` itens 1–4 | Mac | itens 1–4 passando |
+| 14 | `aws s3 sync s3://<campanha>/runs/ runs/`, `consolidate.py --config config/experiment.toml` e `gate.py` itens 1–4 | Mac | itens 1–4 passando |
 | 15 | `quality_triage.py`, `judge`, sync de `quality/results/`, `quality.py` e `gate.py --quality`, como em 6–8 sobre a campanha | Orquestrador e Mac | o item 5 da campanha |
 | 16 | `clean --bucket <campanha> --plan <plano da campanha>`, depois com `--apply` | Orquestrador | as contagens do dry-run; com `--apply`, nenhuma falha nomeada |
 | 17 | o relatório da campanha em `docs/reports/`, commitado | Mac | SHA, tag, custo, os itens 1–5, o Juiz e a retenção |
@@ -1294,3 +1359,44 @@ Três avisos que a ordem carrega:
 - **O `--out` do triage é um diretório novo a cada Pass**, e o plano que o `judge`
   executou é o mesmo que o `clean` lê: trocar o plano entre os dois faria a
   retenção decidir sobre representantes que o Juiz nunca viu.
+
+## Os experimentos complementares, em paralelo
+
+Os três experimentos da ADR-0026 — `config/topologia.toml`,
+`config/repetibilidade.toml` e `config/contadores.toml` — são três `run`s, cada um
+no seu bucket, e podem estar de pé ao mesmo tempo. O que os separa é o
+**diretório de trabalho**: o `run`, o `judge` e o `watch` leem e escrevem tudo
+no diretório do arquivo passado em `--infra` — o `state.json`, o `probe.txt` da
+auto-checagem, as fatias em `scenarios/`, a evidência do `preflight/` e os
+objetos de `status/` baixados a cada poll. Dois `run`s com o mesmo `--infra`
+escreveriam o mesmo `state.json`, e a guarda da D12 recusaria o segundo — ou, se
+o primeiro já tivesse terminado alguma instância, o segundo apagaria os ids das
+outras. Um diretório por experimento, com uma cópia do `infra.json`:
+
+    for e in topologia repetibilidade contadores; do
+      mkdir -p ~/work/$e && cp ~/work/infra.json ~/work/$e/
+    done
+    python -u orchestrator/orchestrator.py --infra ~/work/topologia/infra.json run \
+        --config config/topologia.toml --bucket <topologia> \
+        2>&1 | tee ~/work/topologia/run.log
+
+O `watch` e o `watch --abort` de cada um são pelo mesmo `--infra`, e a dica que o
+`Ctrl-C` imprime já o traz.
+
+**O início é escalonado.** A auto-checagem de todo `run` e de todo `preflight`
+escreve, sincroniza e apaga a **mesma chave**,
+`runs/preflight/self-check/probe.txt`, nos buckets da campanha e do piloto. Duas
+auto-checagens simultâneas apagam o objeto uma da outra, e o `s3-sync` de uma
+delas falha com "o sync não deixou o objeto no destino". Cada `run` (e cada
+`preflight`) começa quando o anterior já imprimiu a tabela da auto-checagem, ou
+a linha `ami: rodando` no caso do `preflight`.
+
+**A quota de vCPU** on-demand standard tem de comportar o que estiver de pé: as
+duas `c7i.2xlarge` da topologia contam 16, as nove `xlarge` da repetibilidade 36,
+a `c7g-pmu` 4 e o Orquestrador 2. Com a quota em 32, a repetibilidade espera a
+topologia terminar. O Juiz, com 16, roda depois, um bucket por vez.
+
+Depois de cada um, o `consolidate.py` com a definição **daquele** experimento —
+é ela que diz quais colunas de PMU o Parquet tem — e o `gate.py` com
+`--covers complementares`. O `analysis/complementares.py` lê os Parquets da
+campanha e dos três e imprime as tabelas do relatório (`analysis/README.md`).

@@ -49,6 +49,11 @@ O **Experimento** em escopo menor, executado entre o **Preflight** e a campanha:
 _Avoid_: ensaio, pré-campanha, dry run, teste piloto.
 _Não confundir com_: o smoke (que atravessa o caminho com shims e não mede nada) nem com o warm-up (a primeira **Execução** de cada bloco).
 
+**Experimento complementar** (`complementary`):
+Um dos três lançamentos da ADR-0026 que fecham a parte experimental depois da campanha: a **topologia** (a Intel com e sem SMT, numa `c7i.2xlarge` com `CpuOptions` 2 × 2 e 4 × 1), a **repetibilidade** (três hosts novos de cada tipo em três Cenários) e os **contadores** (uma `c7g` com um único par de hardware, sem multiplexação). Cada um tem a sua definição em `config/` e o seu bucket, e é rodado pelo mesmo código da campanha. Como o **Piloto**, todo Cenário dele é um Cenário do Experimento, com os mesmos parâmetros; o que ele declara à sua maneira são as instâncias, e nos contadores a instrumentação.
+_Avoid_: sub-experimento, experimento extra, rodada 2.
+_Não confundir com_: o **Piloto**, que vem antes da campanha e a aprova.
+
 **Preflight** (`preflight`):
 A validação de fumaça do IAM da ADR-0016, ampliada pela ADR-0022, no que este degrau alcança: o subcomando do **Orquestrador** que prova, numa instância descartável de poucos minutos, que `PassRole`, condição de tipo de instância, chave via SSM, hop limit do IMDS, clone no SHA, build da imagem, fatia do plano, **Masters** baixados e validados, os **oito eventos de PMU** da definição abrindo contador dentro do container (ADR-0006) e o `PutObject` do encode funcionam juntos — antes de a campanha faturar por dois dias. Começa por uma auto-checagem do Orquestrador (identidade, os dois buckets, o parâmetro SSM, o SHA do clone e um `s3 sync` entre os dois buckets) que roda antes de qualquer lançamento, e termina numa tabela passou/falhou por passo. Rodável nos três tipos por argumento.
 _Não confundir com_: o **Piloto**, que é o Experimento em escopo menor e cujo primeiro bloco é a primeira **Execução** real do projeto. O preflight prova encanamento e não produz dado nenhum: ele confere que cada evento de PMU abre contador naquela arquitetura, o que não é medir.
@@ -71,7 +76,7 @@ O programa Python que coordena o **Experimento**: gera o `scenarios.json` com se
 _Avoid_: controle, instância de controle, controlador, scheduler.
 
 **Instância de encode** (`encode`):
-As instâncias EC2 efêmeras (c7g/c7i/c7a.xlarge) que auto-dirigem os **Cenários** via `run_all.sh`. Criadas e destruídas pelo **Orquestrador**, uma por arquitetura.
+As instâncias EC2 efêmeras que auto-dirigem os **Cenários** via `run_all.sh`, uma por registro `[[instance]]` da definição: na campanha, uma por arquitetura (c7g/c7i/c7a.xlarge); nos **Experimentos complementares**, também os braços da topologia e os hosts da repetibilidade. Criadas e destruídas pelo **Orquestrador**. O id curto do registro (`c7g`, `c7i-nosmt`) é o que as distingue, e não o tipo.
 _Avoid_: worker, runner, nó.
 
 ## Relacionamentos

@@ -20,6 +20,7 @@ from command_output import (
     parse_list_objects,
     parse_run_instances,
 )
+from experiment_config import CpuOptions
 from judgement_check import JUDGE_FILENAME
 
 # A AMI Ubuntu 24.04 (ADR-0015) expõe o volume raiz aqui; o `--block-device-mappings`
@@ -86,6 +87,7 @@ def run_instances(
     volume_size_gb: int,
     imds_hop_limit: int,
     tags: Mapping[str, str],
+    cpu_options: CpuOptions | None,
 ) -> str:
     """Lança uma instância e devolve o id dela."""
     root_volume = [
@@ -139,9 +141,21 @@ def run_instances(
                 json.dumps(metadata_options),
                 "--tag-specifications",
                 json.dumps(tag_specifications),
+                *_cpu_options_argv(cpu_options),
             ]
         )
     )
+
+
+def _cpu_options_argv(cpu_options: CpuOptions | None) -> list[str]:
+    if cpu_options is None:
+        return []
+    return [
+        "--cpu-options",
+        json.dumps(
+            {"CoreCount": cpu_options.core_count, "ThreadsPerCore": cpu_options.threads_per_core}
+        ),
+    ]
 
 
 def terminate_instances(instance_ids: Sequence[str]) -> None:

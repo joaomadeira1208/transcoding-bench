@@ -46,12 +46,13 @@ output "encode_arm64_ami_id" {
   value = var.encode_arm64_ami_id
 }
 
-output "campaign_bucket_name" {
-  value = data.terraform_remote_state.storage.outputs.campaign_bucket_name
+output "bucket_names" {
+  value = local.bucket_names
 }
 
-output "pilot_bucket_name" {
-  value = data.terraform_remote_state.storage.outputs.pilot_bucket_name
+output "orchestrator_infra" {
+  description = "O infra.json que o user-data grava no boot; o `ignore_changes` não o regrava depois."
+  value       = local.orchestrator_infra
 }
 
 output "ssh_private_key_parameter_name" {

@@ -81,7 +81,7 @@ nome em `$SMOKE_ARGV_DIR/sequence`, a linha do tempo comum entre ferramentas —
 é por ela que se vê o upload acontecendo **entre** runs. O do `aws` guarda, além
 disso, toda versão de cada objeto subido avulso em
 `$SMOKE_ARGV_DIR/versions/<key>/`: o bucket falso conserva só a última, como o
-S3, e `status/{instance_type}_progress` é sobrescrito a cada Execução.
+S3, e `status/{instance}_progress` é sobrescrito a cada Execução.
 
 O shim do `aws` traduz `s3 cp` — nos dois sentidos —, `s3 sync` no sentido
 bucket → disco, `s3 rm` e `s3api list-objects-v2` em operações sobre

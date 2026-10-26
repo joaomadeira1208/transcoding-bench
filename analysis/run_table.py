@@ -22,24 +22,30 @@ from run_artifacts import (
 )
 from run_meta import RunMeta
 
-# Os oito eventos da ADR-0006, declarados aqui porque o `meta.json` não os carrega:
-# a coluna existe mesmo quando o contador falta, e é assim que um evento
-# indisponível numa arquitetura aparece como nulo em vez de sumir do schema.
-PMU_EVENTS = (
-    "cycles",
-    "instructions",
-    "branch-instructions",
-    "branch-misses",
-    "task-clock",
-    "context-switches",
-    "cpu-migrations",
-    "page-faults",
-)
 
-METRIC_OPERANDS: dict[str, tuple[str, str]] = {
-    "ipc": ("instructions", "cycles"),
-    "branch_mispredict_rate": ("branch-misses", "branch-instructions"),
-}
+@dataclass(frozen=True)
+class PmuColumns:
+    """Os eventos e as razões que a definição do lançamento declara (ADR-0006).
+
+    Da definição, e não do `meta.json`, que não os carrega: a coluna existe mesmo
+    quando o contador falta, e é assim que um evento indisponível numa
+    arquitetura aparece como nulo em vez de sumir do schema.
+    """
+
+    events: tuple[str, ...]
+    metrics: Mapping[str, tuple[str, str]]
+
+
+def pmu_columns(definition: Mapping[str, Any]) -> PmuColumns:
+    """As colunas de PMU do TOML de uma definição, já parseado."""
+    instrumentation = definition["instrumentation"]
+    return PmuColumns(
+        events=tuple(instrumentation["pmu_events"]),
+        metrics={
+            metric["name"]: (metric["numerator"], metric["denominator"])
+            for metric in instrumentation["metric"]
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -68,7 +74,7 @@ class Consolidation:
     unreadable: tuple[str, ...]
 
 
-def consolidate_runs(runs: Iterable[RawRun]) -> Consolidation:
+def consolidate_runs(runs: Iterable[RawRun], pmu: PmuColumns) -> Consolidation:
     """Projeta as Execuções na tabela: warm-ups fora, dedup, ordem canônica.
 
     A ordem é por `scenario_id`, chave única depois do dedup. A de `os.listdir`
@@ -79,10 +85,10 @@ def consolidate_runs(runs: Iterable[RawRun]) -> Consolidation:
     replications = [run for run in executions if not run.meta.warmup]
     latest = _deduplicate(replications)
     ordered = sorted(latest, key=lambda run: run.meta.scenario_id)
-    built = [_row(run) for run in ordered]
+    built = [_row(run, pmu) for run in ordered]
 
     return Consolidation(
-        table=_table([row for row, _ in built]),
+        table=_table([row for row, _ in built], table_schema(pmu)),
         warmups=len(executions) - len(replications),
         duplicates=len(replications) - len(ordered),
         failed=sum(1 for run in ordered if run.meta.exit_code != 0),
@@ -131,10 +137,15 @@ def _instant(run: RawRun) -> tuple[datetime, str]:
     return run.meta.started_at, run.meta.run_id
 
 
-def _row(run: RawRun) -> tuple[dict[str, Any], list[str]]:
+def _row(run: RawRun, pmu: PmuColumns) -> tuple[dict[str, Any], list[str]]:
     unreadable: list[str] = []
     time = _parsed(run, "time.json", parse_time, run.time, unreadable)
     counters = _parsed(run, "perf.json", parse_perf, run.perf, unreadable) or {}
+    if counters and set(counters) != set(pmu.events) and run.meta.exit_code == 0:
+        unreadable.append(
+            f"{run.meta.run_id}/perf.json: mediu {', '.join(sorted(counters))}, e a definição "
+            f"declara {', '.join(sorted(pmu.events))}"
+        )
     cpu_pct = _parsed(run, "pidstat.txt", parse_pidstat, run.pidstat, unreadable) or []
     ffmpeg = _parsed(run, "ffmpeg.log", parse_ffmpeg_log, run.ffmpeg, unreadable)
 
@@ -145,14 +156,14 @@ def _row(run: RawRun) -> tuple[dict[str, Any], list[str]]:
             f"time_{field}": getattr(time, field) if time else None
             for field in TimeMetrics.model_fields
         },
-        **{_perf_column(event): _counted(counters, event) for event in PMU_EVENTS},
-        **{_pcnt_column(event): _pcnt_running(counters, event) for event in PMU_EVENTS},
+        **{perf_column(event): _counted(counters, event) for event in pmu.events},
+        **{pcnt_column(event): _pcnt_running(counters, event) for event in pmu.events},
         "ffmpeg_frames": ffmpeg.frames if ffmpeg else None,
         "ffmpeg_fps": ffmpeg.fps if ffmpeg else None,
         "ffmpeg_bitrate_kbps": ffmpeg.bitrate_kbps if ffmpeg else None,
         **{
             name: ratio(_counted(counters, numerator), _counted(counters, denominator))
-            for name, (numerator, denominator) in METRIC_OPERANDS.items()
+            for name, (numerator, denominator) in pmu.metrics.items()
         },
         "cpu_pct_avg": mean(cpu_pct),
     }
@@ -192,20 +203,20 @@ def _pcnt_running(counters: Mapping[str, PerfCounter], event: str) -> float | No
     return counter.pcnt_running if counter else None
 
 
-def _perf_column(event: str) -> str:
+def perf_column(event: str) -> str:
     return f"perf_{event.replace('-', '_').lower()}"
 
 
-def _pcnt_column(event: str) -> str:
-    return f"{_perf_column(event)}_pcnt_running"
+def pcnt_column(event: str) -> str:
+    return f"{perf_column(event)}_pcnt_running"
 
 
-def _table(rows: list[dict[str, Any]]) -> pa.Table:
+def _table(rows: list[dict[str, Any]], schema: pa.Schema) -> pa.Table:
     """Coluna a coluna, pelo nome do schema: uma chave que o `_row` deixou de
     escrever estoura aqui em vez de virar uma coluna de nulos."""
     return pa.Table.from_pydict(
-        {name: [row[name] for row in rows] for name in TABLE_SCHEMA.names},
-        schema=TABLE_SCHEMA,
+        {name: [row[name] for row in rows] for name in schema.names},
+        schema=schema,
     )
 
 
@@ -252,17 +263,19 @@ _TIME_COLUMNS = [
     for field, info in TimeMetrics.model_fields.items()
 ]
 
-TABLE_SCHEMA = pa.schema(
-    [
-        *_META_COLUMNS,
-        ("output_sha256", pa.string()),
-        *_TIME_COLUMNS,
-        *((_perf_column(event), pa.float64()) for event in PMU_EVENTS),
-        *((_pcnt_column(event), pa.float64()) for event in PMU_EVENTS),
-        ("ffmpeg_frames", pa.int64()),
-        ("ffmpeg_fps", pa.float64()),
-        ("ffmpeg_bitrate_kbps", pa.float64()),
-        *((name, pa.float64()) for name in METRIC_OPERANDS),
-        ("cpu_pct_avg", pa.float64()),
-    ]
-)
+
+def table_schema(pmu: PmuColumns) -> pa.Schema:
+    return pa.schema(
+        [
+            *_META_COLUMNS,
+            ("output_sha256", pa.string()),
+            *_TIME_COLUMNS,
+            *((perf_column(event), pa.float64()) for event in pmu.events),
+            *((pcnt_column(event), pa.float64()) for event in pmu.events),
+            ("ffmpeg_frames", pa.int64()),
+            ("ffmpeg_fps", pa.float64()),
+            ("ffmpeg_bitrate_kbps", pa.float64()),
+            *((name, pa.float64()) for name in pmu.metrics),
+            ("cpu_pct_avg", pa.float64()),
+        ]
+    )

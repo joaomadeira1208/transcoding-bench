@@ -19,6 +19,7 @@ from conftest import (
     ABSENT,
     CLIP_FRAMES,
     ENCODERS,
+    EXPERIMENT_PMU,
     make_ffmpeg_log,
     make_perf_json,
     make_pidstat,
@@ -32,7 +33,6 @@ from run_artifacts import (
     parse_pidstat,
     parse_time,
 )
-from run_table import PMU_EVENTS
 
 
 @pytest.mark.parametrize("encoder", ENCODERS)
@@ -52,7 +52,7 @@ class TestTheRealTools:
         # A ponte entre o `-e` que o `run_scenario.sh` passou e as colunas que a
         # tabela declara: trocar um evento de um lado só deixaria a métrica vazia
         # para a campanha inteira, e o `perf stat` não reclama disso.
-        assert set(counters) == set(PMU_EVENTS)
+        assert set(counters) == set(EXPERIMENT_PMU.events)
         assert all(counter.value is None or counter.value > 0 for counter in counters.values())
 
     def test_the_fraction_of_time_each_counter_ran_is_read(self, encoder):

@@ -50,6 +50,7 @@ class TestTheFileTheBootstrapWrites:
         assert infra.amis.encode_arm64 == "ami-0246d714afcc1d494"
         assert infra.buckets.campaign == "transcoding-bench-123456789012-campaign"
         assert infra.buckets.pilot == "transcoding-bench-123456789012-pilot"
+        assert list(infra.buckets.by_role) == ["campaign", "pilot"]
 
     def test_a_payload_that_is_not_an_object_is_rejected(self):
         assert message([]) != ""
@@ -90,6 +91,28 @@ class TestMissingFields:
     @pytest.mark.parametrize("section", SECTIONS)
     def test_a_section_that_is_not_an_object_is_rejected(self, section):
         assert section in message(make_infra(**{section: "sg-0b2c3d4e5f6071829"}))
+
+
+class TestTheBucketsOfEveryExperiment:
+    # Um bucket por experimento (ADR-0026), e o mapa cresce a cada `apply` do
+    # `storage/`: um parser que só conhecesse os dois primeiros perderia os novos
+    # da auto-checagem sem nada acusar.
+
+    def test_the_buckets_beyond_the_campaign_and_the_pilot_are_kept_by_name(self):
+        payload = make_infra()
+        payload["buckets"]["topologia"] = "transcoding-bench-123456789012-topologia"
+
+        buckets = parse_infra(payload).buckets
+
+        assert buckets.by_role["topologia"] == "transcoding-bench-123456789012-topologia"
+        assert list(buckets.by_role) == ["campaign", "pilot", "topologia"]
+
+    @pytest.mark.parametrize("value", ["", None, 7])
+    def test_a_new_bucket_that_is_not_a_name_is_rejected_naming_it(self, value):
+        payload = make_infra()
+        payload["buckets"]["contadores"] = value
+
+        assert "buckets.contadores" in message(payload)
 
 
 class TestValuesThatAreNotIdentifiers:

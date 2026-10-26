@@ -71,6 +71,7 @@ def judge_launch(
         volume_size_gb=JUDGE_VOLUME_SIZE_GB,
         imds_hop_limit=IMDS_HOP_LIMIT,
         tags={"Name": JUDGE_NAME, "role": JUDGE_ROLE, "commit": commit},
+        cpu_options=None,
     )
 
 
@@ -125,6 +126,7 @@ def launched_judge(
         total_timeout=total_timeout,
         state=Vigilance.BOOTSTRAPPING,
         outcome=None,
+        cpu_options=None,
     )
 
 

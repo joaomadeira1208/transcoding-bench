@@ -1,7 +1,7 @@
 data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "experiment" {
-  for_each = toset(["campaign", "pilot"])
+  for_each = toset(["campaign", "pilot", "topologia", "repetibilidade", "contadores"])
 
   bucket = "${var.bucket_prefix}-${data.aws_caller_identity.current.account_id}-${each.key}"
 }

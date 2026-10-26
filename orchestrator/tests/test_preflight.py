@@ -15,6 +15,7 @@ import re
 
 import pytest
 from conftest import real_config
+from experiment_config import CpuOptions
 from preflight import (
     ENCODE_STEPS,
     JUDGE_STEPS,
@@ -26,6 +27,7 @@ from preflight import (
     PreflightError,
     Step,
     StepResult,
+    container_topology,
     failed,
     perf_counters,
     perf_detail,
@@ -33,6 +35,7 @@ from preflight import (
     probe_encode_argv,
     render_table,
     summarize,
+    topology_detail,
     vmaf_detail,
     vmaf_score,
 )
@@ -352,6 +355,54 @@ def passed(step: Step, detail: str = "") -> StepResult:
     return StepResult(step, Outcome.PASSED, detail)
 
 
+def topology_output(nproc: int, threads_per_core: int) -> str:
+    """O `nproc` seguido do `lscpu`, como o probe os junta, com o que o lscpu tem a mais."""
+    return "\n".join(
+        [
+            str(nproc),
+            "Architecture:             x86_64",
+            "CPU(s):                   8",
+            f"Thread(s) per core:       {threads_per_core}",
+            "Core(s) per socket:       4",
+            "Model name:               Intel(R) Xeon(R) Platinum 8488C",
+        ]
+    )
+
+
+NOSMT = CpuOptions(core_count=4, threads_per_core=1)
+
+
+class TestTheTopologyInsideTheContainer:
+    # O `nproc` é o que o FFmpeg com `-threads 0` enxerga, e o `lscpu` é o que diz
+    # se esses vCPUs são núcleos ou irmãos de SMT (ADR-0026). Um braço que subisse
+    # com a topologia do tipo passaria por todo o resto do preflight.
+
+    def test_the_declared_topology_passes(self):
+        seen = container_topology(topology_output(4, 1), NOSMT)
+
+        assert (seen.vcpus, seen.threads_per_core) == (4, 1)
+
+    def test_another_vcpu_count_is_refused_naming_both(self):
+        with pytest.raises(PreflightError, match=r"nproc.*8.*4"):
+            container_topology(topology_output(8, 1), NOSMT)
+
+    def test_smt_where_it_was_turned_off_is_refused_naming_both(self):
+        with pytest.raises(PreflightError, match=r"Thread\(s\) per core.*2.*1"):
+            container_topology(topology_output(4, 2), NOSMT)
+
+    def test_an_instance_that_declares_none_is_only_reported(self):
+        seen = container_topology(topology_output(4, 2), None)
+
+        assert topology_detail(seen) == "dentro do container: nproc 4, Thread(s) per core 2"
+
+    @pytest.mark.parametrize(
+        "raw", ["", "quatro\nThread(s) per core: 1", "4\nArchitecture: x86_64"]
+    )
+    def test_an_output_without_both_readings_is_refused(self, raw):
+        with pytest.raises(PreflightError):
+            container_topology(raw, None)
+
+
 class TestTheResultTable:
     def test_a_step_that_did_not_run_is_neither_pass_nor_fail(self):
         results = summarize([passed(ENCODE_STEPS[0])])
@@ -546,6 +597,7 @@ class TestTheJudgeTable:
             Step.AMI,
             Step.LAUNCH,
             Step.BOOTSTRAP,
+            Step.TOPOLOGY,
             Step.PERF,
             Step.PUT,
             Step.TERMINATE,
@@ -553,6 +605,7 @@ class TestTheJudgeTable:
 
     def test_neither_leg_shows_the_probe_of_the_other(self):
         assert Step.PERF not in JUDGE_STEPS
+        assert Step.TOPOLOGY not in JUDGE_STEPS
         assert Step.VMAF not in ENCODE_STEPS
 
     def test_the_lines_of_the_judge_sit_next_to_the_self_check(self):

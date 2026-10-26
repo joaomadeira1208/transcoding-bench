@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from conftest import ROLE_ROOT, make_judgement_json, make_meta_json, make_vmaf_log
+from conftest import EXPERIMENT_PMU, ROLE_ROOT, make_judgement_json, make_meta_json, make_vmaf_log
 from judgement import load_judgement
 from quality_table import (
     QualityDefinition,
@@ -359,22 +359,25 @@ class TestTheVerdict:
 class TestTheJoinWithTheMainTable:
     def test_the_vmaf_of_a_bitstream_reaches_every_replication_that_produced_it(self):
         runs = consolidate_runs(
-            RawRun(
-                meta=load_meta(
-                    make_meta_json(
-                        run_id=f"{instance}-rep{rep}",
-                        scenario_id=f"libx265_1080p_720p_tos_{instance}_rep{rep}",
-                        instance=instance,
-                    )
-                ),
-                time=None,
-                perf=None,
-                pidstat=None,
-                ffmpeg=None,
-                sha256=f"{sha256}\n",
-            )
-            for instance, sha256 in (("c7g", ARM), ("c7i", INTEL), ("c7a", INTEL))
-            for rep in range(1, 6)
+            (
+                RawRun(
+                    meta=load_meta(
+                        make_meta_json(
+                            run_id=f"{instance}-rep{rep}",
+                            scenario_id=f"libx265_1080p_720p_tos_{instance}_rep{rep}",
+                            instance=instance,
+                        )
+                    ),
+                    time=None,
+                    perf=None,
+                    pidstat=None,
+                    ffmpeg=None,
+                    sha256=f"{sha256}\n",
+                )
+                for instance, sha256 in (("c7g", ARM), ("c7i", INTEL), ("c7a", INTEL))
+                for rep in range(1, 6)
+            ),
+            EXPERIMENT_PMU,
         ).table.to_pandas()
         judgements = quality_tables(agreeing_x86(vmaf=(80.0,) * 3), DEFINITION).outputs
 

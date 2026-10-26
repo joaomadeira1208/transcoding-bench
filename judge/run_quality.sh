@@ -26,6 +26,8 @@ VMAF_LOG_FILENAME=vmaf.json
 JUDGEMENT_FILENAME=judge.json
 FFMPEG_LOG_FILENAME=ffmpeg.log
 
+ZEROED_START=setpts=PTS-STARTPTS
+
 EXIT_USAGE=2
 EXIT_DOWNLOAD=70
 EXIT_VMAF_LOG=71
@@ -99,7 +101,8 @@ output_field() {
 }
 
 filtergraph() {
-  printf '[1:v]scale=%s:%s:flags=%s[ref];[0:v][ref]libvmaf=model=version=%s:feature=name=float_ssim:n_threads=%s:log_fmt=json:log_path=%s' \
+  printf '[0:v]%s[dist];[1:v]%s,scale=%s:%s:flags=%s[ref];[dist][ref]libvmaf=model=version=%s:feature=name=float_ssim:n_threads=%s:log_fmt=json:log_path=%s' \
+    "$ZEROED_START" "$ZEROED_START" \
     "$output_width" "$output_height" "$scale_flags" \
     "$vmaf_model" "$threads" "$vmaf_log"
 }
@@ -116,6 +119,7 @@ measure_quality() {
     -i "$local_output" \
     -i "$masters_dir/$master" \
     -filter_complex "$(filtergraph)" \
+    -an \
     -f null - >/dev/null 2>"$ffmpeg_log" &
   guard $! "$(remaining_seconds)"
 }

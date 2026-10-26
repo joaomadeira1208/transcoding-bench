@@ -8,10 +8,11 @@ EXIT_USAGE=2
 
 CLIP_CODEC=ffv1
 CLIP_PIX_FMT=yuv420p
+AUDIO_CODEC=ac3
 
 usage_error() {
   printf 'judge_acceptance.sh: %s\n' "$*" >&2
-  printf 'uso: judge_acceptance.sh --out-dir <dir> --clip <path> --clip-size <WxH> --clip-seconds <n> --clip-fps <n> [--encoder <name> --encoded <path>] -- <julgamento>\n' >&2
+  printf 'uso: judge_acceptance.sh --out-dir <dir> --clip <path> --clip-size <WxH> --clip-seconds <n> --clip-fps <n> [--encoder <name> --encoded <path>] [--video-delay <seconds> --video-only <path>] -- <julgamento>\n' >&2
   exit "$EXIT_USAGE"
 }
 
@@ -22,6 +23,8 @@ clip_seconds=""
 clip_fps=""
 encoder=""
 encoded=""
+video_delay=""
+video_only=""
 
 while (($#)); do
   if [[ $1 == -- ]]; then
@@ -37,6 +40,8 @@ while (($#)); do
     --clip-fps) clip_fps=$2 ;;
     --encoder) encoder=$2 ;;
     --encoded) encoded=$2 ;;
+    --video-delay) video_delay=$2 ;;
+    --video-only) video_only=$2 ;;
     *) usage_error "argumento desconhecido: $1" ;;
   esac
   shift 2
@@ -48,12 +53,24 @@ done
 (($#)) || usage_error "faltou o julgamento depois do --"
 [[ -z $encoder && -z $encoded || -n $encoder && -n $encoded ]] ||
   usage_error "--encoder e --encoded vêm juntos"
+[[ -z $video_delay && -z $video_only || -n $video_delay && -n $video_only ]] ||
+  usage_error "--video-delay e --video-only vêm juntos"
 
 mkdir -p "$out_dir" "$(dirname "$clip")"
 
-ffmpeg -nostdin -y -hide_banner -loglevel error \
-  -f lavfi -i "testsrc2=size=$clip_size:rate=$clip_fps" \
-  -t "$clip_seconds" -pix_fmt "$CLIP_PIX_FMT" -c:v "$CLIP_CODEC" "$clip"
+if [[ -z $video_delay ]]; then
+  ffmpeg -nostdin -y -hide_banner -loglevel error \
+    -f lavfi -i "testsrc2=size=$clip_size:rate=$clip_fps" \
+    -t "$clip_seconds" -pix_fmt "$CLIP_PIX_FMT" -c:v "$CLIP_CODEC" "$clip"
+else
+  late_video_source=$(dirname "$clip")/late_video_source.mkv
+  ffmpeg -nostdin -y -hide_banner -loglevel error \
+    -f lavfi -i "sine=duration=$clip_seconds" \
+    -itsoffset "$video_delay" -f lavfi -i "testsrc2=size=$clip_size:rate=$clip_fps:duration=$clip_seconds" \
+    -map 1:v -map 0:a -pix_fmt "$CLIP_PIX_FMT" -c:v "$CLIP_CODEC" -c:a "$AUDIO_CODEC" "$late_video_source"
+  ffmpeg -nostdin -y -hide_banner -loglevel error -i "$late_video_source" -c copy "$clip"
+  ffmpeg -nostdin -y -hide_banner -loglevel error -i "$clip" -c copy -an "$video_only"
+fi
 
 if [[ -n $encoder ]]; then
   ffmpeg -nostdin -y -hide_banner -loglevel error \

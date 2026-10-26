@@ -272,6 +272,14 @@ ele mesmo é FFV1, e o `preflight --judge` mede o Master contra ele mesmo. Sem
 ele, a imagem sem decoder de AV1 por software chegou ao Pass do piloto e
 reprovou os quatro outputs de `libsvtav1` (#116).
 
+E o mesmo argv julga um clip na forma do Master remuxado com `-c copy`: um áudio
+que começa em zero e o vídeo dois frames depois, contra a cópia dele sem o
+áudio, que é a forma de todo output. O veredito é o de antes, um frame no log
+por frame do clip e o VMAF acima de 99, e o log tem de mostrar o vídeo do Master
+começando depois de zero. Sem o `setpts` nos dois ramos, o VMAF cai para ~27: é
+o Pass do BBB de 2160p na campanha, que comparou cada frame com o de dois antes
+(#120). O FFV1 que começa em zero nunca exercitou isso.
+
 ### Regenerar as fixtures
 
     .venv-smoke/bin/python -m pytest smoke/ --docker \

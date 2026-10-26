@@ -50,6 +50,10 @@ SCALE = re.compile(r"scale=([0-9]+):([0-9]+):")
 CLIP_SECONDS = 5
 CLIP_FPS = 24
 
+VIDEO_DELAY_FRAMES = 2
+VIDEO_DELAY_S = VIDEO_DELAY_FRAMES / CLIP_FPS
+STREAM_START = re.compile(r"Stream #1:0.*: Video: .*, start ([0-9.]+)")
+
 # O que vira fixture. O `output.sha256` fica de fora: é digest, não texto a
 # parsear.
 CAPTURED = ("time.json", "perf.json", "pidstat.txt", "ffmpeg.log")
@@ -348,13 +352,16 @@ def judge_in_image(
     clip = f"{CONTAINER_MASTERS}/{Path(master).name}"
     width, height = SCALE.search(traced[traced.index("-filter_complex") + 1]).groups()
 
-    def _judge(encoder: str | None = None) -> Capture:
+    def _judge(encoder: str | None = None, video_delay: float | None = None) -> Capture:
         out_dir = tmp_path_factory.mktemp("judge-capture")
         arguments = ["--clip", clip, "--clip-size", f"{width}x{height}"]
         distorted = clip
         if encoder is not None:
             distorted = f"{CONTAINER_OUT}/encoded.mkv"
             arguments += ["--encoder", encoder, "--encoded", distorted]
+        elif video_delay is not None:
+            distorted = f"{CONTAINER_OUT}/video_only.mkv"
+            arguments += ["--video-delay", f"{video_delay:.6f}", "--video-only", distorted]
         result = run_in_image(
             image,
             JUDGE_ACCEPTANCE,
@@ -377,6 +384,14 @@ def judged_for_real(judge_in_image, capture_dir) -> Capture:
 @pytest.fixture(scope="session", params=ENCODERS)
 def judged_encode(request, judge_in_image) -> Capture:
     return judge_in_image(request.param)
+
+
+@pytest.fixture(scope="session")
+def judged_late_video(judge_in_image) -> Capture:
+    """O clip remuxado com um áudio que começa antes do vídeo, julgado contra a
+    cópia dele sem o áudio. Contra o próprio clip, os dois ramos teriam o mesmo
+    `start`, e o par sairia certo sem o `setpts`."""
+    return judge_in_image(video_delay=VIDEO_DELAY_S)
 
 
 def vmaf_log(captured: Capture) -> dict[str, Any]:
@@ -416,3 +431,19 @@ class TestJudgeDecodesEveryEncoder:
 
     def test_the_log_has_one_entry_per_frame_of_the_clip(self, judged_encode):
         assert len(vmaf_log(judged_encode)["frames"]) == CLIP_SECONDS * CLIP_FPS
+
+
+class TestJudgeAlignsAMasterWhoseVideoStartsLate:
+    def test_the_real_ffmpeg_accepted_the_argv_the_judge_builds(self, judged_late_video):
+        assert judged_late_video.returncode == 0, judged_late_video.artifact("ffmpeg.log")
+
+    def test_the_video_of_the_master_starts_after_zero(self, judged_late_video):
+        (start,) = STREAM_START.findall(judged_late_video.artifact("ffmpeg.log"))
+
+        assert float(start) == pytest.approx(VIDEO_DELAY_S, abs=0.001)
+
+    def test_the_log_has_one_entry_per_frame_of_the_clip(self, judged_late_video):
+        assert len(vmaf_log(judged_late_video)["frames"]) == CLIP_SECONDS * CLIP_FPS
+
+    def test_the_vmaf_of_the_video_against_its_master_is_close_to_100(self, judged_late_video):
+        assert vmaf_log(judged_late_video)["pooled_metrics"]["vmaf"]["mean"] >= VMAF_FLOOR

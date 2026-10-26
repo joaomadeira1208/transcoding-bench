@@ -62,7 +62,9 @@ class TestTheSmtEffect:
         # e o encode leva mais ciclos por quadro com SMT. A razão é smt/nosmt, e um
         # valor acima de 1 é o custo do SMT.
         df = frame(
-            replications("c7i-smt", perf_cycles=3.0e12, perf_task_clock=1.5e6, time_elapsed_s=150.0),
+            replications(
+                "c7i-smt", perf_cycles=3.0e12, perf_task_clock=1.5e6, time_elapsed_s=150.0
+            ),
             replications("c7i-nosmt", perf_cycles=2.0e12, time_elapsed_s=100.0),
         )
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 from conftest import (
+    CONFIG_DIR,
     ROLE_ROOT,
     make_ffmpeg_log,
     make_meta,
@@ -25,9 +26,11 @@ CLI = ROLE_ROOT / "consolidate.py"
 SCENARIO = "libx264_2160p_1080p_bbb_c7g"
 
 
-def run_cli(runs: Path, out: Path) -> subprocess.CompletedProcess[str]:
+def run_cli(
+    runs: Path, out: Path, config: Path = CONFIG_DIR / "experiment.toml"
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(CLI), "--runs", str(runs), "--out", str(out)],
+        [sys.executable, str(CLI), "--runs", str(runs), "--config", str(config), "--out", str(out)],
         capture_output=True,
         text=True,
         check=False,

@@ -1,0 +1,165 @@
+# O experimento de topologia (ADR-0026): a Intel com e sem SMT, numa
+# `c7i.2xlarge` cujo `CpuOptions` deixa 4 vCPUs nos dois braços. A matriz é a da
+# campanha inteira, e todo registro aqui é cópia idêntica do `experiment.toml`,
+# menos o bloco de instâncias.
+
+[experiment]
+seed = 20260808
+replications = 5
+warmup_runs = 1
+
+[encode]
+threads = 0
+gop_size = 48
+pix_fmt = "yuv420p"
+strip_audio = true
+container = "mkv"
+scale_flags = "lanczos"
+
+[instrumentation]
+pmu_events = [
+  "cycles",
+  "instructions",
+  "branch-instructions",
+  "branch-misses",
+  "task-clock",
+  "context-switches",
+  "cpu-migrations",
+  "page-faults",
+]
+
+[[instrumentation.metric]]
+name = "ipc"
+numerator = "instructions"
+denominator = "cycles"
+max_ratio = 10.0
+
+[[instrumentation.metric]]
+name = "branch_mispredict_rate"
+numerator = "branch-misses"
+denominator = "branch-instructions"
+max_ratio = 1.0
+
+[[codec]]
+slug = "libx264"
+codec = "h264"
+encoder = "libx264"
+preset = "medium"
+crf = 23
+encoder_args = ["-sc_threshold", "0"]
+bitstream_muxer = "h264"
+
+[[codec]]
+slug = "libx265"
+codec = "h265"
+encoder = "libx265"
+preset = "medium"
+crf = 28
+encoder_args = ["-x265-params", "scenecut=0"]
+bitstream_muxer = "hevc"
+
+[[codec]]
+slug = "libsvtav1"
+codec = "av1"
+encoder = "libsvtav1"
+preset = "8"
+crf = 35
+encoder_args = ["-svtav1-params", "scd=0"]
+bitstream_muxer = "obu"
+
+[[pair]]
+input_res = "2160p"
+output_res = "2160p"
+
+[[pair]]
+input_res = "2160p"
+output_res = "1080p"
+
+[[pair]]
+input_res = "2160p"
+output_res = "720p"
+
+[[pair]]
+input_res = "2160p"
+output_res = "480p"
+
+[[pair]]
+input_res = "1080p"
+output_res = "1080p"
+
+[[pair]]
+input_res = "1080p"
+output_res = "720p"
+
+[[pair]]
+input_res = "1080p"
+output_res = "480p"
+
+[[pair]]
+input_res = "720p"
+output_res = "720p"
+
+[[pair]]
+input_res = "720p"
+output_res = "480p"
+
+[[video]]
+slug = "bbb"
+title = "Big Buck Bunny"
+frame_rate = "30/1"
+frames = 19036
+
+[video.geometry]
+2160p = { width = 3840, height = 2160 }
+1080p = { width = 1920, height = 1080 }
+720p = { width = 1280, height = 720 }
+480p = { width = 854, height = 480 }
+
+[video.source]
+url = "https://ftp.nluug.nl/pub/graphics/blender/demo/movies/BBB/bbb_sunflower_2160p_30fps_normal.mp4.zip"
+file = "bbb_sunflower_2160p_30fps_normal.mp4"
+size = 633016449
+sha256 = "37f0ff251a606c2dcfa26c19fe6bf843234b4e7a8889cfab50bc26f644e55520"
+
+[[video]]
+slug = "tos"
+title = "Tears of Steel"
+frame_rate = "24/1"
+frames = 17616
+
+[video.geometry]
+2160p = { width = 3840, height = 1714 }
+1080p = { width = 1920, height = 856 }
+720p = { width = 1280, height = 572 }
+480p = { width = 854, height = 382 }
+
+[video.source]
+url = "https://ftp.nluug.nl/pub/graphics/blender/demo/movies/ToS/tearsofsteel_4k.mov.zip"
+file = "tearsofsteel_4k.mov"
+size = 6737592810
+sha256 = "89b7fd21c7729b7d5071af993939997f847b5af06613a3388ba158dae9e52ab3"
+
+# `c7i-smt` é a topologia da `c7i.xlarge` da campanha (2 núcleos x 2 threads), e
+# é a ponte com ela; `c7i-nosmt` é a de `c7g` e `c7a` (4 núcleos x 1 thread).
+[[instance]]
+id = "c7i-smt"
+instance_type = "c7i.2xlarge"
+arch = "x86_64"
+core_count = 2
+threads_per_core = 2
+
+[[instance]]
+id = "c7i-nosmt"
+instance_type = "c7i.2xlarge"
+arch = "x86_64"
+core_count = 4
+threads_per_core = 1
+
+[quality]
+vmaf_model = "vmaf_v0.6.1"
+vmaf_delta_max = 0.5
+ssim_delta_max = 0.001
+
+[quality.judge]
+instance_type = "c7i.4xlarge"
+arch = "x86_64"

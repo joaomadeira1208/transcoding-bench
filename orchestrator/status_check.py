@@ -21,12 +21,11 @@ from field_checks import (
     check_non_empty_str,
 )
 
-# O que a coluna tem de acomodar não é um id de arquitetura e sim o `judge`, que
-# é o mais largo dos quatro nomes que o resumo do fim põe um debaixo do outro.
-INSTANCE_WIDTH = 5
+LONGEST_INSTANCE = "c7i-nosmt"
+INSTANCE_WIDTH = len(LONGEST_INSTANCE)
 HOUR_WIDTH = 8
 
-LONGEST_SCENARIO_ID = "libsvtav1_2160p_2160p_bbb_c7g_warmup"
+LONGEST_SCENARIO_ID = f"libsvtav1_2160p_2160p_bbb_{LONGEST_INSTANCE}_warmup"
 SCENARIO_WIDTH = len(LONGEST_SCENARIO_ID) + 1
 
 SECONDS_PER_HOUR = 3600
@@ -101,9 +100,9 @@ class StatusKeys:
     progress: str
 
     @classmethod
-    def of(cls, role: Role, instance_type: str) -> StatusKeys:
-        """As chaves que aquele papel dá aos seus objetos."""
-        stem = instance_type if role is Role.ENCODE else JUDGE_STEM
+    def of(cls, role: Role, instance: str) -> StatusKeys:
+        """As chaves que aquele papel dá aos seus objetos: o encode, pelo id curto."""
+        stem = instance if role is Role.ENCODE else JUDGE_STEM
         return cls(
             done=f"{STATUS_PREFIX}{stem}_done",
             progress=f"{STATUS_PREFIX}{stem}_progress",

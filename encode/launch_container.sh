@@ -14,7 +14,7 @@ EXIT_USAGE=2
 
 usage_error() {
   printf 'launch_container.sh: %s\n' "$*" >&2
-  printf 'uso: launch_container.sh --work-dir <dir> --plan <file> --bucket <name> --commit <sha> --instance-id <id> --instance-type <type> [--run-timeout <seconds>] [--total-timeout <seconds>]\n' >&2
+  printf 'uso: launch_container.sh --work-dir <dir> --plan <file> --bucket <name> --commit <sha> --instance <id> --instance-id <id> --instance-type <type> [--run-timeout <seconds>] [--total-timeout <seconds>]\n' >&2
   exit "$EXIT_USAGE"
 }
 
@@ -22,6 +22,7 @@ work_dir=""
 plan=""
 bucket=""
 commit=""
+instance=""
 instance_id=""
 instance_type=""
 run_timeout=""
@@ -36,6 +37,7 @@ while (($#)); do
     --plan) plan=$value ;;
     --bucket) bucket=$value ;;
     --commit) commit=$value ;;
+    --instance) instance=$value ;;
     --instance-id) instance_id=$value ;;
     --instance-type) instance_type=$value ;;
     --run-timeout) run_timeout=$value ;;
@@ -45,7 +47,7 @@ while (($#)); do
   shift 2
 done
 
-for name in work_dir plan bucket commit instance_id instance_type; do
+for name in work_dir plan bucket commit instance instance_id instance_type; do
   [[ -n ${!name} ]] || usage_error "faltou --${name//_/-}"
 done
 
@@ -58,6 +60,7 @@ run_all_arguments=(
   --runs-dir "$WORK_MOUNT/$RUNS_DIR_NAME"
   --bucket "$bucket"
   --commit "$commit"
+  --instance "$instance"
   --instance-id "$instance_id"
   --instance-type "$instance_type"
 )

@@ -66,3 +66,25 @@ gp3 = 0.08
 
 [quote.network_usd_per_hour]
 public_ipv4 = 0.005
+
+[[quote]]
+consulted_at = "2026-10-26"
+covers = "complementares"
+region = "us-east-1"
+model = "on-demand"
+operating_system = "Linux"
+tenancy = "Shared"
+
+[quote.instance_usd_per_hour]
+"c7i.2xlarge" = 0.3570
+"c7g.xlarge" = 0.1450
+"c7i.xlarge" = 0.1785
+"c7a.xlarge" = 0.20528
+"c7i.4xlarge" = 0.7140
+"t3.micro" = 0.0104
+
+[quote.storage_usd_per_gb_month]
+gp3 = 0.08
+
+[quote.network_usd_per_hour]
+public_ipv4 = 0.005

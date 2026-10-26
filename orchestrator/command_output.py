@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from experiment_config import CpuOptions
+
 
 class OutputError(Exception):
     """Saída de comando externo que o Orquestrador recusa a ler."""
@@ -24,6 +26,7 @@ class DescribedInstance:
     state: str
     public_ip: str | None
     private_ip: str | None
+    cpu_options: CpuOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,16 @@ def _described_instance(instance: Any) -> DescribedInstance:
         state=_field(_field(described, "State", dict), "Name", str),
         public_ip=_optional_field(described, "PublicIpAddress", str),
         private_ip=_optional_field(described, "PrivateIpAddress", str),
+        cpu_options=_cpu_options(_optional_field(described, "CpuOptions", dict)),
+    )
+
+
+def _cpu_options(raw: dict[str, Any] | None) -> CpuOptions | None:
+    if raw is None:
+        return None
+    return CpuOptions(
+        core_count=_field(raw, "CoreCount", int),
+        threads_per_core=_field(raw, "ThreadsPerCore", int),
     )
 
 

@@ -31,6 +31,8 @@ from campaign_launch import (
     resumed_campaign,
     slice_key,
     slice_name,
+    topology,
+    topology_divergence,
 )
 from campaign_state import (
     CampaignState,
@@ -86,6 +88,7 @@ from instance_launch import (
     BOOTSTRAP_TIMEOUT_SECONDS,
     ENCODE_VOLUME_SIZE_GB,
     IMDS_HOP_LIMIT,
+    READY_TIMEOUT_SECONDS,
     REMOTE_REPO_DIR,
     REMOTE_WORK_DIR,
     EncodeTarget,
@@ -94,13 +97,15 @@ from instance_launch import (
     encode_tags,
     encode_target,
     image_for_arch,
+    instance_target,
     launch_encode,
     launch_instance,
     orphan_hint,
     render_user_data,
+    target_of,
     wait_for_bootstrapped_instance,
 )
-from instance_wait import BootstrapError, WaitTimeout
+from instance_wait import BootstrapError, WaitTimeout, wait_for_instance_ready
 from judge_launch import (
     QUALITY_PLAN_KEY,
     QUALITY_RESULTS_PREFIX,
@@ -112,7 +117,7 @@ from judge_launch import (
 )
 from judgement_check import JudgementError
 from manifest_check import check_manifest
-from masters_launch import mirror_differences, prepare_masters_command
+from masters_launch import mirror_differences, prepare_masters_command, unmirrored
 from masters_plan import build_masters_plan, iter_masters
 from meta_check import MetaError
 from preflight import (
@@ -125,6 +130,7 @@ from preflight import (
     Step,
     StepResult,
     VmafScore,
+    container_topology,
     failed,
     perf_counters,
     perf_detail,
@@ -132,6 +138,8 @@ from preflight import (
     put_command,
     render_table,
     summarize,
+    topology_detail,
+    topology_probe_command,
     vmaf_detail,
     vmaf_probe_command,
     vmaf_score,
@@ -278,8 +286,9 @@ def main() -> int:
         help="prova o caminho do encode ou do Juiz numa instância descartável",
         description=(
             "Roda a auto-checagem do Orquestrador, lança uma instância de encode do tipo "
-            "pedido com a fatia daquela arquitetura, confere o perf e o PutObject de dentro "
-            "do container, termina a instância e imprime a tabela passou/falhou. Com "
+            "pedido (ou do [[instance]] pedido, com o CpuOptions dele) com a fatia daquela "
+            "arquitetura, confere o nproc e o Thread(s) per core, o perf e o PutObject de "
+            "dentro do container, termina a instância e imprime a tabela passou/falhou. Com "
             "--judge, lança um Juiz descartável sobre um plano vazio e confere o libvmaf e "
             "o PutObject em quality/results/preflight/ no lugar do perf."
         ),
@@ -291,9 +300,23 @@ def main() -> int:
         help=f"tipo da instância de encode descartável (default: {PREFLIGHT_INSTANCE_TYPE})",
     )
     leg.add_argument(
+        "--instance",
+        default=None,
+        help=(
+            "id de um [[instance]] da definição, lançado com o CpuOptions dele: o que "
+            "separa dois registros do mesmo tipo"
+        ),
+    )
+    leg.add_argument(
         "--judge",
         action="store_true",
         help="a perna do Juiz, com o tipo e a arquitetura de [quality.judge]",
+    )
+    check.add_argument(
+        "--config",
+        type=Path,
+        default=EXPERIMENT_TOML,
+        help="a definição de onde saem a instância e a fatia (default: config/experiment.toml)",
     )
     check.add_argument(
         "--bucket",
@@ -302,8 +325,8 @@ def main() -> int:
     )
     check.set_defaults(
         run=lambda args, **common: preflight(
-            config=_load_config(EXPERIMENT_TOML),
-            instance_type=None if args.judge else args.instance_type,
+            config=_load_config(args.config),
+            leg=_preflight_leg(args),
             bucket=args.bucket,
             **common,
         )
@@ -315,7 +338,8 @@ def main() -> int:
             "Roda a auto-checagem, recusa um arquivo de estado com instância de pé e um "
             "bucket cujo runs/ já tem Execuções, sobe o plano para scenarios/, lança uma "
             "Instância de encode por registro [[instance]] "
-            "da definição, espera os três cloud-init e dispara o run_all.sh desacoplado da "
+            "da definição, confere o CpuOptions aplicado, espera todos os cloud-init e "
+            "dispara o run_all.sh desacoplado da "
             "sessão SSH. Termina aqui: as Instâncias seguem sozinhas (ADR-0010) e o arquivo "
             "de estado no work dir é o que o watch lê."
         ),
@@ -324,7 +348,8 @@ def main() -> int:
         "--config",
         required=True,
         type=Path,
-        help="caminho do TOML da definição: config/pilot.toml ou config/experiment.toml",
+        help="caminho do TOML da definição: config/pilot.toml, config/experiment.toml ou um "
+        "dos complementares",
     )
     campaign.add_argument(
         "--bucket",
@@ -488,6 +513,21 @@ def main() -> int:
         return EXIT_FAILURE
 
 
+@dataclass(frozen=True)
+class EncodeLeg:
+    """A instância de encode que o `preflight` prova: por id, ou pelo tipo se ele é único."""
+
+    instance_type: str
+    instance_id: str | None
+
+
+def _preflight_leg(args: argparse.Namespace) -> EncodeLeg | None:
+    """`None` é a perna do Juiz."""
+    if args.judge:
+        return None
+    return EncodeLeg(instance_type=args.instance_type, instance_id=args.instance)
+
+
 def _interrupted(infra_path: Path, subcommand: str) -> int:
     """O `Ctrl-C` para só a vigilância, e diz como voltar e como abortar (D11).
 
@@ -534,6 +574,7 @@ def prepare_masters(*, infra: InfraConfig, config: ExperimentConfig, work_dir: P
                 "role": MASTERS_ROLE,
                 "commit": commit,
             },
+            cpu_options=None,
         )
     except OutputError as error:
         # O único caminho em que a instância pode ter subido sem um id que o
@@ -590,7 +631,7 @@ def _drive_preparation(
         s3_list_prefix(pilot, MASTERS_PREFIX),
     )
     if differences:
-        raise PreparationError(_lines("o espelho dos dois buckets diverge", differences))
+        raise PreparationError(_lines(f"o espelho de {campaign} em {pilot} diverge", differences))
 
     manifest = work_dir / MANIFEST_NAME
     s3_cp(f"s3://{campaign}/{MASTERS_PREFIX}{MANIFEST_NAME}", str(manifest))
@@ -610,17 +651,17 @@ def preflight(
     infra: InfraConfig,
     config: ExperimentConfig,
     work_dir: Path,
-    instance_type: str | None,
+    leg: EncodeLeg | None,
     bucket: str | None,
 ) -> int:
-    """O caminho do encode, ou o do Juiz quando não há tipo, numa instância de minutos.
+    """O caminho do encode, ou o do Juiz quando não há perna de encode, numa instância de minutos.
 
     A escada é linear e para no primeiro passo que falhar: o que vem depois de um
     `PassRole` recusado não tem o que provar. A instância, se chegou a subir, é
     terminada em todo caminho de saída.
     """
     target = bucket or infra.buckets.pilot
-    judge = instance_type is None
+    judge = leg is None
     results: list[StepResult] = []
     launched: list[str] = []
 
@@ -645,7 +686,7 @@ def preflight(
                 commit=commit,
                 bucket=target,
                 work_dir=work_dir,
-                instance_type=instance_type,
+                leg=leg,
             )
     except _Aborted:
         pass
@@ -681,13 +722,13 @@ def _encode_leg(
     commit: str,
     bucket: str,
     work_dir: Path,
-    instance_type: str,
+    leg: EncodeLeg,
 ) -> None:
     encode = _step(
         results,
         Step.AMI,
-        lambda: encode_target(config, infra.amis, instance_type),
-        detail=lambda chosen: f"{instance_type} ({chosen.instance.arch}): {chosen.image_id}",
+        lambda: _resolve_leg(leg, config=config, infra=infra),
+        detail=_target_detail,
     )
     key = slice_key(encode.instance.id)
     started = _step(
@@ -714,6 +755,15 @@ def _encode_leg(
     )
     _step(
         results,
+        Step.TOPOLOGY,
+        lambda: container_topology(
+            ssh_exec(host, topology_probe_command(), timeout=PUT_TIMEOUT_SECONDS),
+            encode.instance.cpu_options,
+        ),
+        detail=topology_detail,
+    )
+    _step(
+        results,
         Step.PERF,
         lambda: _probe_perf(
             host=host,
@@ -726,6 +776,18 @@ def _encode_leg(
         detail=perf_detail,
     )
     _step(results, Step.PUT, lambda: _put_from_container(host, bucket, instance_id))
+
+
+def _resolve_leg(leg: EncodeLeg, *, config: ExperimentConfig, infra: InfraConfig) -> EncodeTarget:
+    if leg.instance_id is not None:
+        return instance_target(config, infra.amis, leg.instance_id)
+    return encode_target(config, infra.amis, leg.instance_type)
+
+
+def _target_detail(chosen: EncodeTarget) -> str:
+    instance = chosen.instance
+    cpu = topology(instance.cpu_options) if instance.cpu_options else "o CpuOptions do tipo"
+    return f"{instance.id}: {instance.instance_type} ({instance.arch}), {cpu}: {chosen.image_id}"
 
 
 def _judge_leg(
@@ -828,6 +890,7 @@ def run_campaign(
 
     try:
         _launch_all(tracked, campaign, infra=infra, config=config)
+        _confirm_topologies(tracked, campaign)
         hosts = _await_bootstraps(tracked.state)
     except _FAILURES as error:
         _fail(error)
@@ -1264,7 +1327,7 @@ def _self_check(
 ) -> str:
     """Os cinco passos que provam credencial, infra e Masters antes de lançar (D6)."""
     _step(results, Step.STS, sts_caller_identity)
-    _step(results, Step.BUCKETS, lambda: _list_both_buckets(infra, bucket))
+    _step(results, Step.BUCKETS, lambda: _list_every_bucket(infra, bucket))
     _step(results, Step.SSM, lambda: _read_ssh_key(infra.ssh_private_key_parameter_name))
     commit = _step(results, Step.GIT, git_rev_parse)
     _step(results, Step.SYNC, lambda: _sync_between_buckets(infra, work_dir))
@@ -1343,11 +1406,35 @@ def _launch_all(
         )
 
 
+def _confirm_topologies(tracked: _StateFile, campaign: CampaignPlan) -> None:
+    """O `CpuOptions` que a EC2 aplicou a cada Instância, gravado e conferido (ADR-0026).
+
+    Gravado antes de conferido: a entrada que diverge é a que o pesquisador vai
+    querer ler no arquivo de estado depois de o `run` terminar tudo.
+    """
+    declared = {each.instance.id: each.instance for each in campaign.slices}
+    for entry in tracked.state.instances:
+        applied = _ready(entry.instance_id).cpu_options
+        _remember(tracked, entry.instance_id, cpu_options=applied)
+        refusal = topology_divergence(declared[entry.instance], entry.instance_id, applied)
+        if refusal is not None:
+            raise CampaignError(refusal)
+        _report(f"{entry.instance_id} ({entry.instance}): {topology(applied)}")
+
+
+def _ready(instance_id: str) -> DescribedInstance:
+    return wait_for_instance_ready(
+        lambda: described_instance(instance_id),
+        instance_id=instance_id,
+        timeout=READY_TIMEOUT_SECONDS,
+    )
+
+
 def _launch_architecture(
     each: ArchitectureSlice, *, state: CampaignState, infra: InfraConfig, config: ExperimentConfig
 ) -> str:
     return launch_encode(
-        target=encode_target(config, infra.amis, each.instance.instance_type),
+        target=target_of(infra.amis, each.instance),
         infra=infra,
         commit=state.commit,
         bucket=state.bucket,
@@ -1402,6 +1489,7 @@ def _dispatch_all(
             plan_name=slice_name(architecture.instance),
             bucket=tracked.state.bucket,
             commit=tracked.state.commit,
+            instance=architecture.instance,
             instance_id=architecture.instance_id,
             instance_type=architecture.instance_type,
             run_timeout=run_timeout,
@@ -1466,9 +1554,10 @@ def _terminate_all(tracked: _StateFile) -> int:
     return len(standing)
 
 
-def _list_both_buckets(infra: InfraConfig, bucket: str) -> str:
-    """O `ListBucket` dos dois, e o manifesto no bucket que a instância vai ler."""
-    names = list(dict.fromkeys((infra.buckets.campaign, infra.buckets.pilot, bucket)))
+def _list_every_bucket(infra: InfraConfig, bucket: str) -> str:
+    """O `ListBucket` de todos, o `masters/` de cada um igual ao da campanha e o manifesto
+    no bucket que a instância vai ler."""
+    names = list(dict.fromkeys((*infra.buckets.by_role.values(), bucket)))
     listings = {name: s3_list_prefix(name, MASTERS_PREFIX) for name in names}
 
     manifest = f"{MASTERS_PREFIX}{MANIFEST_NAME}"
@@ -1476,6 +1565,11 @@ def _list_both_buckets(infra: InfraConfig, bucket: str) -> str:
         raise PreflightError(
             f"s3://{bucket}/{manifest} não existe: o preflight roda depois do prepare-masters, "
             f"e sem os Masters a instância só descobre isso depois do build"
+        )
+    differences = unmirrored(listings, infra.buckets.campaign)
+    if differences:
+        raise PreflightError(
+            _lines(f"{MASTERS_PREFIX} diverge do de {infra.buckets.campaign}:", differences)
         )
     return "; ".join(
         f"{name}: {len(objects)} em {MASTERS_PREFIX}" for name, objects in listings.items()
@@ -1533,7 +1627,7 @@ def _launch_encode(
     plan = build_instance_slices(build_canonical_plan(config)).get(encode.instance.id)
     if plan is None:
         raise PreflightError(
-            f"{encode.instance.id}: o plano do experiment.toml não tem fatia para esta instância"
+            f"{encode.instance.id}: o plano da definição não tem fatia para esta instância"
         )
 
     local = work_dir / f"{encode.instance.id}.json"

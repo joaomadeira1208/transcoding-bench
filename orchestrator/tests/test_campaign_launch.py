@@ -26,10 +26,12 @@ from campaign_launch import (
     refuse_standing_instances,
     resumed_campaign,
     slice_key,
+    topology_divergence,
 )
 from campaign_state import CampaignState, parse_state, serialize_state
 from command_output import S3Object, TruncatedListing
 from conftest import make_campaign_state, make_tracked_instance, real_config, real_pilot_config
+from experiment_config import CpuOptions, InstanceRecord
 from scenario_plan import build_canonical_plan, build_instance_slices
 from status_check import Role
 from vigilance import Vigilance
@@ -372,3 +374,38 @@ class TestTheDecisionAfterTheBootstraps:
 
     def test_no_architecture_at_all_is_not_dispatch(self):
         assert abort_reasons({}) != ()
+
+
+NOSMT = InstanceRecord(
+    id="c7i-nosmt",
+    instance_type="c7i.2xlarge",
+    arch="x86_64",
+    cpu_options=CpuOptions(core_count=4, threads_per_core=1),
+)
+
+
+class TestTheTopologyTheEc2Applied:
+    # A EC2 aceita um `CpuOptions` e pode lançar outra coisa — a cota de núcleos
+    # do tipo, o AMI —, e o braço medido com a topologia errada é dois dias de
+    # dado que mede o SMT ao contrário (ADR-0026).
+
+    def test_the_declared_topology_applied_passes(self):
+        assert topology_divergence(NOSMT, INSTANCE_ID, CpuOptions(4, 1)) is None
+
+    def test_another_topology_is_refused_naming_the_instance_and_both(self):
+        refusal = topology_divergence(NOSMT, INSTANCE_ID, CpuOptions(2, 2))
+
+        assert refusal is not None
+        assert INSTANCE_ID in refusal and "c7i-nosmt" in refusal
+        assert "4 núcleos x 1 thread" in refusal and "2 núcleos x 2 thread" in refusal
+
+    def test_a_launch_the_describe_says_nothing_about_is_refused(self):
+        refusal = topology_divergence(NOSMT, INSTANCE_ID, None)
+
+        assert refusal is not None
+        assert INSTANCE_ID in refusal
+
+    def test_an_instance_that_declares_none_takes_whatever_its_type_has(self):
+        (c7i,) = (record for record in real_config().instances if record.id == "c7i")
+
+        assert topology_divergence(c7i, INSTANCE_ID, CpuOptions(2, 2)) is None

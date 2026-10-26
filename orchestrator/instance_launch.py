@@ -9,11 +9,11 @@ from __future__ import annotations
 import shlex
 import string
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from command_output import OutputError
-from experiment_config import ExperimentConfig, InstanceRecord
+from experiment_config import CpuOptions, ExperimentConfig, InstanceRecord
 from external import cloud_init_status, described_instance, run_instances
 from infra_config import Amis, InfraConfig
 from instance_wait import wait_for_bootstrap, wait_for_instance_ready
@@ -62,6 +62,7 @@ class InstanceLaunch:
     volume_size_gb: int
     imds_hop_limit: int
     tags: Mapping[str, str]
+    cpu_options: CpuOptions | None
 
 
 @dataclass(frozen=True)
@@ -74,16 +75,37 @@ class EncodeTarget:
 
 def encode_target(config: ExperimentConfig, amis: Amis, instance_type: str) -> EncodeTarget:
     """Resolve o tipo pedido contra a spec: nenhuma arquitetura é derivada do nome."""
-    declared = {instance.instance_type: instance for instance in config.instances}
-    instance = declared.get(instance_type)
+    matching = [
+        instance for instance in config.instances if instance.instance_type == instance_type
+    ]
+    if not matching:
+        declared = sorted({instance.instance_type for instance in config.instances})
+        raise LaunchError(
+            f"{instance_type} não é um tipo declarado na definição "
+            f"(declarados: {', '.join(declared)})"
+        )
+    if len(matching) > 1:
+        raise LaunchError(
+            f"{instance_type} é o tipo de {', '.join(each.id for each in matching)}: "
+            f"escolha a instância pelo id"
+        )
+    return target_of(amis, matching[0])
+
+
+def instance_target(config: ExperimentConfig, amis: Amis, instance_id: str) -> EncodeTarget:
+    """Resolve o id curto contra a spec: é ele que separa dois registros do mesmo tipo."""
+    declared = {instance.id: instance for instance in config.instances}
+    instance = declared.get(instance_id)
     if instance is None:
         raise LaunchError(
-            f"{instance_type} não é um tipo declarado no experiment.toml "
-            f"(declarados: {', '.join(sorted(declared))})"
+            f"{instance_id} não é um id declarado na definição (declarados: {', '.join(declared)})"
         )
+    return target_of(amis, instance)
 
+
+def target_of(amis: Amis, instance: InstanceRecord) -> EncodeTarget:
     return EncodeTarget(
-        instance=instance, image_id=image_for_arch(amis, instance.arch, instance_type)
+        instance=instance, image_id=image_for_arch(amis, instance.arch, instance.instance_type)
     )
 
 
@@ -142,6 +164,7 @@ def launch_encode(
             volume_size_gb=volume_size_gb,
             imds_hop_limit=IMDS_HOP_LIMIT,
             tags=tags,
+            cpu_options=target.instance.cpu_options,
         )
     )
 
@@ -167,7 +190,11 @@ def bootstrap_args(
 def launch_instance(launch: InstanceLaunch) -> str:
     """Chama o `run-instances` projetado e devolve o id, ou diz como achar o órfão."""
     try:
-        return run_instances(**asdict(launch))
+        # Campo a campo, e não `asdict`: ele desceria no `CpuOptions` e o
+        # entregaria como dicionário.
+        return run_instances(
+            **{field.name: getattr(launch, field.name) for field in fields(launch)}
+        )
     except OutputError as error:
         raise LaunchError(orphan_hint(f"Name={launch.tags['Name']}", error)) from error
 

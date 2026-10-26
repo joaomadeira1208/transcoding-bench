@@ -1,0 +1,144 @@
+# A repetibilidade entre hosts (ADR-0026): três instâncias novas de cada tipo,
+# nos três Cenários de `1080p -> 720p` sobre Big Buck Bunny que o piloto e a
+# campanha já rodaram. Todo registro aqui é cópia idêntica do `experiment.toml`,
+# menos o bloco de instâncias.
+
+[experiment]
+seed = 20260808
+replications = 5
+warmup_runs = 1
+
+[encode]
+threads = 0
+gop_size = 48
+pix_fmt = "yuv420p"
+strip_audio = true
+container = "mkv"
+scale_flags = "lanczos"
+
+[instrumentation]
+pmu_events = [
+  "cycles",
+  "instructions",
+  "branch-instructions",
+  "branch-misses",
+  "task-clock",
+  "context-switches",
+  "cpu-migrations",
+  "page-faults",
+]
+
+[[instrumentation.metric]]
+name = "ipc"
+numerator = "instructions"
+denominator = "cycles"
+max_ratio = 10.0
+
+[[instrumentation.metric]]
+name = "branch_mispredict_rate"
+numerator = "branch-misses"
+denominator = "branch-instructions"
+max_ratio = 1.0
+
+[[codec]]
+slug = "libx264"
+codec = "h264"
+encoder = "libx264"
+preset = "medium"
+crf = 23
+encoder_args = ["-sc_threshold", "0"]
+bitstream_muxer = "h264"
+
+[[codec]]
+slug = "libx265"
+codec = "h265"
+encoder = "libx265"
+preset = "medium"
+crf = 28
+encoder_args = ["-x265-params", "scenecut=0"]
+bitstream_muxer = "hevc"
+
+[[codec]]
+slug = "libsvtav1"
+codec = "av1"
+encoder = "libsvtav1"
+preset = "8"
+crf = 35
+encoder_args = ["-svtav1-params", "scd=0"]
+bitstream_muxer = "obu"
+
+[[pair]]
+input_res = "1080p"
+output_res = "720p"
+
+[[video]]
+slug = "bbb"
+title = "Big Buck Bunny"
+frame_rate = "30/1"
+frames = 19036
+
+[video.geometry]
+2160p = { width = 3840, height = 2160 }
+1080p = { width = 1920, height = 1080 }
+720p = { width = 1280, height = 720 }
+480p = { width = 854, height = 480 }
+
+[video.source]
+url = "https://ftp.nluug.nl/pub/graphics/blender/demo/movies/BBB/bbb_sunflower_2160p_30fps_normal.mp4.zip"
+file = "bbb_sunflower_2160p_30fps_normal.mp4"
+size = 633016449
+sha256 = "37f0ff251a606c2dcfa26c19fe6bf843234b4e7a8889cfab50bc26f644e55520"
+
+[[instance]]
+id = "c7g-r1"
+instance_type = "c7g.xlarge"
+arch = "arm64"
+
+[[instance]]
+id = "c7g-r2"
+instance_type = "c7g.xlarge"
+arch = "arm64"
+
+[[instance]]
+id = "c7g-r3"
+instance_type = "c7g.xlarge"
+arch = "arm64"
+
+[[instance]]
+id = "c7i-r1"
+instance_type = "c7i.xlarge"
+arch = "x86_64"
+
+[[instance]]
+id = "c7i-r2"
+instance_type = "c7i.xlarge"
+arch = "x86_64"
+
+[[instance]]
+id = "c7i-r3"
+instance_type = "c7i.xlarge"
+arch = "x86_64"
+
+[[instance]]
+id = "c7a-r1"
+instance_type = "c7a.xlarge"
+arch = "x86_64"
+
+[[instance]]
+id = "c7a-r2"
+instance_type = "c7a.xlarge"
+arch = "x86_64"
+
+[[instance]]
+id = "c7a-r3"
+instance_type = "c7a.xlarge"
+arch = "x86_64"
+
+[quality]
+vmaf_model = "vmaf_v0.6.1"
+vmaf_delta_max = 0.5
+ssim_delta_max = 0.001
+
+[quality.judge]
+instance_type = "c7i.4xlarge"
+arch = "x86_64"

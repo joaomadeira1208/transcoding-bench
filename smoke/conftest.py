@@ -38,6 +38,7 @@ EXPERIMENT_TOML = REPO_ROOT / "config" / "experiment.toml"
 PILOT_TOML = REPO_ROOT / "config" / "pilot.toml"
 
 COMMIT = "ffd4f43a1b2c3d4e5f60718293a4b5c6d7e8f900"
+INSTANCE = "c7g"
 INSTANCE_ID = "i-0123456789abcdef0"
 INSTANCE_TYPE = "c7g.xlarge"
 BUCKET = "smoke-bucket"
@@ -568,8 +569,8 @@ def bootstrap_arguments(
     """Os argumentos que os dois scripts recebem do host: nada é descoberto.
 
     A identidade da máquina é parâmetro porque três arquiteturas escrevem no mesmo
-    bucket no smoke do Pass de qualidade, e o `status/{instance_type}_done` de uma
-    sobrescreveria o da outra.
+    bucket no smoke do Pass de qualidade, e dois `meta.json` com o mesmo
+    `instance_id` seriam uma máquina só.
     """
     return [
         "--masters-dir",
@@ -658,6 +659,7 @@ def run_all(
         blocks: list[dict[str, Any]],
         *flags: str,
         s3_root: Path | None = None,
+        instance: str = INSTANCE,
         instance_id: str = INSTANCE_ID,
         instance_type: str = INSTANCE_TYPE,
         **shim_env: str,
@@ -674,6 +676,8 @@ def run_all(
                 str(RUN_ALL),
                 "--plan",
                 str(plan_path),
+                "--instance",
+                instance,
                 *bootstrap_arguments(
                     masters_dir,
                     runs_dir,
@@ -1023,6 +1027,7 @@ def campaign(campaign_plan: dict[str, Any], run_all) -> dict[str, Loop]:
             campaign_plan,
             blocks_of(campaign_plan, architecture),
             s3_root=s3_root,
+            instance=architecture,
             instance_id=instance_id_of(architecture),
             instance_type=instance_type_of(architecture),
             **bitstream_environment(architecture),
@@ -1343,10 +1348,22 @@ def validate_manifest_with_cli(
     )
 
 
-def consolidate_with_cli(runs_dir: Path, out: Path) -> subprocess.CompletedProcess[str]:
-    """A CLI de consolidação do `analysis/`, sobre a árvore que o laço produziu."""
+def consolidate_with_cli(
+    runs_dir: Path, out: Path, config: Path = EXPERIMENT_TOML
+) -> subprocess.CompletedProcess[str]:
+    """A CLI de consolidação do `analysis/`, sobre a árvore que o laço produziu, com as
+    colunas de PMU da definição de onde o plano saiu."""
     return subprocess.run(
-        [sys.executable, str(CONSOLIDATE), "--runs", str(runs_dir), "--out", str(out)],
+        [
+            sys.executable,
+            str(CONSOLIDATE),
+            "--runs",
+            str(runs_dir),
+            "--config",
+            str(config),
+            "--out",
+            str(out),
+        ],
         capture_output=True,
         text=True,
         check=False,

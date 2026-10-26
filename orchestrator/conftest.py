@@ -31,6 +31,11 @@ def real_pilot_config() -> ExperimentConfig:
     return _real_config(REAL_PILOT_TOML)
 
 
+def every_real_definition() -> list[ExperimentConfig]:
+    """Toda definição de `config/`, a campanha, o piloto e os complementares (ADR-0026)."""
+    return [_real_config(path) for path in sorted(REAL_EXPERIMENT_TOML.parent.glob("*.toml"))]
+
+
 def _real_config(path: Path) -> ExperimentConfig:
     with path.open("rb") as handle:
         return validate_config(tomllib.load(handle))
@@ -588,6 +593,7 @@ _TRACKED_INSTANCE: dict[str, Any] = {
     "total_timeout": 120 * 60 * 60,
     "state": "running",
     "outcome": None,
+    "cpu_options": None,
 }
 
 _CAMPAIGN_STATE: dict[str, Any] = {

@@ -4,9 +4,16 @@ locals {
 
   ephemeral_roles = ["encode", "judge", "masters"]
 
+  experiments = ["campaign", "pilot", "topologia", "repetibilidade", "contadores"]
+
+  bucket_names = {
+    for experiment in local.experiments :
+    experiment => data.terraform_remote_state.storage.outputs["${experiment}_bucket_name"]
+  }
+
   bucket_arns = [
-    data.terraform_remote_state.storage.outputs.campaign_bucket_arn,
-    data.terraform_remote_state.storage.outputs.pilot_bucket_arn,
+    for experiment in local.experiments :
+    data.terraform_remote_state.storage.outputs["${experiment}_bucket_arn"]
   ]
 }
 

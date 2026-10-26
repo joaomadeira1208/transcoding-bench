@@ -54,22 +54,31 @@ def mirror_differences(
     """Tudo em que as duas listagens divergem, nomeando cada objeto."""
     sizes = _sizes(source)
     mirrored = _sizes(destination)
-    differences = [
-        f"{key}: no bucket da campanha e ausente no do piloto"
-        for key in sizes
-        if key not in mirrored
+    differences = [f"{key}: na origem e ausente no destino" for key in sizes if key not in mirrored]
+    differences += [
+        f"{key}: no destino e ausente na origem" for key in mirrored if key not in sizes
     ]
     differences += [
-        f"{key}: no bucket do piloto e ausente no da campanha"
-        for key in mirrored
-        if key not in sizes
-    ]
-    differences += [
-        f"{key}: tamanho diverge entre os buckets: {size} na campanha, {mirrored[key]} no piloto"
+        f"{key}: tamanho diverge: {size} na origem, {mirrored[key]} no destino"
         for key, size in sizes.items()
         if key in mirrored and mirrored[key] != size
     ]
     return tuple(differences)
+
+
+def unmirrored(listings: Mapping[str, Sequence[S3Object]], reference: str) -> tuple[str, ...]:
+    """Cada bucket cujo `masters/` não é o do de referência, com o que diverge nele.
+
+    Pela listagem inteira, e não pelo manifesto: um `sync` interrompido deixa o
+    manifesto no destino e um Master pela metade, e quem o descobre é o
+    bootstrap da instância, depois do build.
+    """
+    return tuple(
+        f"{bucket}: {difference}"
+        for bucket, listed in listings.items()
+        if bucket != reference
+        for difference in mirror_differences(listings[reference], listed)
+    )
 
 
 def _sizes(objects: Sequence[S3Object]) -> Mapping[str, int]:

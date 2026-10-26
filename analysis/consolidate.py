@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Projeta uma árvore `runs/` na tabela analítica em Parquet (ADR-0007).
 
-python analysis/consolidate.py --runs runs/ --out runs.parquet
+python analysis/consolidate.py --runs runs/ --config config/pilot.toml --out runs.parquet
 
 Casca fina sobre `run_table`: percorre o diretório, lê os artefatos e escreve o
 Parquet. Recebe um diretório **local** — o `aws s3 sync` que o traz do bucket é
@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 
 import pyarrow.parquet as pq
 from json_contract import offending_fields
 from pydantic import ValidationError
 from run_meta import load_meta
-from run_table import RawRun, consolidate_runs, summarize
+from run_table import RawRun, consolidate_runs, pmu_columns, summarize
 
 EXIT_OK = 0
 EXIT_INVALID_RUN = 1
@@ -56,11 +57,23 @@ def main() -> int:
         description="Consolida uma árvore runs/ na tabela analítica em Parquet."
     )
     parser.add_argument("--runs", required=True, type=Path, help="diretório com os runs/{run_id}/")
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="a definição do lançamento, de onde saem os eventos e as métricas de PMU",
+    )
     parser.add_argument("--out", required=True, type=Path, help="caminho do Parquet a escrever")
     args = parser.parse_args()
 
     if not args.runs.is_dir():
         print(f"{args.runs}: não é um diretório", file=sys.stderr)
+        return EXIT_UNREADABLE
+
+    try:
+        pmu = pmu_columns(tomllib.loads(args.config.read_text(encoding="utf-8")))
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as error:
+        print(f"{args.config}: {error}", file=sys.stderr)
         return EXIT_UNREADABLE
 
     try:
@@ -72,7 +85,7 @@ def main() -> int:
         print(f"{error.filename}: {error.strerror}", file=sys.stderr)
         return EXIT_UNREADABLE
 
-    result = consolidate_runs(runs)
+    result = consolidate_runs(runs, pmu)
     for artifact in result.unreadable:
         print(f"{args.runs}/{artifact}", file=sys.stderr)
 

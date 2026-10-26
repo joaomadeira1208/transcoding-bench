@@ -12,7 +12,7 @@ from typing import Any
 
 from campaign_state import CampaignState, TrackedInstance
 from command_output import S3Object, TruncatedListing
-from experiment_config import ExperimentConfig, InstanceRecord
+from experiment_config import CpuOptions, ExperimentConfig, InstanceRecord
 from generate_scenarios import CANONICAL_FILENAME, SLICE_FILENAME
 from scenario_plan import build_canonical_plan, build_instance_slices
 from status_check import Role
@@ -121,7 +121,30 @@ def launched_instance(
         total_timeout=total_timeout,
         state=Vigilance.BOOTSTRAPPING,
         outcome=None,
+        cpu_options=None,
     )
+
+
+def topology_divergence(
+    record: InstanceRecord, instance_id: str, applied: CpuOptions | None
+) -> str | None:
+    """O motivo de recusar a instância lançada, ou `None` se ela tem a topologia declarada.
+
+    Sem `CpuOptions` declarado não há o que conferir: a instância tem a do tipo.
+    """
+    declared = record.cpu_options
+    if declared is None or applied == declared:
+        return None
+    return (
+        f"{instance_id} ({record.id}): o CpuOptions aplicado é {topology(applied)}, "
+        f"o declarado é {topology(declared)}"
+    )
+
+
+def topology(options: CpuOptions | None) -> str:
+    if options is None:
+        return "desconhecido (o describe-instances não o informou)"
+    return f"{options.core_count} núcleos x {options.threads_per_core} thread(s)"
 
 
 def full_campaign(config: ExperimentConfig) -> CampaignPlan:
@@ -181,6 +204,7 @@ def dispatch_command(
     plan_name: str,
     bucket: str,
     commit: str,
+    instance: str,
     instance_id: str,
     instance_type: str,
     run_timeout: int,
@@ -204,6 +228,8 @@ def dispatch_command(
             bucket,
             "--commit",
             commit,
+            "--instance",
+            instance,
             "--instance-id",
             instance_id,
             "--instance-type",

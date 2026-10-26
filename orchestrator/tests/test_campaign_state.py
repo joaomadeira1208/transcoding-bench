@@ -18,6 +18,7 @@ from conftest import (
     make_progress,
     make_tracked_instance,
 )
+from experiment_config import CpuOptions
 from status_check import Role, StatusError
 from vigilance import Vigilance
 
@@ -82,6 +83,7 @@ class TestTheFileTheRunWrites:
             total_timeout=120 * 60 * 60,
             state=Vigilance.RUNNING,
             outcome=None,
+            cpu_options=None,
         )
 
     def test_the_architecture_that_finished_keeps_the_marker_that_ended_it(self):
@@ -234,13 +236,19 @@ class TestTheRoleTheEntryCarries:
 
 
 class TestTheStatusObjectsTheEntryNames:
-    def test_the_encode_names_them_after_the_instance_type_of_its_slice(self):
-        keys = only(instance_type="c7g.xlarge").status_keys
+    def test_the_encode_names_them_after_the_instance_of_its_slice(self):
+        keys = only(instance="c7g", instance_type="c7g.xlarge").status_keys
 
-        assert (keys.done, keys.progress) == (
-            "status/c7g.xlarge_done",
-            "status/c7g.xlarge_progress",
-        )
+        assert (keys.done, keys.progress) == ("status/c7g_done", "status/c7g_progress")
+
+    def test_two_entries_of_the_same_type_name_different_objects(self):
+        # Pelo tipo, as três `c7g.xlarge` da repetibilidade escreveriam o mesmo
+        # marcador: o da que acabasse por último apagaria o das outras, que só
+        # sairiam do laço no prazo de D10, dadas por mortas.
+        first = only(instance="c7g-r1", instance_type="c7g.xlarge").status_keys
+        second = only(instance="c7g-r2", instance_type="c7g.xlarge").status_keys
+
+        assert {first.done, first.progress}.isdisjoint({second.done, second.progress})
 
     def test_the_judge_names_them_after_itself_and_not_after_its_instance_type(self):
         keys = only(role="judge", instance_type="c7i.4xlarge").status_keys
@@ -324,6 +332,26 @@ class TestTheJudgeEntryReadsAndPrintsItsOwnProgress:
 
     def test_the_judge_without_an_object_yet_says_no_output_was_judged(self):
         assert "nenhum output julgado" in only(role="judge").render_progress(None)
+
+
+class TestTheTopologyTheEntryWasLaunchedWith:
+    def test_the_applied_topology_survives_the_round_trip(self):
+        applied = {"core_count": 4, "threads_per_core": 1}
+        state = parse_state(
+            make_campaign_state(instances=[make_tracked_instance(cpu_options=applied)])
+        )
+
+        assert state.instances[0].cpu_options == CpuOptions(core_count=4, threads_per_core=1)
+        assert parse_state(json.loads(serialize_state(state))) == state
+
+    def test_the_entry_of_the_campaign_which_predates_the_field_has_none(self):
+        assert only(cpu_options=ABSENT).cpu_options is None
+
+    @pytest.mark.parametrize(
+        "value", ["4x1", {"core_count": 4}, {"core_count": "4", "threads_per_core": 1}]
+    )
+    def test_a_topology_that_is_not_one_is_refused_by_index_and_name(self, value):
+        assert "instances[1].cpu_options" in message(deformed(cpu_options=value))
 
 
 class TestTheEntryAppendedToTheFile:

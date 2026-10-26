@@ -90,3 +90,9 @@ A chave de um resultado é o `run_id` do **representante** do bitstream (ADR-002
 **`status/judge_done` tem a mesma forma do marcador do encode** — `instance_id`, `finished_at`, `runs_total`, `runs_failed`, `capped`, `exit_status` —, porque cada output julgado é um run do Juiz. É o que faz o leitor do marcador e a decisão de vigilância servirem ao Juiz **sem ramo**. `status/judge_progress` é próprio, com `instance_id`, `output_index` e `output_count`, `run_id` e `scenario_id` do output que acabou, `runs_total`, `runs_failed`, `elapsed_seconds` e `written_at`. Os dois carregam `instance_id` pelo motivo desta ADR: o `DeleteObject` da matriz (ADR-0016) não alcança `status/`, e numa repetição do Pass os objetos anteriores sobrevivem no bucket.
 
 O nome é `judge_*`, e não `{instance_type}_*`: o Juiz é um só, e prendê-lo ao tipo faria a chave mudar se a ADR-0025 trocasse de instância.
+
+## Emenda: os objetos de `status/` são nomeados pelo id curto da Instância
+
+`status/{instance_type}_progress` e `status/{instance_type}_done` passam a ser `status/{instance}_progress` e `status/{instance}_done`, com o id curto do `[[instance]]` (`c7g`, `c7i-nosmt`, `c7g-r2`). O `run_all.sh` o recebe por `--instance`, e o Orquestrador nomeia as chaves pela entrada do `state.json`.
+
+O tipo deixou de identificar a Instância com os experimentos complementares (ADR-0026). As três `c7g.xlarge` da repetibilidade, ou os dois braços `c7i.2xlarge` da topologia, escreveriam o mesmo objeto. O marcador da última a terminar apagaria o das outras, que só sairiam do laço no prazo de D10, dadas por mortas. O id curto é único na definição (o `experiment_config.py` recusa duplicata), e é ele que já nomeia a fatia (`scenarios/{instance}.json`). O conteúdo dos dois objetos não muda, nem o IAM: o papel `encode` tem `PutObject` em `status/*`. As chaves do Juiz (`status/judge_done`, `status/judge_progress`) também não mudam.

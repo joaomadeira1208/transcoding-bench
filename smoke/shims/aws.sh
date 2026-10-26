@@ -35,7 +35,7 @@ object_key() {
   printf '%s\n' "${without_scheme#*/}"
 }
 
-# Toda versão do objeto, e não só a última: o `status/{type}_progress` é
+# Toda versão do objeto, e não só a última: o `status/{instance}_progress` é
 # sobrescrito a cada run, e um `run_index` gravado sempre como `run_count`
 # passaria pela asserção sobre o objeto que ficou no bucket.
 record_version() {

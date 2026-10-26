@@ -14,7 +14,7 @@ EXIT_USAGE=2
 
 usage_error() {
   printf 'run_all.sh: %s\n' "$*" >&2
-  printf 'uso: run_all.sh --plan <slice.json> --masters-dir <dir> --runs-dir <dir> --bucket <name> --commit <sha> --instance-id <id> --instance-type <type> [--versions-file <path>] [--run-timeout <seconds>] [--total-timeout <seconds>]\n' >&2
+  printf 'uso: run_all.sh --plan <slice.json> --masters-dir <dir> --runs-dir <dir> --bucket <name> --commit <sha> --instance <id> --instance-id <id> --instance-type <type> [--versions-file <path>] [--run-timeout <seconds>] [--total-timeout <seconds>]\n' >&2
   exit "$EXIT_USAGE"
 }
 
@@ -112,7 +112,7 @@ write_progress() {
     }' >"$payload"
   # Telemetria não derruba medição: sem o `if`, um `s3 cp` de poucos bytes que
   # falhe aqui leva o `set -e` e a fatia inteira com ele.
-  if ! "$AWS_COMMAND" s3 cp "$payload" "s3://$bucket/status/${instance_type}_progress"; then
+  if ! "$AWS_COMMAND" s3 cp "$payload" "s3://$bucket/status/${instance}_progress"; then
     log "$scenario_id: o progresso não subiu"
   fi
   rm -f "$payload"
@@ -136,7 +136,7 @@ write_done_marker() {
       capped: $capped,
       exit_status: $exit_status
     }' >"$marker"
-  "$AWS_COMMAND" s3 cp "$marker" "s3://$bucket/status/${instance_type}_done"
+  "$AWS_COMMAND" s3 cp "$marker" "s3://$bucket/status/${instance}_done"
   rm -f "$marker"
 }
 
@@ -145,6 +145,7 @@ masters_dir=""
 runs_dir=""
 bucket=""
 commit=""
+instance=""
 instance_id=""
 instance_type=""
 versions_file=${VERSIONS_FILE:-}
@@ -159,6 +160,7 @@ while (($#)); do
     --runs-dir) runs_dir=$value ;;
     --bucket) bucket=$value ;;
     --commit) commit=$value ;;
+    --instance) instance=$value ;;
     --instance-id) instance_id=$value ;;
     --instance-type) instance_type=$value ;;
     --versions-file) versions_file=$value ;;
@@ -169,7 +171,7 @@ while (($#)); do
   shift 2
 done
 
-for name in plan masters_dir runs_dir bucket commit instance_id instance_type versions_file; do
+for name in plan masters_dir runs_dir bucket commit instance instance_id instance_type versions_file; do
   [[ -n ${!name} ]] || usage_error "faltou --${name//_/-}"
 done
 for name in RUN_TIMEOUT_SECONDS TOTAL_TIMEOUT_SECONDS; do

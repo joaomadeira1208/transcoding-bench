@@ -1008,3 +1008,68 @@ class TestRejectsBadQuality:
 
         with pytest.raises(ConfigError, match="threads"):
             validate_config(raw)
+
+
+class TestCpuOptions:
+    # O par só existe junto: um `core_count` sozinho deixaria o `ThreadsPerCore`
+    # no default do tipo, e a topologia lançada não seria a declarada.
+
+    def test_an_instance_without_them_launches_with_the_default_of_the_type(self, make_raw_config):
+        (instance,) = validate_config(make_raw_config()).instances
+
+        assert instance.cpu_options is None
+
+    def test_both_together_are_accepted(self, make_raw_config):
+        raw = make_raw_config(instance=[make_instance(core_count=4, threads_per_core=1)])
+
+        (instance,) = validate_config(raw).instances
+
+        assert instance.cpu_options is not None
+        assert (instance.cpu_options.core_count, instance.cpu_options.threads_per_core) == (4, 1)
+        assert instance.cpu_options.vcpus == 4
+
+    @pytest.mark.parametrize(
+        ("present", "absent"),
+        [("core_count", "threads_per_core"), ("threads_per_core", "core_count")],
+    )
+    def test_one_without_the_other_is_rejected_naming_both(self, make_raw_config, present, absent):
+        raw = make_raw_config(instance=[make_instance(**{present: 2})])
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        message = str(excinfo.value)
+        assert "instance[0] 'c7g'" in message
+        assert present in message and absent in message
+
+    @pytest.mark.parametrize("value", [0, -1, True, "4"])
+    @pytest.mark.parametrize("field", ["core_count", "threads_per_core"])
+    def test_a_value_that_is_not_a_positive_integer_is_rejected(
+        self, make_raw_config, field, value
+    ):
+        options = {"core_count": 4, "threads_per_core": 1, field: value}
+        raw = make_raw_config(instance=[make_instance(**options)])
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        assert "instance[0]" in str(excinfo.value)
+        assert field in str(excinfo.value)
+
+
+class TestInstanceIds:
+    def test_a_hyphen_is_accepted(self, make_raw_config):
+        raw = make_raw_config(instance=[make_instance(id="c7i-nosmt")])
+
+        assert [i.id for i in validate_config(raw).instances] == ["c7i-nosmt"]
+
+    def test_an_underscore_is_rejected(self, make_raw_config):
+        # A `scenario_id` junta os campos com `_` e o `retention.py` tira a
+        # Instância dela por `rpartition`: um `c7i_nosmt` deixaria `c7i` no lugar
+        # do Cenário, e o `clean` casaria bitstreams de Cenários diferentes.
+        raw = make_raw_config(instance=[make_instance(id="c7i_nosmt")])
+
+        with pytest.raises(ConfigError) as excinfo:
+            validate_config(raw)
+
+        assert "instance[0] 'c7i_nosmt'" in str(excinfo.value)

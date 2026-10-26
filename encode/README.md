@@ -47,7 +47,7 @@ na ausência valem os defaults dele.
 
     bash encode/launch_container.sh \
         --work-dir /home/ubuntu/work --plan c7g.json --bucket "$bucket" \
-        --commit "$sha" --instance-id "$id" --instance-type c7g.xlarge \
+        --commit "$sha" --instance c7g --instance-id "$id" --instance-type c7g.xlarge \
         --run-timeout 14400 --total-timeout 432000
 
 O work dir é o contrato entre os três: o `bootstrap.sh` deixa lá a fatia, o
@@ -76,17 +76,19 @@ O `run_all.sh` é o bloco, e a fatia inteira: percorre **todo** bloco do arquivo
 que recebeu, na ordem do arquivo e com o warm-up primeiro, sem predicado de
 seleção — a seleção por arquitetura já aconteceu no Python que pré-fatiou o
 plano (ADR-0019). Depois de cada Execução ele sobrescreve
-`s3://{bucket}/status/{instance_type}_progress`, e ao terminar escreve
-`s3://{bucket}/status/{instance_type}_done`: é por esses dois objetos que o
+`s3://{bucket}/status/{instance}_progress`, e ao terminar escreve
+`s3://{bucket}/status/{instance}_done`: é por esses dois objetos que o
 Orquestrador sabe onde a Instância está e que ela acabou, sem SSH interativo
-(ADR-0010/0011).
+(ADR-0010/0011). O `{instance}` é o id curto do `[[instance]]` (`c7g`,
+`c7g-r2`), que chega por `--instance`, e não o tipo: duas Instâncias do mesmo
+tipo no mesmo bucket escreveriam o mesmo objeto (emenda da ADR-0011).
 
     bash encode/run_all.sh \
         --plan /work/c7g.json \
         --masters-dir /work/masters --runs-dir /work/runs --bucket "$bucket" \
-        --commit "$sha" --instance-id "$id" --instance-type c7g.xlarge
+        --commit "$sha" --instance c7g --instance-id "$id" --instance-type c7g.xlarge
 
-`instance_id`, `instance_type`, `commit` e o bucket chegam por argumento —
+O id curto, `instance_id`, `instance_type`, `commit` e o bucket chegam por argumento —
 nunca por consulta ao IMDS —, e o arquivo de versões vem da imagem
 (`VERSIONS_FILE`). É essa ausência de descoberta que torna o caminho rodável no
 Mac: não existe modo degradado, existe um argumento.
@@ -99,7 +101,7 @@ Orquestrador a cada 5 minutos. Os dois carregam o `instance_id` porque o
 tentativa anterior continuam no bucket, e o que os torna inertes é a identidade,
 não a ausência.
 
-`status/{instance_type}_progress` é **sobrescrito depois de cada Execução**,
+`status/{instance}_progress` é **sobrescrito depois de cada Execução**,
 entre runs e nunca durante um encode (ADR-0011) — um `jq -n` e um `s3 cp` de
 poucos bytes:
 
@@ -122,7 +124,7 @@ quem lê. O total de runs da fatia contra o qual ele mostra `runs_total` vem do
 plano que ele mesmo subiu, não daqui. Um upload de progresso que falhe é
 registrado no log e o laço segue: telemetria não derruba medição.
 
-`status/{instance_type}_done` é o **último** objeto que a Instância escreve
+`status/{instance}_done` é o **último** objeto que a Instância escreve
 quando o laço termina, inclusive no caminho do teto. Morto por sinal, o laço não
 escreve marcador nenhum — é por essa ausência que o Orquestrador distingue uma
 Instância que acabou de uma que morreu no meio de um run:

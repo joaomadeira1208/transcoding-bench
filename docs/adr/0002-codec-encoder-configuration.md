@@ -30,3 +30,7 @@ O invariante que esta ADR protege é o GOP **em frames**, idêntico entre codecs
 
 - Qualidades resultantes vão diferir entre codecs (CRF não é intercambiável). Isso é esperado e não afeta a comparação arquitetural; a faixa absoluta de VMAF/SSIM por codec é reportada como contexto via amostra metodológica fixa do Pass de qualidade (ADR-0005) — qualidade não é variável dependente.
 - Configuração é "produção realista", não "encoder agressivo": presets `medium`/`8` exercitam SIMD/cache/branch predictor de forma significativa, expondo diferenças arquiteturais.
+
+## Emenda: a `c7a` também tem 4 núcleos físicos sem SMT
+
+A opção rejeitada de fixar `-threads` cita "a vantagem estrutural de Graviton (4 cores físicos sem SMT)", e a ADR-0001 dizia que a `c7a` era 2 núcleos × 2 threads. As duas estão erradas sobre a AMD: a `c7a.xlarge` também tem 4 núcleos físicos sem SMT (emenda da ADR-0001), e quem tem 2 × 2 é só a `c7i.xlarge`. A rejeição continua de pé pelo mesmo motivo, agora dito certo: fixar `-threads` esconderia a assimetria de topologia da Intel, que a ADR-0026 mede à parte.

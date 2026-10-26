@@ -6,11 +6,15 @@ from __future__ import annotations
 
 import copy
 import json
+import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from run_table import PmuColumns, pmu_columns
+
 ROLE_ROOT = Path(__file__).resolve().parent
+CONFIG_DIR = ROLE_ROOT.parent / "config"
 
 META_SCHEMA_PATH = ROLE_ROOT / "meta.schema.json"
 JUDGE_SCHEMA_PATH = ROLE_ROOT / "judge.schema.json"
@@ -24,6 +28,14 @@ ENCODERS = ("libx264", "libx265", "libsvtav1")
 # 5 s a 24 fps: o clip que a camada de aceite gera dentro da imagem. Regenerar as
 # capturas com outra duração muda o total que o `-stats` reporta.
 CLIP_FRAMES = 120
+
+
+def definition_pmu(name: str) -> PmuColumns:
+    """As colunas de PMU de uma definição real de `config/`."""
+    return pmu_columns(tomllib.loads((CONFIG_DIR / f"{name}.toml").read_text(encoding="utf-8")))
+
+
+EXPERIMENT_PMU = definition_pmu("experiment")
 
 
 def read_capture(encoder: str, artifact: str) -> str:

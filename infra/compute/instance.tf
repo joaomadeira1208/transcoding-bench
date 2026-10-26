@@ -19,10 +19,7 @@ locals {
       encode_amd64 = var.encode_amd64_ami_id
       encode_arm64 = var.encode_arm64_ami_id
     }
-    buckets = {
-      campaign = data.terraform_remote_state.storage.outputs.campaign_bucket_name
-      pilot    = data.terraform_remote_state.storage.outputs.pilot_bucket_name
-    }
+    buckets                        = local.bucket_names
     ssh_private_key_parameter_name = aws_ssm_parameter.orchestrator_ssh_key.name
   })
 }

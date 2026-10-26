@@ -39,19 +39,35 @@ _FAMILIES_WITH_THEIR_OWN_RULE = frozenset(
 )
 
 
-def subset_divergences(pilot: ExperimentConfig, campaign: ExperimentConfig) -> list[str]:
-    """Onde o piloto deixa de ser a campanha em escopo menor, uma mensagem por campo."""
-    return [
-        *_experiment_divergences(pilot, campaign),
-        *_field_divergences("encode", None, pilot.encode, campaign.encode),
-        *_field_divergences(
+def subset_divergences(
+    pilot: ExperimentConfig, campaign: ExperimentConfig, *, free: frozenset[str] = frozenset()
+) -> list[str]:
+    """Onde o piloto deixa de ser a campanha em escopo menor, uma mensagem por campo.
+
+    `free` são as famílias que a definição pode declarar à sua maneira: as
+    instâncias e a instrumentação dos experimentos complementares (ADR-0026).
+    """
+    divergences = {
+        "encode": lambda: _field_divergences("encode", None, pilot.encode, campaign.encode),
+        "instrumentation": lambda: _field_divergences(
             "instrumentation", None, pilot.instrumentation, campaign.instrumentation
         ),
-        *_field_divergences("quality", None, pilot.quality, campaign.quality),
-        *_record_divergences("codec", "slug", pilot.codecs, campaign.codecs),
-        *_record_divergences("video", "slug", pilot.videos, campaign.videos),
-        *_record_divergences("instance", "id", pilot.instances, campaign.instances),
-        *_pair_divergences(pilot.pairs, campaign.pairs),
+        "quality": lambda: _field_divergences("quality", None, pilot.quality, campaign.quality),
+        "codec": lambda: _record_divergences("codec", "slug", pilot.codecs, campaign.codecs),
+        "video": lambda: _record_divergences("video", "slug", pilot.videos, campaign.videos),
+        "instance": lambda: _record_divergences(
+            "instance", "id", pilot.instances, campaign.instances
+        ),
+        "pair": lambda: _pair_divergences(pilot.pairs, campaign.pairs),
+    }
+    return [
+        *_experiment_divergences(pilot, campaign),
+        *(
+            divergence
+            for family, divergent in divergences.items()
+            if family not in free
+            for divergence in divergent()
+        ),
     ]
 
 

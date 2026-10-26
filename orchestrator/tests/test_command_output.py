@@ -31,6 +31,7 @@ from conftest import (
     make_run_instances_payload,
     make_s3_object,
 )
+from experiment_config import CpuOptions
 
 PARAMETER_VALUE = "not-a-real-key"
 
@@ -157,6 +158,33 @@ class TestDescribeInstances:
 
         with pytest.raises(OutputError, match="State"):
             parse_describe_instances(make_describe_payload([instance]))
+
+
+class TestDescribedCpuOptions:
+    # É por ele que o `run` confere a topologia que a EC2 aplicou (ADR-0026): lido
+    # errado, o braço sem SMT passaria a conferência com os 2 núcleos x 2 threads.
+
+    def test_the_applied_topology_is_read(self):
+        described = make_described_instance()
+        described["CpuOptions"] = {"CoreCount": 4, "ThreadsPerCore": 1}
+
+        (instance,) = parse_describe_instances(make_describe_payload([described]))
+
+        assert instance.cpu_options == CpuOptions(core_count=4, threads_per_core=1)
+
+    def test_an_instance_without_it_has_none(self):
+        (instance,) = parse_describe_instances(make_describe_payload([make_described_instance()]))
+
+        assert instance.cpu_options is None
+
+    @pytest.mark.parametrize("field", ["CoreCount", "ThreadsPerCore"])
+    def test_rejects_a_topology_without_one_of_the_two(self, field):
+        described = make_described_instance()
+        described["CpuOptions"] = {"CoreCount": 4, "ThreadsPerCore": 1}
+        del described["CpuOptions"][field]
+
+        with pytest.raises(OutputError, match=field):
+            parse_describe_instances(make_describe_payload([described]))
 
 
 class TestListObjects:
@@ -341,6 +369,11 @@ class TestCapturedPayloads:
         assert instance.state == "running"
         assert instance.private_ip == "10.0.1.42"
         assert instance.public_ip == "203.0.113.2"
+
+    def test_describe_running_carries_the_applied_topology(self):
+        (instance,) = parse_describe_instances(captured("describe-instances-running.json"))
+
+        assert instance.cpu_options == CpuOptions(core_count=1, threads_per_core=2)
 
     def test_describe_terminated_has_no_private_ip(self):
         (instance,) = parse_describe_instances(captured("describe-instances-terminated.json"))

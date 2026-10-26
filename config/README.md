@@ -56,5 +56,29 @@ e o campo que divergiram. A única liberdade do `pilot.toml` é **omitir** um
 registro inteiro; dentro de um registro que ele declara nada pode faltar,
 inclusive os tiers de geometria que ele não usa.
 
+## Os experimentos complementares
+
+`topologia.toml`, `repetibilidade.toml` e `contadores.toml` são as definições dos
+três experimentos da ADR-0026, lidas pelo mesmo validador e pelo mesmo gerador.
+A regra é a do piloto, com uma família a mais livre em cada uma:
+
+| definição | o que ela declara à sua maneira | o escopo |
+|---|---|---|
+| `topologia.toml` | as instâncias: `c7i-smt` e `c7i-nosmt`, as duas `c7i.2xlarge` | a matriz inteira da campanha |
+| `repetibilidade.toml` | as instâncias: `c7g-r1` … `c7a-r3`, três de cada tipo | 3 codecs × `1080p → 720p` × `bbb` |
+| `contadores.toml` | as instâncias (`c7g-pmu`) e o `[instrumentation]`, reduzido a um par de hardware | o da repetibilidade |
+
+Todo outro registro é cópia idêntica do `experiment.toml`, a seed inclusive, e o
+CI o garante como garante o piloto: o `orchestrator/tests/test_complementary_subsets.py`
+confronta cada família com a da campanha e cada Cenário de cada instância com o
+Cenário homônimo da campanha, sem o que o amarra à instância (o id e o segmento
+dele na `scenario_id`). No `contadores.toml`, os campos de PMU do objeto de run
+também ficam de fora da comparação.
+
+Um `[[instance]]` pode declarar `core_count` e `threads_per_core`, os dois juntos
+ou nenhum: é o `CpuOptions` com que a EC2 lança a instância (ADR-0026). Sem eles,
+a instância sobe com a topologia do tipo. Os ids levam hífen e nunca `_`, que é o
+separador da `scenario_id`; o validador recusa o `_`.
+
 A *maquinaria* que age sobre esta spec mora em `orchestrator/` — a separação é
 deliberada (ADR-0017): contrato de dado de um lado, código do outro.

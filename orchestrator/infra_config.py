@@ -11,6 +11,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from typing import Any
 
+CAMPAIGN_BUCKET = "campaign"
+PILOT_BUCKET = "pilot"
+
 
 class InfraError(Exception):
     """Arquivo de infra que o Orquestrador recusa a ler. A mensagem nomeia o campo."""
@@ -39,8 +42,17 @@ class Amis:
 
 @dataclass(frozen=True)
 class Buckets:
-    campaign: str
-    pilot: str
+    """Um bucket por experimento, pelo papel; a campanha e o piloto são os que todo `apply` tem."""
+
+    by_role: Mapping[str, str]
+
+    @property
+    def campaign(self) -> str:
+        return self.by_role[CAMPAIGN_BUCKET]
+
+    @property
+    def pilot(self) -> str:
+        return self.by_role[PILOT_BUCKET]
 
 
 @dataclass(frozen=True)
@@ -63,7 +75,7 @@ def parse_infra(payload: Mapping[str, Any]) -> InfraConfig:
         instance_profiles=_section(raw, "instance_profiles", InstanceProfiles),
         key_pair_name=_identifier(raw, "key_pair_name", "infra"),
         amis=_section(raw, "amis", Amis),
-        buckets=_section(raw, "buckets", Buckets),
+        buckets=_buckets(raw),
         ssh_private_key_parameter_name=_identifier(raw, "ssh_private_key_parameter_name", "infra"),
     )
 
@@ -71,6 +83,13 @@ def parse_infra(payload: Mapping[str, Any]) -> InfraConfig:
 def _section[Section](raw: Mapping[str, Any], key: str, section: type[Section]) -> Section:
     table = _object(_require(raw, key, "infra"), key)
     return section(**{f.name: _identifier(table, f.name, key) for f in fields(section)})
+
+
+def _buckets(raw: Mapping[str, Any]) -> Buckets:
+    table = _object(_require(raw, "buckets", "infra"), "buckets")
+    for role in (CAMPAIGN_BUCKET, PILOT_BUCKET):
+        _require(table, role, "buckets")
+    return Buckets(by_role={role: _identifier(table, role, "buckets") for role in table})
 
 
 def _object(value: Any, where: str) -> Mapping[str, Any]:

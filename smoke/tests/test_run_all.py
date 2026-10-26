@@ -15,16 +15,16 @@ import pytest
 from conftest import (
     BUCKET,
     DONE_MARKER_TYPES,
+    INSTANCE,
     INSTANCE_ID,
-    INSTANCE_TYPE,
     Loop,
     offset_aware,
     typed_fields,
 )
 from test_run_scenario import ARTIFACTS, UUID4
 
-DONE_MARKER = f"status/{INSTANCE_TYPE}_done"
-PROGRESS_OBJECT = f"status/{INSTANCE_TYPE}_progress"
+DONE_MARKER = f"status/{INSTANCE}_done"
+PROGRESS_OBJECT = f"status/{INSTANCE}_progress"
 
 # O contrato cross-language do `status/`: o Orquestrador lê estes campos com
 # estes tipos, e `bool` não é `int` do lado de quem lê.
